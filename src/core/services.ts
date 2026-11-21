@@ -29,6 +29,10 @@ export interface PlayerService {
   carrying: Box | null;
   /** true enquanto uma UI modal (tablet, checkout, relatório) está aberta — para travar o movimento. */
   inputLocked: boolean;
+  /** furnitureId do balcão (caixa) junto do qual o jogador está; null se não está em nenhum. */
+  atCounter: number | null;
+  /** Personaliza cores do avatar (hex CSS). Opcional. */
+  setAppearance?(c: Partial<Record<'skin' | 'shirt' | 'apron' | 'cap' | 'pants', string>>): void;
 }
 
 /** Publicado pelo módulo `npc`. */
