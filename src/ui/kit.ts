@@ -12,6 +12,8 @@ export interface ConfirmOpts { title: string; text: string; ok?: string; cancel?
 /** Kit: tudo que as telas precisam (estado, toasts, som, modais, confirmação). */
 export class UiKit {
   readonly settings: SettingsStore;
+  /** Dica do tutorial mostrada no topo do tablet (null = nenhuma). */
+  tutorialHint: string | null = null;
   private modals = new Set<string>();
   private pausedBy = new Set<string>();
   private layer!: HTMLElement;

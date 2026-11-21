@@ -27,30 +27,83 @@ Uso as mecânicas como loop de gameplay. Nome, arte, sons e textos do jogo de re
 
 ## 3. Progressão
 
-- **XP:** 1 por unidade vendida. Nível n exige `120·(n−1)^1,7` XP acumulado.
-- **Licenças:** por categoria, com nível mínimo e custo (mercearia grátis → congelados R$ 20.000).
-- **Funcionários:** caixa, repositor e faxineiro, com salário diário que cresce com o nível.
-- **A implementar:** expansão de metragem, depósito (`storage` já existe no estado), móveis, personalização.
+- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `130·(n−1)^1,8` XP acumulado (n=2: 130, n=5: 1.585, n=10: 6.900, n=20: 26.500).
+- **Licenças** (nível mínimo / custo): Mercearia 1 / grátis · Bebidas 3 / R$ 1.500 · Laticínios 5 / R$ 4.000 · Padaria 7 / R$ 8.000 · Limpeza 9 / R$ 12.000 · Congelados 11 / R$ 20.000.
+- **Móveis, expansão, depósito, funcionários e personalização:** implementados em `src/sim/furniture.ts`, `api.ts` e `tuning.ts` (tabelas abaixo).
 
-## 4. Resultado do balanceamento preliminar
+## 4. Números do jogo (balanceamento v1, bot `src/sim/bot.ts`, validado em `tests/balance.test.ts`)
 
-Bot que só repõe 1×/dia, 30 dias, semente 11. **Não são valores finais.**
+Todos os números ficam em `src/sim/tuning.ts` (+ `furniture.ts`, `catalog.ts`, `demand.ts`). Dinheiro em R$.
 
-| Preço vs. mercado | Lucro/dia | Atendidos/dia | Perdidos/dia | Reputação |
+### 4.1 Móveis (footprint em tiles; `slots`: shelf/fridge/freezer = slots de produto × `slotCapacity` do produto; rack = caixas)
+
+| Móvel | Custo | Nível | Slots | Categorias | Footprint |
+|---|---|---|---|---|---|
+| Prateleira | 350 | 1 | 2 | mercearia, limpeza, padaria | 2×1 |
+| Geladeira | 900 | 3 | 3 | bebidas, laticínios | 2×1 |
+| Freezer | 1.800 | 10 | 3 | congelados | 2×1 |
+| Caixa registradora | 1.200 | 3 | – | – | 2×2 |
+| Estante do depósito | 600 | 3 | 8 caixas | – | 2×1 |
+| Decoração | 80 | 1 | – | – | 1×1 |
+
+Venda de móvel devolve 50%. Início: 1 caixa em (8,6) + 4 prateleiras em z=2 (arroz, feijão, macarrão, café) = 16/24/32/20 unidades de capacidade. Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta.
+
+### 4.2 Loja
+
+| Item | Valor |
+|---|---|
+| Dinheiro inicial / aluguel | R$ 5.000 / R$ 120 por dia (+R$ 50 por expansão) |
+| Expansão 1 / 2 / 3 / 4 | R$ 4.500 (nív. 4) / R$ 16.000 (nív. 8) / R$ 35.000 (nív. 13) / R$ 70.000 (nív. 19) — salão 12×10 → 16×12 → 20×14 → 24×16 → 28×18 |
+| Depósito | R$ 4.000 (nív. 3); 6 caixas base + 8 por estante |
+| Calçada | máx. 48 caixas |
+| Personalização | renomear grátis (≤24 letras); cada cor alterada R$ 10 |
+| Sujeira | máx. 12 manchas; > 3 manchas tiram 0,06 de satisfação por mancha (máx. 0,5) |
+
+### 4.3 Funcionários (nível 1→5; custo para chegar ao nível / nível do jogador / salário diário / segundos por ação)
+
+| Papel | Custos | Nível exigido | Salário/dia | Segundos |
 |---|---|---|---|---|
-| ×0,9 | R$ 52 | 18 | 24 | 2,26 |
-| ×1,0 | R$ 177 | 20 | 19 | 2,41 |
-| **×1,15** | **R$ 353** | 22 | 10 | 2,83 |
-| ×1,3 | R$ 188 | 13 | 6 | 1,77 |
-| ×1,6 | −R$ 162 | 1 | 9 | 1,30 |
+| Caixa | 250 · 450 · 800 · 1.400 · 2.300 | 4 · 7 · 11 · 15 · 20 | 120 · 150 · 190 · 240 · 300 | 10 · 8 · 6,5 · 5 · 4 |
+| Repositor | 180 · 350 · 650 · 1.100 · 1.800 | 5 · 8 · 12 · 16 · 21 | 100 · 130 · 170 · 220 · 280 | 7 · 5,5 · 4,5 · 3,5 · 2,5 |
+| Faxineiro | 120 · 220 · 400 · 700 · 1.200 | 3 · 6 · 10 · 14 · 19 | 80 · 100 · 130 · 170 · 220 | 9 · 7 · 5,5 · 4,5 · 3,5 |
 
-Leitura:
-- **Existe ponto ótimo interior** (~+15%) e abusar de preço dá prejuízo. A mecânica de precificação funciona.
-- Preço baixo rende menos porque a loja inicial é **limitada por prateleira**: os perdidos são sobretudo ruptura de estoque. O bot não repõe durante o dia, e o jogador real vai repor. Isso **subestima** a lucratividade e a reputação.
-- A reputação cai demais com ruptura. Revisar o peso da ruptura em `simulateOpenDay`.
-- O bot nunca compra móveis nem funcionários, então o nível 7 não é representativo.
+Capacidade de checkout/dia = 45 (jogador) + `40·(1+0,25·(nível_caixa−1))` (caixa contratado) + 20 por caixa registradora extra.
 
-**Próximo passo de balanceamento:** bot que repõe a cada N minutos e investe em slots e funcionários. Depois ajustar os parâmetros (8; 1,2), o fluxo base `18 + 5·nível` e o aluguel.
+### 4.4 Clientes, preço e vendas
+
+- Chegadas/dia = `(22 + 4·min(nível,30)) · (1 + 0,4·(1 − razão_preço_média)) · (0,6 + 0,1·reputação) · (1 + 0,12·expansão) · (0,9..1,1)`.
+- Compra: `P = 1 / (1 + e^(8·(r − 1,25)))`, `r = preço/mercado`: r=1,0 → 88%; 1,1 → 77%; 1,15 → 69%; 1,25 → 50%; 1,5 → 12%; 1,6 → 6%.
+- Cesta: 1 a min(produtos expostos, 4+⌊nível/3⌋) produtos distintos (sorteio ponderado por popularidade), quantidade 1 (45%), 2 (36%) ou 3 (19%).
+- Gorjeta = até 8% do total × `speed` × `(satisfação−2)/3`. Reputação: média móvel com peso 0,04 por cliente (atendido ou perdido).
+- COGS pelo custo médio ponderado; lucro líquido = receita + gorjeta − COGS − aluguel − salários.
+
+### 4.5 Resultado do balanceamento (bot: repõe 4×/dia, investe, 3 sementes, média de 30 dias)
+
+| Preço vs. mercado | Lucro/dia | Atendidos/dia | Perdidos/dia | Reputação | Nível no dia 30 |
+|---|---|---|---|---|---|
+| ×0,8 | R$ 469 | 67 | 2 | 4,41 | 17 |
+| ×0,9 | R$ 1.020 | 67 | 2 | 4,05 | 17 |
+| ×1,0 | R$ 1.377 | 64 | 2 | 4,31 | 17 |
+| **×1,1** | **R$ 1.412** | 57 | 3 | 4,38 | 15 |
+| ×1,15 | R$ 1.191 | 50 | 4 | 4,22 | 13 |
+| ×1,2 | R$ 859 | 40 | 5 | 3,52 | 11 |
+| ×1,3 | R$ 387 | 23 | 9 | 2,34 | 7 |
+| ×1,6 | −R$ 67 | 2 | 15 | 1,79 | 2 |
+
+Leitura: o ótimo fica entre mercado e +10% (volume compensa a margem); +15% ainda rende ~85%; +30% rende ~27%; +60% quebra a loja (prejuízo e reputação no chão). Preço abaixo do mercado perde margem sem ganhar volume proporcional (checkout e prateleira limitam).
+
+Linha do tempo do bot (semente 11; as outras ficam ±1 dia): nível 2 no fim do dia 1; licença de bebidas no dia 4 (nível 3 no dia 3); expansão 1 no dia 10; caixa contratado ~dia 11; laticínios ~dia 14; expansão 2 ~dia 26; expansão 3 ~dia 48; expansão 4 ~dia 70.
+
+| Dia | Nível | Chegadas | Atendidos | Lucro/dia |
+|---|---|---|---|---|
+| 1 | 2 | 23 | 21 | R$ 471 |
+| 10 | 5 | 47 | 42 | R$ 978 |
+| 20 | 10 | 68 | 63 | R$ 1.462 |
+| 30 | 14 | 87 | 84 | R$ 2.277 |
+| 60 | 28 | 191 | 179 | R$ 4.707 |
+| 80 | 38 | 216 | 206 | R$ 6.876 |
+
+O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30). Depois do dia ~70 não há mais o que comprar (caixa acumula): conteúdo de fim de jogo é trabalho futuro. Limitações do modelo: o bot não usa depósito/repositor/faxineiro (estes poupam tempo do jogador, não mudam regra de venda).
 
 ## 5. Arquitetura
 
@@ -66,7 +119,7 @@ tests/        Vitest: troco, mercado, economia, save
 
 ## 6. Roadmap
 
-1. ✅ Núcleo de simulação e testes.
+1. ✅ Núcleo de simulação, regras de móveis/expansão/funcionários, bot e testes de balanceamento.
 2. Cena Phaser: loja top-down, HUD (dinheiro, hora, nível), tablet de compras e precificação.
 3. Clientes andando e fila, depois o minigame de checkout (bipar, troco, cartão).
 4. Relatório de fim de dia, autosave, funcionários.

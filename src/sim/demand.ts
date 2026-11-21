@@ -4,11 +4,11 @@ import type { StoreState } from './state';
 
 /**
  * Probabilidade de um cliente aceitar comprar um item dado r = preço/média.
- * Logística centrada em r=1.2: r=0.8 → ~0.96, r=1.0 → ~0.83, r=1.2 → 0.50, r=1.5 → ~0.08.
- * Parâmetros (8, 1.2) são pontos de balanceamento, ver GDD §4.
+ * Logística centrada em r=1.25: r=0.8 → ~0.97, r=1.0 → 0.88, r=1.15 → 0.69, r=1.25 → 0.50, r=1.5 → 0.12, r=1.6 → 0.06.
+ * Parâmetros (8, 1.25) são pontos de balanceamento, ver GDD §4.
  */
 export function buyProbability(ratio: number): number {
-  return 1 / (1 + Math.exp(8 * (ratio - 1.2)))
+  return 1 / (1 + Math.exp(8 * (ratio - 1.25)))
 }
 
 /** Razão média preço/mercado ponderada por popularidade, sobre produtos licenciados. */
@@ -25,11 +25,11 @@ export function averagePriceRatio(state: StoreState): number {
 
 /**
  * Fluxo diário de clientes: cresce com nível (até 30), reputação, tamanho da loja e preço baixo.
- * base = 22 + 4·nível; preço: ±1,2 por unidade de desvio de razão (0,5..1,5); reputação 0,6+0,1·rep; +12% por expansão.
+ * base = 22 + 4·nível; preço: ±0,4 por unidade de desvio de razão (0,5..1,5); reputação 0,6+0,1·rep; +12% por expansão.
  */
 export function customersForDay(state: StoreState, rand: () => number): number {
   const base = 22 + 4 * Math.min(30, state.level);
-  const priceMult = Math.min(1.5, Math.max(0.5, 1 + (1 - averagePriceRatio(state)) * 1.2));
+  const priceMult = Math.min(1.5, Math.max(0.5, 1 + (1 - averagePriceRatio(state)) * 0.4));
   const repMult = 0.6 + 0.1 * state.reputation;
   const sizeMult = 1 + 0.12 * state.expansion;
   return Math.max(0, Math.round(base * priceMult * repMult * sizeMult * (0.9 + 0.2 * rand())));

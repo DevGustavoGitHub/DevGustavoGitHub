@@ -1,6 +1,5 @@
 /** Cliente: máquina de estados completa (chegada → compras → fila → pagamento → saída). */
 import * as api from '../sim/api';
-import { storeBounds } from '../core/layout';
 import type { Lane, CheckoutManager } from './checkout';
 import { Agent } from './agent';
 import { footprint, furnitureFor, maybeDirt } from './helpers';
@@ -135,14 +134,11 @@ export class Customer extends Agent {
       case 'gone':
         break;
     }
-    if (this.state !== 'gone' && !this.leaving && this.state !== 'enter1' && this.state !== 'enter2' && this.state !== 'basketPick'
-      && this.state !== 'queue' && this.state !== 'front' && this.state !== 'serving' && this.totalT > 200) {
-      this.toCheckout();
-    }
+    const st = this.state;
+    if (this.totalT > 200 && (st === 'pickNext' || st === 'walkShelf' || st === 'browse' || st === 'react')) this.toCheckout();
   }
 
   private pickNext(): void {
-    const s = this.env.ctx.state;
     // escolhe o próximo item cujo móvel esteja mais perto; descarta os sem móvel
     let bi = -1, bd = Infinity, bf = null as ReturnType<typeof furnitureFor>;
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -153,7 +149,6 @@ export class Customer extends Agent {
       const d = (f.x + fp.w / 2 - this.x) ** 2 + (f.z + fp.d / 2 - this.z) ** 2;
       if (d < bd) { bd = d; bi = i; bf = f; }
     }
-    void s;
     if (bi < 0 || !bf) { this.toCheckout(); return; }
     this.entry = this.list.splice(bi, 1)[0]!;
     this.furnId = bf.id;
@@ -328,5 +323,4 @@ export class Customer extends Agent {
   }
 
   get isAngry(): boolean { return this.angry; }
-  get storeBoundsFor(): ReturnType<typeof storeBounds> { return storeBounds(this.env.ctx.state.expansion); }
 }

@@ -9,7 +9,7 @@ import { emptyLedger, type Ledger, type StoreState } from './state';
 /* ---------- Progressão ---------- */
 
 /** XP acumulado necessário para ALCANÇAR o nível n (n>=2). */
-export const xpForLevel = (n: number): number => (n <= 1 ? 0 : Math.round(120 * Math.pow(n - 1, 1.7)));
+export const xpForLevel = (n: number): number => (n <= 1 ? 0 : Math.round(130 * Math.pow(n - 1, 1.8)));
 
 export function addXp(state: StoreState, amount: number): void {
   state.xp += amount;

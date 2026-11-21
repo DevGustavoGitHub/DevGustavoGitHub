@@ -99,6 +99,7 @@ export class Tablet {
     this.cash.textContent = money(this.kit.ctx.state.money);
     const top = this.body.scrollTop;
     clear(this.body);
+    if (this.kit.tutorialHint) this.body.appendChild(h('div', { class: 'banner warn', html: `${icon('bulb', 22)}<span>${this.kit.tutorialHint}</span>` }));
     try {
       def.render(this.body, this.kit, this.api);
     } catch (e) {

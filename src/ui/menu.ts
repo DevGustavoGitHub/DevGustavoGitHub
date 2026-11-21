@@ -1,0 +1,95 @@
+/** Tela inicial, menu de pausa e opções. */
+import { SAVE_KEY } from '../sim/save';
+import { h } from './dom';
+import { icon } from './icons';
+import { UiKit } from './kit';
+import type { Quality } from './settings';
+
+export interface MenuHooks {
+  endDay(): void;
+  replayTutorial(): void;
+  onStart(): void;
+}
+
+const EXTRA_KEYS = ['mercadinho:tutorial', 'mercadinho:lastReport', 'mercadinho:daysnap'];
+
+export class Menus {
+  private title: HTMLElement | null = null;
+  private pause: HTMLElement | null = null;
+  constructor(private kit: UiKit, private layer: HTMLElement, private hooks: MenuHooks) {}
+
+  get isOpen(): boolean { return this.title !== null || this.pause !== null; }
+
+  private hasSave(): boolean {
+    try { return localStorage.getItem(SAVE_KEY) !== null; } catch { return false; }
+  }
+
+  showTitle(): void {
+    if (this.title) return;
+    const save = this.hasSave();
+    const start = (): void => { this.title?.remove(); this.title = null; this.kit.modalClose('title'); this.hooks.onStart(); };
+    const btns = h('div', { class: 'menu-btns' },
+      h('button', { class: 'btn accent', on: { click: start } }, h('span', { html: icon('play', 22) }), save ? 'Continuar' : 'Jogar'),
+      save ? h('button', { class: 'btn', on: { click: () => void this.newGame() } }, 'Novo jogo') : null,
+      h('button', { class: 'btn ghost', style: 'color:#fff;border-color:rgba(255,255,255,.4)', on: { click: () => this.showOptions() } }, h('span', { html: icon('gear', 22) }), 'Opções'));
+    this.title = h('div', { class: 'mx-modal title-screen mx-z-menu', role: 'dialog', 'aria-label': 'Menu inicial' },
+      h('div', { class: 'logo' }, h('div', { class: 'mk', html: icon('store', 48) }), h('h1', null, 'Mercadinho ', h('span', null, '3D')), h('p', null, 'Monte, abasteça e administre a sua loja.')),
+      btns);
+    this.layer.appendChild(this.title);
+    this.kit.modalOpen('title', { pauseClock: true });
+  }
+
+  showPause(): void {
+    if (this.pause || this.title) return;
+    if (this.kit.isModalOpen()) return;
+    const close = (): void => { this.pause?.remove(); this.pause = null; this.kit.modalClose('pause'); };
+    const ph = this.kit.ctx.clock.phase;
+    this.pause = h('div', { class: 'mx-modal mx-dim mx-z-menu', role: 'dialog', 'aria-label': 'Menu' },
+      h('div', { class: 'menu-card' },
+        h('div', { class: 'mx-row' }, h('h2', { style: 'flex:1' }, 'Pausa'), UiKit.closeButton(close)),
+        h('div', { class: 'menu-sub' },
+          h('button', { class: 'btn primary block', on: { click: close } }, 'Continuar'),
+          h('button', { class: 'btn block', on: { click: () => this.showOptions() } }, h('span', { html: icon('gear', 20) }), 'Opções'),
+          h('button', { class: 'btn block', on: { click: () => { close(); this.hooks.replayTutorial(); } } }, h('span', { html: icon('bulb', 20) }), 'Rever tutorial'),
+          ph === 'report' ? null : h('button', { class: 'btn block', on: { click: () => void this.confirmEnd(close) } }, h('span', { html: icon('chart', 20) }), 'Encerrar o dia'),
+          h('button', { class: 'btn danger block', on: { click: () => void this.newGame() } }, 'Novo jogo'))));
+    this.layer.appendChild(this.pause);
+    this.kit.modalOpen('pause', { pauseClock: true, onEsc: close });
+  }
+
+  private async confirmEnd(close: () => void): Promise<void> {
+    const ok = await this.kit.confirm({ title: 'Encerrar o dia?', text: 'Os clientes que ainda estão na loja vão embora e o relatório do dia será gerado.', ok: 'Encerrar dia' });
+    if (ok) { close(); this.hooks.endDay(); }
+  }
+
+  showOptions(): void {
+    const st = this.kit.settings;
+    const quality: [Quality, string][] = [['low', 'Baixa'], ['medium', 'Média'], ['high', 'Alta']];
+    const volOut = h('output', null, `${Math.round(st.value.volume * 100)}%`);
+    const vol = h('input', { type: 'range', min: 0, max: 100, value: Math.round(st.value.volume * 100), 'aria-label': 'Volume' });
+    vol.addEventListener('input', () => { volOut.textContent = `${vol.value}%`; st.set({ volume: Number(vol.value) / 100 }); });
+    const sw = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(st.value.haptics), 'aria-label': 'Vibração' });
+    sw.addEventListener('click', () => { const v = !st.value.haptics; st.set({ haptics: v }); sw.setAttribute('aria-checked', String(v)); if (v) st.buzz(30); });
+    const seg = h('div', { class: 'seg' });
+    const paint = (): void => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.q === st.value.quality));
+    for (const [q, label] of quality) seg.appendChild(h('button', { class: 'btn', 'data-q': q, on: { click: () => { st.set({ quality: q }); paint(); } } }, label));
+    paint();
+    const back = h('div', { class: 'mx-modal mx-dim mx-z-confirm', role: 'dialog', 'aria-label': 'Opções' },
+      h('div', { class: 'menu-card' },
+        h('div', { class: 'mx-row' }, h('h2', { style: 'flex:1' }, 'Opções'), UiKit.closeButton(() => back.remove())),
+        h('div', { class: 'opt' }, h('label', null, 'Volume', volOut), vol),
+        h('div', { class: 'opt' }, h('div', { class: 'lb' }, h('span', null, 'Vibração'), sw)),
+        h('div', { class: 'opt' }, h('div', { class: 'lb' }, 'Qualidade gráfica'), seg, h('small', { class: 'muted' }, 'Baixa economiza bateria em celulares mais simples.')),
+        h('button', { class: 'btn primary block', on: { click: () => back.remove() } }, 'Voltar')));
+    this.layer.appendChild(back);
+  }
+
+  async newGame(): Promise<void> {
+    const ok = await this.kit.confirm({ title: 'Começar um novo jogo?', text: 'O progresso salvo será apagado e não poderá ser recuperado.', ok: 'Apagar e recomeçar', danger: true });
+    if (!ok) return;
+    try { localStorage.removeItem(SAVE_KEY); for (const k of EXTRA_KEYS) localStorage.removeItem(k); } catch { /* privado */ }
+    // impede o autosave do main (intervalo / pagehide) de regravar o estado antigo durante o reload
+    this.kit.ctx.save = () => {};
+    location.reload();
+  }
+}

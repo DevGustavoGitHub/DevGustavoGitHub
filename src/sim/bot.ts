@@ -84,12 +84,26 @@ export function restock(state: StoreState): void {
 const afford = (state: StoreState, cost: number): boolean => state.money - cost >= 80000 + 6000 * state.level;
 
 /** Investimentos da manhã (uma decisão por categoria por dia, simples e conservadora). */
-export function investMorning(state: StoreState, mem: { stockouts: Record<string, number>; arrivals: number; lostByCapacity: number }): void {
+export function investMorning(state: StoreState, mem: { stockouts: Record<string, number>; arrivals: number; lostByCapacity: number; lastNet: number }): void {
+  // 0. expansão tem prioridade (loja maior = mais clientes)
+  const ec = expansionCost(state);
+  const em = expansionMinLevel(state);
+  if (ec !== null && em !== null && state.level >= em && afford(state, ec)) buyExpansion(state);
+  // Se a expansão já está liberada por nível mas ainda não cabe no caixa, o bot poupa (sem licenças/capacidade extra).
+  const saving = ec !== null && state.level >= (em ?? 99) && ec - state.money <= 6 * mem.lastNet;
   // 1. licenças (mais baratas primeiro)
   for (const l of LICENSES) {
-    if (state.licenses.includes(l.id) || state.level < l.minLevel || !afford(state, l.cost)) continue;
+    if (saving || state.licenses.includes(l.id) || state.level < l.minLevel || !afford(state, l.cost)) continue;
     buyLicense(state, l.id);
   }
+  const buyFurnitureOfType = (type: FurnitureType): boolean => {
+    const spec = furnitureCatalog().find((c) => c.type === type)!;
+    if (state.level < spec.minLevel || !afford(state, spec.cost)) return false;
+    const spot = findSpot(state, type);
+    if (!spot) return false;
+    buyFurniture(state, type, spot.x, spot.z, 0);
+    return true;
+  };
   const buyFor = (productId: string): boolean => {
     const cat = productById(productId).category;
     const type = typeFor(cat);
@@ -105,25 +119,23 @@ export function investMorning(state: StoreState, mem: { stockouts: Record<string
   for (const p of PRODUCTS) if (state.licenses.includes(p.category) && productCapacity(state, p.id) === 0) buyFor(p.id);
   // 3. mais capacidade onde houve ruptura (no máx. 1 por dia)
   const worst = Object.entries(mem.stockouts).sort((a, b) => b[1] - a[1])[0];
-  if (worst && worst[1] >= 4) buyFor(worst[0]);
+  if (!saving && worst && worst[1] >= 4) buyFor(worst[0]);
   // 4. caixa contratado quando o checkout é o gargalo
   const cc = employeeCost(state, 'cashier');
-  if (cc && state.level >= cc.minLevel && (mem.lostByCapacity > 0 || mem.arrivals > 0.85 * checkoutCapacity(state)) && afford(state, cc.cost + cc.dailyWage * 10)) {
+  if (!saving && cc && state.level >= cc.minLevel && (mem.lostByCapacity > 0 || mem.arrivals > 0.85 * checkoutCapacity(state)) && afford(state, cc.cost + cc.dailyWage * 10)) {
     hireOrUpgrade(state, 'cashier');
   }
-  // 5. expansão
-  const ec = expansionCost(state);
-  const em = expansionMinLevel(state);
-  if (ec !== null && em !== null && state.level >= em && afford(state, ec)) buyExpansion(state);
+  // 5. caixa registradora extra quando o checkout transborda
+  if (mem.lostByCapacity > 3) buyFurnitureOfType('counter');
 }
 
 export interface Bot {
   opts: BotOptions;
-  mem: { stockouts: Record<string, number>; arrivals: number; lostByCapacity: number };
+  mem: { stockouts: Record<string, number>; arrivals: number; lostByCapacity: number; lastNet: number };
 }
 export const newBot = (opts: Partial<BotOptions> = {}): Bot => ({
   opts: { ...defaultBotOptions, ...opts },
-  mem: { stockouts: {}, arrivals: 0, lostByCapacity: 0 },
+  mem: { stockouts: {}, arrivals: 0, lostByCapacity: 0, lastNet: 0 },
 });
 
 /** Joga um dia completo (investe, precifica, repõe, atende todos os clientes previstos, fecha o dia). */
@@ -163,7 +175,7 @@ export function playDay(state: StoreState, bot: Bot): DayStats {
       const a = acceptsPrice(state, it.productId, rand);
       if (!a.ok) {
         rejected++;
-        if (a.ratio > 1.15) sat -= 1;
+        if (a.ratio > 1.2) sat -= 1;
         continue;
       }
       const got = takeFromShelf(state, it.productId, it.qty);
@@ -177,8 +189,8 @@ export function playDay(state: StoreState, bot: Bot): DayStats {
       completeSale(state, cart, speed, Math.max(1, sat));
     }
   }
-  bot.mem = { stockouts, arrivals: times.length, lostByCapacity };
   const report = closeDay(state);
+  bot.mem = { stockouts, arrivals: times.length, lostByCapacity, lastNet: report.netProfit };
   return { ...report, arrivals: times.length, stockouts: stockoutN, rejected, lostByCapacity, level: state.level, money: state.money };
 }
 

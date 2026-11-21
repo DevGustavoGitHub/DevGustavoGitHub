@@ -27,11 +27,11 @@ export interface Product {
 
 export const LICENSES: License[] = [
   { id: 'mercearia', name: 'Mercearia', minLevel: 1, cost: 0 },
-  { id: 'bebidas', name: 'Bebidas', minLevel: 2, cost: 150000 },
-  { id: 'laticinios', name: 'Laticínios', minLevel: 4, cost: 400000 },
-  { id: 'padaria', name: 'Padaria', minLevel: 6, cost: 800000 },
-  { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 1200000 },
-  { id: 'congelados', name: 'Congelados', minLevel: 10, cost: 2000000 },
+  { id: 'bebidas', name: 'Bebidas', minLevel: 3, cost: 150000 },
+  { id: 'laticinios', name: 'Laticínios', minLevel: 5, cost: 400000 },
+  { id: 'padaria', name: 'Padaria', minLevel: 7, cost: 800000 },
+  { id: 'limpeza', name: 'Limpeza', minLevel: 9, cost: 1200000 },
+  { id: 'congelados', name: 'Congelados', minLevel: 11, cost: 2000000 },
 ];
 
 export const PRODUCTS: Product[] = [

@@ -9,8 +9,8 @@ export type Rot = 0 | 90 | 180 | 270;
 
 const CATALOG: FurnitureSpec[] = [
   { type: 'shelf', name: 'Prateleira', cost: 35000, minLevel: 1, slots: 2, categories: ['mercearia', 'limpeza', 'padaria'] },
-  { type: 'fridge', name: 'Geladeira', cost: 90000, minLevel: 2, slots: 3, categories: ['bebidas', 'laticinios'] },
-  { type: 'freezer', name: 'Freezer', cost: 180000, minLevel: 8, slots: 3, categories: ['congelados'] },
+  { type: 'fridge', name: 'Geladeira', cost: 90000, minLevel: 3, slots: 3, categories: ['bebidas', 'laticinios'] },
+  { type: 'freezer', name: 'Freezer', cost: 180000, minLevel: 10, slots: 3, categories: ['congelados'] },
   { type: 'counter', name: 'Caixa registradora', cost: 120000, minLevel: 3, slots: 0, categories: [] },
   /** rack: `slots` = nº de caixas que a estante guarda no depósito. */
   { type: 'rack', name: 'Estante do depósito', cost: 60000, minLevel: 3, slots: STORAGE.rackBoxes, categories: [] },
