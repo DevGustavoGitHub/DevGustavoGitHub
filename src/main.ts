@@ -56,7 +56,7 @@ window.addEventListener('pagehide', () => ctx.save());
 
 let last = performance.now();
 renderer.setAnimationLoop((now) => {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000));
   last = now;
   clock.update(dt);
   for (const m of modules) m.update(dt);

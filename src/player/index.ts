@@ -484,6 +484,7 @@ export default function create(): GameModule {
     },
 
     update(dt) {
+      dt = Math.max(0, dt); // o primeiro frame pode vir com dt negativo
       const p = svc.position;
       // validade da caixa carregada
       if (svc.carrying && idxOf(svc.carrying) < 0) { svc.carrying = null; placing = null; }
@@ -504,7 +505,7 @@ export default function create(): GameModule {
         const a = (mag > 0 ? ACCEL : DECEL) * dt;
         const dx = tx - vel.x, dz = tz - vel.y;
         const dl = Math.hypot(dx, dz);
-        if (dl <= a) { vel.x = tx; vel.y = tz; } else { vel.x += (dx / dl) * a; vel.y += (dz / dl) * a; }
+        if (dl <= a || dl < 1e-6) { vel.x = tx; vel.y = tz; } else { vel.x += (dx / dl) * a; vel.y += (dz / dl) * a; }
         const bx = p.x, bz = p.z;
         moveSlide(vel.x * dt, vel.y * dt);
         speedNow = Math.hypot(p.x - bx, p.z - bz) / Math.max(dt, 1e-4);

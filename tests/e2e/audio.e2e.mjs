@@ -24,7 +24,8 @@ try {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text() + ' ' + (m.location().url ?? '')); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  await page.goto(`http://localhost:${PORT}/`);
+  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(1500);
   await page.waitForFunction(() => window.__game);
 
   check(await page.evaluate(() => window.__game.services.audio.state) === 'none', 'antes do gesto: AudioContext não criado');
@@ -101,6 +102,6 @@ try {
   }
 } finally {
   await browser.close();
-  server.kill();
+  server.kill('SIGKILL');
 }
 process.exit(failed ? 1 : 0);

@@ -311,3 +311,10 @@ export class Person {
     this.head.rotation.y = lerp(this.head.rotation.y, lookYaw + Math.sin(t * 0.6) * 0.25 * (1 - w), k);
   }
 }
+
+/** Mesh de item de mercadoria (esteira/balcão), compartilha geometria. */
+export function itemMesh(): THREE.Mesh {
+  const m = new THREE.Mesh(shared().item, productMaterial('x'));
+  m.visible = false;
+  return m;
+}
