@@ -3,6 +3,7 @@ import { buyProbability, customersForDay, pickProduct } from './demand';
 import { advanceMarket, marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
 import { makeRng } from './rng';
+import { CHECKOUT, EMPLOYEE_TABLE, MAX_EMPLOYEE_LEVEL, type EmployeeRole } from './tuning';
 import { emptyLedger, type Ledger, type StoreState } from './state';
 
 /* ---------- Progressão ---------- */
@@ -94,22 +95,21 @@ export function recordSale(state: StoreState, productId: string, qty: number): C
 
 /* ---------- Funcionários ---------- */
 
-const WAGE_BASE: Record<keyof StoreState['employees'], Cents> = { cashier: 12000, stocker: 10000, janitor: 8000 };
-
 export function dailyWages(state: StoreState): Cents {
   let sum = 0;
-  for (const k of Object.keys(WAGE_BASE) as (keyof typeof WAGE_BASE)[]) {
-    const lvl = state.employees[k];
-    if (lvl > 0) sum += Math.round(WAGE_BASE[k] * (1 + 0.5 * (lvl - 1)));
+  for (const role of Object.keys(EMPLOYEE_TABLE) as EmployeeRole[]) {
+    const lvl = Math.min(MAX_EMPLOYEE_LEVEL, state.employees[role]);
+    if (lvl > 0) sum += EMPLOYEE_TABLE[role].wage[lvl - 1] ?? 0;
   }
   return sum;
 }
 
-/** Clientes/dia que o checkout aguenta: jogador manual + caixa contratado. */
+/** Clientes/dia que o checkout aguenta: jogador manual + caixa contratado + caixas registradoras extras. */
 export function checkoutCapacity(state: StoreState): number {
-  const manual = 45;
   const c = state.employees.cashier;
-  return manual + (c > 0 ? Math.round(40 * (1 + 0.25 * (c - 1))) : 0);
+  const counters = state.furniture.filter((f) => f.type === 'counter').length;
+  const cashier = c > 0 ? Math.round(CHECKOUT.cashierBase * (1 + CHECKOUT.cashierLevelBonus * (c - 1))) : 0;
+  return CHECKOUT.manual + cashier + CHECKOUT.extraCounter * Math.max(0, counters - 1);
 }
 
 /* ---------- Dia ---------- */

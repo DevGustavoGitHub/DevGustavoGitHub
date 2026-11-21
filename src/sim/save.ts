@@ -1,4 +1,5 @@
-import { newGame, type StoreState } from './state';
+import { recomputeSlots } from './furniture';
+import { initialFurniture, newGame, type StoreState } from './state';
 
 export const SAVE_KEY = 'mercadinho-sim:save:v1';
 
@@ -10,11 +11,32 @@ export interface KV {
 
 export const serialize = (s: StoreState): string => JSON.stringify(s);
 
+/**
+ * Mescla sobre um jogo novo (saves antigos ganham campos novos) e migra:
+ * - sem móveis (save anterior ao sistema de móveis) => layout inicial;
+ * - state.slots sempre recalculado a partir dos móveis (fonte da verdade);
+ * - levelAck ausente => nível atual (não dispara avisos antigos).
+ */
 export function deserialize(raw: string): StoreState {
   const data = JSON.parse(raw) as Partial<StoreState>;
   if (data.version !== 1) throw new Error('Versão de save incompatível');
-  // Mescla sobre um jogo novo: saves antigos ganham campos novos com defaults.
-  return { ...newGame(data.seed ?? 1), ...data } as StoreState;
+  const base = newGame(data.seed ?? 1);
+  const s = {
+    ...base,
+    ...data,
+    market: { ...base.market, ...data.market },
+    employees: { ...base.employees, ...data.employees },
+    ledger: { ...base.ledger, ...data.ledger },
+    decor: { ...base.decor, ...data.decor },
+  } as StoreState;
+  if (!Array.isArray(data.furniture) || (data.furniture.length === 0 && (data.nextFurnitureId ?? 1) <= 1)) {
+    s.furniture = initialFurniture();
+    s.nextFurnitureId = Math.max(s.nextFurnitureId, 6);
+  }
+  s.nextFurnitureId = Math.max(s.nextFurnitureId, ...s.furniture.map((f) => f.id + 1));
+  if (data.levelAck === undefined) s.levelAck = s.level;
+  recomputeSlots(s);
+  return s;
 }
 
 export function save(kv: KV, s: StoreState): void {

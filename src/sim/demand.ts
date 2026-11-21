@@ -23,12 +23,16 @@ export function averagePriceRatio(state: StoreState): number {
   return den === 0 ? 1 : num / den;
 }
 
-/** Fluxo diário de clientes. Preço baixo atrai; reputação escala. */
+/**
+ * Fluxo diário de clientes: cresce com nível (até 30), reputação, tamanho da loja e preço baixo.
+ * base = 16 + 4·nível; preço: ±1,2 por unidade de desvio de razão (0,5..1,5); reputação 0,6+0,1·rep; +12% por expansão.
+ */
 export function customersForDay(state: StoreState, rand: () => number): number {
-  const base = 18 + 5 * state.level;
+  const base = 16 + 4 * Math.min(30, state.level);
   const priceMult = Math.min(1.5, Math.max(0.5, 1 + (1 - averagePriceRatio(state)) * 1.2));
-  const repMult = 0.7 + 0.3 * (state.reputation / 5) * 1.0 + 0.1;
-  return Math.max(0, Math.round(base * priceMult * repMult * (0.9 + 0.2 * rand())));
+  const repMult = 0.6 + 0.1 * state.reputation;
+  const sizeMult = 1 + 0.12 * state.expansion;
+  return Math.max(0, Math.round(base * priceMult * repMult * sizeMult * (0.9 + 0.2 * rand())));
 }
 
 /** Escolhe um produto licenciado ponderando por popularidade. */

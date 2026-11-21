@@ -40,7 +40,17 @@ export interface NpcService {
   customersInStore(): number;
 }
 
+/** Publicado pelo módulo `audio`. */
+export interface AudioService {
+  /** 'none' = ainda sem gesto do usuário (AudioContext não criado). */
+  readonly state: 'none' | AudioContextState;
+  /** Toca um SFX (mesmo que o evento 'sfx'). */
+  sfx(name: string, pan?: number): void;
+  setVolume(v: number): void;
+}
+
 export interface Services {
+  audio?: AudioService;
   world?: WorldService;
   player?: PlayerService;
   npc?: NpcService;

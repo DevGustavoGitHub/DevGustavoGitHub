@@ -79,6 +79,17 @@ export interface StoreState {
   /** Sujeira no chão (x,z em tiles). O faxineiro/jogador remove. */
   dirt: { x: number; z: number }[];
   decor: Decor;
+  /** Maior nível já "consumido" pela UI (ver consumeLevelUps em api.ts). */
+  levelAck: number;
+}
+
+/** Layout inicial: 1 caixa registradora e 4 prateleiras de mercearia já atribuídas (salão 12x10). */
+export function initialFurniture(): Furniture[] {
+  const shelves = ['arroz', 'feijao', 'macarrao', 'cafe'];
+  return [
+    { id: 1, type: 'counter', x: 8, z: 6, rot: 0 },
+    ...shelves.map((productId, i): Furniture => ({ id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, productId })),
+  ];
 }
 
 export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0 });
@@ -90,7 +101,7 @@ export function newGame(seed = 1): StoreState {
     market[p.id] = 1;
     slots[p.id] = 0;
   }
-  // Loja inicial: 2 slots para os 4 produtos de mercearia.
+  // Loja inicial: 4 prateleiras (2 slots cada) para os 4 produtos de mercearia (ver initialFurniture).
   for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) slots[id] = 2;
   return {
     version: 1,
@@ -114,9 +125,10 @@ export function newGame(seed = 1): StoreState {
     storeName: 'Meu Mercadinho',
     expansion: 0,
     storageUnlocked: false,
-    furniture: [],
-    nextFurnitureId: 1,
+    furniture: initialFurniture(),
+    nextFurnitureId: 6,
     dirt: [],
     decor: { wallColor: '#f2e8d5', floorColor: '#c9c4b8', signColor: '#d93a3a' },
+    levelAck: 1,
   };
 }

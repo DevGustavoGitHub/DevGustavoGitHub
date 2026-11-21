@@ -59,10 +59,10 @@ const QUALITY = {
   sus: [0, 5, 7, 10],
   add9: [0, 4, 7, 14],
 } as const;
-type Quality = keyof typeof QUALITY;
+type ChordQuality = keyof typeof QUALITY;
 
 /** Graus no tom maior -> qualidade. */
-const DEGREES: Record<number, Quality> = { 0: 'maj7', 2: 'min7', 4: 'min7', 5: 'maj7', 7: 'sus', 9: 'min7' };
+const DEGREES: Record<number, ChordQuality> = { 0: 'maj7', 2: 'min7', 4: 'min7', 5: 'maj7', 7: 'sus', 9: 'min7' };
 
 const PROGRESSIONS: number[][] = [
   [0, 9, 5, 7],
