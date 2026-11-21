@@ -63,6 +63,7 @@ await page.screenshot({ path: `${OUT}/01-customers.png` });
 let shot2 = false;
 for (let i = 0; i < 150; i++) {
   const st = await page.evaluate(() => { if (__game.clock.minute < 900) __game.clock.minute += 6; return { ...__npc.stats, c: __npc.customers().length, fps: 0 }; });
+  if (i % 5 === 0) console.log('t', i, JSON.stringify(st), await page.evaluate(() => __game.clock.hhmm));
   if (!shot2 && st.c >= 3) { shot2 = true; await page.screenshot({ path: `${OUT}/02-later.png` }); }
   if (st.sold >= 6 && st.left >= 6) break;
   await page.waitForTimeout(1000);

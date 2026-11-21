@@ -65,3 +65,10 @@ renderer.setAnimationLoop((now) => {
 
 // Gancho para testes automatizados (Playwright): inspeção e controle do jogo.
 (window as any).__game = ctx;
+
+// PWA: service worker só em produção (em dev atrapalha o hot reload).
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* sem HTTPS/privado: segue sem offline */ });
+  });
+}
