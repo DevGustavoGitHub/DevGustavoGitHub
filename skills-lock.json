@@ -1,0 +1,82 @@
+{
+  "version": 2,
+  "skills": {
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "commit": "57217cf86ba38148a57af9e90d14a4c049558330",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "7bc223e2aafbdbf6e50ea243ba6ef67fe432bb069ab439fea0390795dac0bf7f"
+    },
+    "game-setup-and-config": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/game-setup-and-config/SKILL.md",
+      "computedHash": "768aa16da0efb08b22cbf91be3ce656008a88bd929929fee942152fad485e3f3"
+    },
+    "scale-and-responsive": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/scale-and-responsive/SKILL.md",
+      "computedHash": "70ba549c58fee9a136466dc5d731c553b894d461ee70430aa73e4910f7946483"
+    },
+    "scenes": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/scenes/SKILL.md",
+      "computedHash": "d83a8b7828d7c526210be340ef91db476072d588a2129c3ba1fbc0eaa03283b6"
+    },
+    "sprites-and-images": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/sprites-and-images/SKILL.md",
+      "computedHash": "5cc09bc45e88614494f2eea3da8a51ccfa88900873e2e60744e54a1844417faa"
+    },
+    "text-and-bitmaptext": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/text-and-bitmaptext/SKILL.md",
+      "computedHash": "0bbd7f5c9e1fa257b90b8aa4403476259983cd9d8281cb36812f388e4def3304"
+    },
+    "threejs-fundamentals": {
+      "source": "cloudai-x/threejs-skills",
+      "commit": "0e181866f095b5f06d005133876e926515390d95",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-fundamentals/SKILL.md",
+      "computedHash": "268a79c9d3f35bd7deffc65293f4bd1bcc141b496c69b0f67e9886fc28def4b2"
+    },
+    "threejs-interaction": {
+      "source": "cloudai-x/threejs-skills",
+      "commit": "0e181866f095b5f06d005133876e926515390d95",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-interaction/SKILL.md",
+      "computedHash": "160f06e61488f74734eaf75ef51e8a55624777e3ffa3d6a0fd4f325813ceff87"
+    },
+    "tilemaps": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/tilemaps/SKILL.md",
+      "computedHash": "f93df92e9867ab942716b773e8457a168a6aa6a134e100427ec1492fd4dea1ae"
+    },
+    "time-and-timers": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/time-and-timers/SKILL.md",
+      "computedHash": "579217ae7f96cb76fda8ba4c10e3e9b9ae9f347fb0fb9dc1e02a1034a3bebf2a"
+    },
+    "tweens": {
+      "source": "phaserjs/phaser",
+      "commit": "02d8931b626d9764c133cbb3fbf99966c03c757c",
+      "sourceType": "github",
+      "skillPath": "skills/tweens/SKILL.md",
+      "computedHash": "be521f3d4b4a28671f8a8134383ad35651f492ef19ed78aaedaee58779adcfe6"
+    }
+  }
+}
