@@ -1,5 +1,6 @@
 import type { Cents } from './money';
 import { PRODUCTS } from './catalog';
+import type { FurnitureType } from '../core/layout';
 
 export const OPEN_MIN = 8 * 60;
 export const CLOSE_MIN = 21 * 60;
@@ -16,12 +17,35 @@ export interface Ledger {
 export interface Box {
   productId: string;
   units: number;
+  /** Posição no chão (tiles). Indefinida = o mundo escolhe um ponto livre na zona de entrega. */
+  x?: number;
+  z?: number;
+  /** true enquanto o jogador (ou repositor) a carrega. */
+  carried?: boolean;
 }
 
 export interface Employees {
   cashier: number; // nível 0 = não contratado
   stocker: number;
   janitor: number;
+}
+
+export interface Furniture {
+  id: number;
+  type: FurnitureType;
+  x: number; // canto mínimo (x,z) do footprint, em tiles
+  z: number;
+  rot: 0 | 90 | 180 | 270;
+  /** Produto exposto (shelf/fridge/freezer). */
+  productId?: string;
+  /** Variante visual (decor / cores). */
+  variant?: string;
+}
+
+export interface Decor {
+  wallColor: string;
+  floorColor: string;
+  signColor: string;
 }
 
 export interface StoreState {
@@ -47,6 +71,14 @@ export interface StoreState {
   rent: Cents;
   ledger: Ledger;
   storeName: string;
+  /** 0..4 — ver storeBounds() em core/layout.ts. */
+  expansion: number;
+  storageUnlocked: boolean;
+  furniture: Furniture[];
+  nextFurnitureId: number;
+  /** Sujeira no chão (x,z em tiles). O faxineiro/jogador remove. */
+  dirt: { x: number; z: number }[];
+  decor: Decor;
 }
 
 export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0 });
@@ -80,5 +112,11 @@ export function newGame(seed = 1): StoreState {
     rent: 20000, // R$ 200/dia (luz incluída) — ver GDD
     ledger: emptyLedger(),
     storeName: 'Meu Mercadinho',
+    expansion: 0,
+    storageUnlocked: false,
+    furniture: [],
+    nextFurnitureId: 1,
+    dirt: [],
+    decor: { wallColor: '#f2e8d5', floorColor: '#c9c4b8', signColor: '#d93a3a' },
   };
 }
