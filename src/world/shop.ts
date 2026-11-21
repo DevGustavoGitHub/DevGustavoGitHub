@@ -534,11 +534,11 @@ export class Env {
     if (this.scene.fog) (this.scene.fog as THREE.Fog).color.copy(this.cHor);
     lerpKeys(SUN_COL, t, this.sun.color, this.tmp);
     const arc = Math.sin(t * Math.PI);
-    this.sun.intensity = 1.0 + 1.5 * Math.pow(arc, 0.6);
+    this.sun.intensity = 1.7 + 1.3 * Math.pow(arc, 0.6);
     const R = 60;
     this.sun.position.set(this.sun.target.position.x + (t * 2 - 1) * R * 0.8, 14 + 40 * arc, this.sun.target.position.z + R * 0.55);
     lerpKeys(HEM_SKY, t, this.hemi.color, this.tmp);
-    this.hemi.intensity = 0.85 + 0.25 * (1 - arc);
+    this.hemi.intensity = 1.0 + 0.2 * (1 - arc);
     const night = Math.max(0, Math.min(1, (t - 0.72) / 0.22));
     this.lampMat.emissiveIntensity = 0.2 + night * 2.2;
     for (const m of nightMats) m.emissiveIntensity = night * 0.9;

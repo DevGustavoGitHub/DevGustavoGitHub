@@ -92,7 +92,7 @@ export default function create(): GameModule {
     for (let i = 0; i < 6; i++) { g.beginPath(); g.arc(8 + hash01(i, 8) * 48, 8 + hash01(i, 9) * 48, 2 + hash01(i, 3) * 3, 0, 7); g.fill(); }
     dirtTex = canvasTex(c);
     dirtGeo = new THREE.PlaneGeometry(0.62, 0.62); dirtGeo.rotateX(-Math.PI / 2);
-    dirtMat = new THREE.MeshBasicMaterial({ map: dirtTex, transparent: true, opacity: 0.78, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, color: 0x6a4a2f });
+    dirtMat = new THREE.MeshBasicMaterial({ map: dirtTex, transparent: true, opacity: 0.78, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, color: 0xffffff });
     dirtMesh = new THREE.InstancedMesh(dirtGeo, dirtMat, DIRT_CAP);
     dirtMesh.count = 0; dirtMesh.frustumCulled = false; dirtMesh.renderOrder = 2;
     root.add(dirtMesh);
