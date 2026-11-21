@@ -1,7 +1,6 @@
 /** Estilos da Fase 2: acessibilidade (fonte/movimento/daltonismo), banco, gráfico, pedido automático, falência. */
 export const phase2Css = `
-/* ---- tamanho de fonte (zoom na raiz; a raiz é redimensionada para continuar ocupando a tela) ---- */
-.mx-root.mx-fs-s,.mx-root.mx-fs-l{zoom:var(--zf);right:auto;bottom:auto;left:0;top:0;width:calc(100% / var(--zf));height:calc(100% / var(--zf))}
+/* ---- tamanho de fonte: todo font-size em px é multiplicado por var(--fs) (ver scaleFonts) ---- */
 
 /* ---- reduzir movimento ---- */
 .mx-rm *,.mx-rm *::before,.mx-rm *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
@@ -37,11 +36,12 @@ export const phase2Css = `
 
 /* ---- gráfico ---- */
 .chart{position:relative}
+.chart{max-width:520px;margin:0 auto;width:100%}
 .chart svg{display:block;width:100%;height:auto;touch-action:pan-y;user-select:none;-webkit-user-select:none;outline:none}
 .chart svg:focus-visible{outline:3px solid var(--c-info);outline-offset:2px;border-radius:8px}
 .chart .gl{stroke:var(--c-line);stroke-width:1}
 .chart .zero{stroke:var(--c-ink-3);stroke-width:1.5}
-.chart text{font:600 11px var(--font);fill:var(--c-ink-2)}
+.chart text{font-family:var(--font);font-weight:600;font-size:11px;fill:var(--c-ink-2)}
 .chart .bar-pos{fill:#2a6fdb}.chart .bar-neg{fill:url(#mx-hatch)}
 .chart .bar-neg-out{fill:#e8710a}
 .chart .sel{fill:rgba(37,34,46,.12)}
@@ -83,3 +83,10 @@ export const phase2Css = `
   .bk-card{padding:12px 16px;gap:8px}.bk-card h2{font-size:20px}.bk-ico{display:none}
 }
 `;
+
+/** Multiplica cada `font-size:Npx` (e o tamanho em `font:` abreviado) por `var(--fs)`, a escala escolhida em Opções. */
+export function scaleFonts(css: string): string {
+  return css
+    .replace(/font-size:\s*([\d.]+)px/g, 'font-size:calc($1px * var(--fs,1))')
+    .replace(/font:(\d{3}) ([\d.]+)px/g, 'font:$1 calc($2px * var(--fs,1))');
+}

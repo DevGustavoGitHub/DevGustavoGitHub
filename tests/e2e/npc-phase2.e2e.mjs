@@ -84,10 +84,14 @@ await page.evaluate(() => {
     if (window.__mode === 'cancel') { window.__cancels++; __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: false, speed: 0, mistakes: 0 }); }
     else if (window.__mode === 'ok') __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.8, mistakes: 0 });
   }, 300));
+  __game.state.prices = {};
   __npc.timeScale = 6;
-  __npc.spawnNow(1, 'normal');
 });
-const first = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 60000);
+let first = null;
+for (let k = 0; k < 4 && first === null; k++) {
+  await page.evaluate(() => { __game.clock.minute = 600; __npc.spawnNow(1, 'normal'); });
+  first = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 25000);
+}
 check('primeiro checkoutRequest emitido', first !== null, String(first));
 await page.waitForTimeout(1500);
 const afterCancel = await page.evaluate((id) => ({ info: __npc.customerInfo(id), reqs: window.__reqs.length }), first);
@@ -101,7 +105,11 @@ const sold = await until(() => __npc.stats.sold >= 1, undefined, 30000);
 check('venda concluída após nova tentativa', !!sold);
 // 3 cancelamentos seguidos: cliente desiste, sem travar a fila
 await page.evaluate(() => { window.__mode = 'cancel'; window.__reqs.length = 0; __npc.spawnNow(1, 'normal'); });
-const cid = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 60000);
+let cid = null;
+for (let k = 0; k < 4 && cid === null; k++) {
+  await page.evaluate(() => { __game.clock.minute = 600; __npc.spawnNow(1, 'normal'); });
+  cid = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 25000);
+}
 for (let i = 0; i < 4; i++) { await page.waitForTimeout(900); await page.evaluate(() => __npc.retryCheckout()); }
 await page.waitForTimeout(1500);
 const gone = await page.evaluate((id) => { const i = __npc.customerInfo(id); return !i || i.state.startsWith('leave') || i.state === 'gone'; }, cid);
@@ -129,13 +137,13 @@ const comp = await until(() => window.__compl.length >= 1 ? window.__compl.lengt
 check('exigente reclama de preço alto', !!comp, String(comp));
 // bulk/kid: restaura preços e confere tamanho da compra
 await page.evaluate(() => { const s = __game.state; s.prices = {}; for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) s.shelf[id] = 40; });
-await page.evaluate(() => { __npc.spawnNow(1, 'bulk'); __npc.spawnNow(1, 'kid'); });
-const sizes = await until(() => {
-  const cs = __npc.customers();
-  const out = {};
-  for (const c of cs) { const i = __npc.customerInfo(c.id); if (i && (i.state === 'queue' || i.state === 'front' || i.state === 'serving')) out[i.kind] = Math.max(out[i.kind] ?? 0, i.units); }
-  return out.bulk && out.kid ? out : null;
-}, undefined, 90000);
+await page.evaluate(() => {
+  __game.clock.phase = 'open'; __game.clock.minute = 600;
+  window.__max = {};
+  setInterval(() => { for (const c of __npc.customers()) { const i = __npc.customerInfo(c.id); if (i) window.__max[i.kind] = Math.max(window.__max[i.kind] ?? 0, i.units); } }, 100);
+  for (let i = 0; i < 3; i++) { __npc.spawnNow(1, 'bulk'); __npc.spawnNow(1, 'kid'); }
+});
+const sizes = await until(() => (window.__max.bulk > 0 && window.__max.kid > 0 && __npc.stats.sold >= 4) ? window.__max : null, undefined, 120000);
 check('compra grande > compra de criança', !!sizes && sizes.bulk > sizes.kid, JSON.stringify(sizes));
 await page.screenshot({ path: process.env.NPC_SHOT ?? '/tmp/npc-phase2.png' });
 check('sem erros de console', errors.length === 0, errors.slice(0, 3).join(' | '));

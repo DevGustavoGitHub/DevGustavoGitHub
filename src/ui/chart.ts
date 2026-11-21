@@ -44,7 +44,8 @@ export function profitChart(rows: DayReport[], hold: (v: boolean) => void): HTML
   defs.append(pat);
   svg.append(defs);
 
-  const ticks = Array.from(new Set([top - (top - bot) * 0.04, hi, 0, lo].map((v) => Math.round(v)))).filter((v) => v >= bot && v <= top);
+  const ticks: number[] = [];
+  for (const t of [hi, 0, lo].map((v) => Math.round(v))) if (t >= bot && t <= top && ticks.every((o) => Math.abs(y(o) - y(t)) >= 16)) ticks.push(t);
   for (const t of ticks) {
     svg.append(sv('line', { x1: ML, x2: W - MR, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'gl' }));
     const lab = sv('text', { x: ML - 6, y: y(t) + 4, 'text-anchor': 'end' });

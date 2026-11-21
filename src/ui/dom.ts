@@ -10,7 +10,7 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs | 
     for (const [k, v] of Object.entries(attrs)) {
       if (v === undefined || v === null || v === false) continue;
       if (k === 'class') el.className = String(v);
-      else if (k === 'style') el.setAttribute('style', String(v));
+      else if (k === 'style') el.setAttribute('style', String(v).replace(/font-size:\s*([\d.]+)px/g, 'font-size:calc($1px * var(--fs,1))'));
       else if (k === 'on') for (const [ev, fn] of Object.entries(v as Record<string, (e: Event) => void>)) el.addEventListener(ev, fn);
       else if (k === 'html') el.innerHTML = String(v);
       else if (v === true) el.setAttribute(k, '');

@@ -73,16 +73,25 @@ for (const vp of [{ width: 844, height: 390, name: 'paisagem' }, { width: 390, h
   const stopped2 = await snap(page);
   check(`${tag} soltar o joystick para o jogador`, Math.hypot(stopped2.x - stopped.x, stopped2.z - stopped.z) < 0.15);
 
+  // linha horizontal livre de UI (botão de interação, HUD) para a pinça
+  const PY = await page.evaluate(([w, h]) => {
+    for (const f of [0.5, 0.3, 0.7, 0.4, 0.6, 0.2, 0.8]) {
+      const y = h * f;
+      const xs = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.96];
+      if (xs.every((q) => document.elementFromPoint(w * q, y)?.tagName === 'CANVAS')) return y;
+    }
+    return h * 0.5;
+  }, [W, H]);
   // --- pinça: afastar = aproximar (dist diminui); juntar = afastar
   const p0 = await snap(page);
-  const A = { id: 3, x: W * 0.6, y: H * 0.5 }, B = { id: 4, x: W * 0.8, y: H * 0.5 };
+  const A = { id: 3, x: W * 0.6, y: PY }, B = { id: 4, x: W * 0.8, y: PY };
   await touch('touchStart', [A, B]);
   for (let i = 1; i <= 10; i++) { A.x = W * 0.6 - i * 10; B.x = W * 0.8 + i * 10; await touch('touchMove', [A, B]); await page.waitForTimeout(30); }
   await touch('touchEnd', [A, B]);
   await frames(page, 6);
   const p1 = await snap(page);
   check(`${tag} pinça (afastar dedos) aproxima a câmera`, p1.distT < p0.distT - 0.5, `${p0.distT.toFixed(1)} -> ${p1.distT.toFixed(1)}`);
-  const C = { id: 5, x: W * 0.56, y: H * 0.5 }, D = { id: 6, x: W * 0.96, y: H * 0.5 };
+  const C = { id: 5, x: W * 0.56, y: PY }, D = { id: 6, x: W * 0.96, y: PY };
   await touch('touchStart', [C, D]);
   for (let i = 1; i <= 10; i++) { C.x += W * 0.012; D.x -= W * 0.012; await touch('touchMove', [C, D]); await page.waitForTimeout(30); }
   await touch('touchEnd', [C, D]);

@@ -14,7 +14,7 @@ export interface Settings {
   /** Troca verde/vermelho por azul/laranja e acrescenta ícones ↑↓. */
   colorblind: boolean;
 }
-export const FONT_SCALE: Record<FontSize, number> = { small: 0.92, medium: 1, large: 1.16 };
+export const FONT_SCALE: Record<FontSize, number> = { small: 0.9, medium: 1, large: 1.2 };
 export const SETTINGS_KEY = 'mercadinho:settings';
 
 const prefersReduced = (): boolean => {
@@ -55,7 +55,7 @@ export class SettingsStore {
     r.classList.toggle('mx-fs-l', v.fontSize === 'large');
     r.classList.toggle('mx-rm', v.reduceMotion);
     r.classList.toggle('mx-cb', v.colorblind);
-    r.style.setProperty('--zf', String(FONT_SCALE[v.fontSize]));
+    r.style.setProperty('--fs', String(FONT_SCALE[v.fontSize]));
   }
   set(p: Partial<Settings>): void {
     this.value = { ...this.value, ...p };

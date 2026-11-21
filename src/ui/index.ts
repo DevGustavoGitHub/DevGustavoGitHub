@@ -12,7 +12,7 @@ import { Menus } from './menu';
 import { Report } from './report';
 import { baseCss } from './styles-base';
 import { playCss } from './styles-play';
-import { phase2Css } from './styles-phase2';
+import { phase2Css, scaleFonts } from './styles-phase2';
 import { tabletCss } from './styles-tablet';
 import { Tablet } from './tablet';
 import { Tutorial } from './tutorial';
@@ -59,7 +59,7 @@ export default function create(): GameModule {
     init(ctx: GameContext) {
       kit = new UiKit(ctx);
       const style = h('style', { id: 'mx-style' });
-      style.textContent = baseCss + tabletCss + playCss + phase2Css;
+      style.textContent = scaleFonts(baseCss + tabletCss + playCss + phase2Css);
       document.head.appendChild(style);
       root = h('div', { class: 'mx-root', style: 'pointer-events:none' });
       ctx.uiRoot.appendChild(root);
