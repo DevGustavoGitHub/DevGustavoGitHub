@@ -15,8 +15,6 @@ import { tabletCss } from './styles-tablet';
 import { Tablet } from './tablet';
 import { Tutorial } from './tutorial';
 
-interface CounterPlayer { atCounter?: boolean }
-
 export default function create(): GameModule {
   let kit: UiKit;
   let root: HTMLElement;
@@ -31,11 +29,8 @@ export default function create(): GameModule {
   let keyHandler: ((e: KeyboardEvent) => void) | null = null;
   const offs: (() => void)[] = [];
 
-  const atCounter = (): boolean => (kit.ctx.services.player as CounterPlayer | undefined)?.atCounter !== false;
-
   const tryOpenPending = (): void => {
     if (!pending || checkout.isOpen || kit.isModalOpen()) return;
-    if (!atCounter()) return;
     const req = pending;
     pending = null;
     checkout.open(req);

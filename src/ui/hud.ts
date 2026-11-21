@@ -39,13 +39,14 @@ export class Hud {
 
   private shownMoney: number;
   private targetMoney: number;
-  private lastMoneyText = '';
+  private lastMoneyVal = NaN;
   private cache = { level: -1, xp: -1, clock: '', phase: '', rep: -1, cust: -1, day: -1 };
   private shownLevel: number;
   private custTimer = 0;
   private lastToast = { text: '', t: 0 };
   private lastComplaint = 0;
   private flashTimer = 0;
+  private building = false;
 
   constructor(private kit: UiKit, root: HTMLElement, private hooks: HudHooks) {
     const { ctx } = kit;
@@ -78,10 +79,7 @@ export class Hud {
     bus.on('toast', (p: { text: string; kind?: ToastKind }) => this.pushToast(p.text, p.kind ?? 'info'));
     bus.on('levelUp', (p: { level: number }) => this.levelUp(p.level));
     bus.on('interact:prompt', (p: Prompt | undefined) => this.setPrompt(p ?? { label: null }));
-    bus.on('ui:modal', (p: { open: boolean }) => {
-      this.actions.style.visibility = p.open ? 'hidden' : '';
-      if (p.open) this.interactBtn.hidden = true; else this.setPrompt(this.prompt);
-    });
+    bus.on('ui:modal', () => this.syncVisibility());
     bus.on('customerComplaint', (p: { productId: string }) => {
       const now = performance.now();
       if (now - this.lastComplaint < 7000) return;
@@ -89,8 +87,9 @@ export class Hud {
       this.pushToast('Um cliente achou o preço alto demais.', 'bad');
       void p;
     });
-    bus.on('build:start', () => { this.actions.style.visibility = 'hidden'; });
-    bus.on('build:end', () => { this.actions.style.visibility = ''; });
+    // o modo construção do `world` tem barra própria: some com o HUD enquanto ele está ativo
+    bus.on('build:start', () => { this.building = true; this.syncVisibility(); });
+    bus.on('build:end', () => { this.building = false; this.syncVisibility(); });
     this.render(true);
   }
 
@@ -101,6 +100,13 @@ export class Hud {
     else if (clock.phase === 'open') void this.kit.confirm({ title: 'Fechar a loja?', text: 'Novos clientes não entram mais. Quando a loja esvaziar, o dia termina.', ok: 'Fechar loja' })
       .then((ok) => { if (ok) clock.closeStore(); });
     else if (clock.phase === 'closing') this.hooks.endDay();
+  }
+
+  private syncVisibility(): void {
+    const modal = this.kit.isModalOpen();
+    this.actions.style.visibility = modal || this.building ? 'hidden' : '';
+    this.top.style.visibility = this.building ? 'hidden' : '';
+    if (modal) this.interactBtn.hidden = true; else this.setPrompt(this.prompt);
   }
 
   /* ----- interação contextual ----- */
@@ -181,8 +187,8 @@ export class Hud {
 
   private render(force: boolean): void {
     const { state, clock } = this.kit.ctx;
-    const txt = money(Math.round(this.shownMoney));
-    if (txt !== this.lastMoneyText) { this.lastMoneyText = txt; this.moneyEl.textContent = txt; }
+    const shown = Math.round(this.shownMoney);
+    if (force || shown !== this.lastMoneyVal) { this.lastMoneyVal = shown; this.moneyEl.textContent = money(shown); }
     const c = this.cache;
     if (force || c.level !== state.level || c.xp !== state.xp) {
       c.level = state.level; c.xp = state.xp;

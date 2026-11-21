@@ -46,6 +46,7 @@ tests/       Vitest (sim) e e2e
 | `levelUp` | `{level:number}` | sim/ui → audio/ui |
 | `customerComplaint` | `{customerId:number, productId:string, ratio:number}` | npc → ui/audio (balão "Caro!") |
 | `stateChanged` | `{what:string}` | quem mudar o estado via api → world/ui (re-render de móveis, caixas, sujeira) |
+| `settings:changed` | `{quality:'low'\|'medium'\|'high', volume:number /*0..1*/, haptics:boolean}` | ui → audio/world (opções do jogador; emitido ao mudar e uma vez no início) |
 | `interact:secondary` | `{label:string\|null, action?:()=>void}` | player → ui (botão secundário 'Mover'; opcional, o primário assume 'Mover' quando não há outra ação) |
 | `camera:override` | `{active:boolean}` | world (build mode) → player (player larga a câmera e o movimento; ao terminar interpola de volta) |
 
@@ -79,3 +80,12 @@ Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, 
 - **Build mode:** `build:start {type, productId?, variant?}` (decor: `productId` = variante) / `build:edit {furnitureId}`. O world assume a câmera: emite `camera:override {active:true}` ao iniciar e `{active:false}` + `build:end` ao terminar (confirmar, vender ou cancelar); o `player` devolve o controle ao receber `active:false`. Confirmação chama `api.buyFurniture/moveFurniture` (erros viram `toast` kind `bad`, o modo continua ativo); sucesso emite `stateChanged {what:'furniture'}`, `sfx` e `toast`. Atalhos: R girar, Enter confirmar, Esc cancelar, Del vender; no toque: arrastar o fantasma, tocar para posicionar, arrastar fora dele para mover a câmera, pinça = zoom, giro de dois dedos = girar o móvel. UI própria em overlay DOM dentro de `uiRoot` (atributo `data-world-build`).
 - **Visual reativo:** o world lê `state` a cada 0,25 s e em `stateChanged` (hash por seção; só reconstrói o que mudou). Paredes do lado da câmera ficam translúcidas (corte tipo casa de boneca). Luz/céu seguem `clock.minute` (08:00 manhã → 21:00 entardecer/noite).
 - **Debug/testes:** `window.__world` (`nodes()`, `rebuild()`, `demo(true)`, `stats()`, `setCamera(...)`, `walls()`, `boxCounts()`, `walkable()`, `build.pose`, `service`). `?demo=1` na URL desenha um layout local de desenvolvimento **apenas se `state.furniture` estiver vazio** (nunca persiste).
+
+## UI (`src/ui/`) — notas de integração
+- Opções persistidas em `localStorage['mercadinho:settings']` = `{quality, volume, haptics}` (JSON). A UI emite `settings:changed` ao iniciar e a cada mudança; `quality` é sugestão para world (pixel ratio, sombras).
+- A UI emite `stateChanged {what}` após cada ação do jogador (`orderBoxes`, `price`, `license`, `employee`, `expansion`, `storage`, `decor`, `storeName`) e `dayEnded` (DayReport) depois de `clock.startNextDay()` + `save()`.
+- `checkoutRequest` abre o minigame na hora (se houver outro modal aberto, fica pendente e o botão "Atender cliente" aparece). `checkoutResult.speed` vem do tempo total (escanear + pagar); usar a dica de troco limita speed a 0,6.
+- A UI **não** captura a tecla E (o `player` já trata); o botão contextual só mostra a dica e chama `action()` ao toque.
+- Durante `build:start`..`build:end` o HUD é ocultado para não competir com a barra do modo construção do `world`.
+- Estado do relatório/tutorial em localStorage: `mercadinho:lastReport`, `mercadinho:daysnap`, `mercadinho:tutorial`. "Novo jogo" apaga também estas chaves, troca `ctx.save` por no-op (evita o autosave regravar) e recarrega.
+
