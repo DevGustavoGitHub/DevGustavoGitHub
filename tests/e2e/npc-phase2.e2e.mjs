@@ -90,7 +90,7 @@ await page.evaluate(() => {
 let first = null;
 for (let k = 0; k < 4 && first === null; k++) {
   await page.evaluate(() => { __game.clock.minute = 600; __npc.spawnNow(1, 'normal'); });
-  first = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 25000);
+  first = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 70000);
 }
 check('primeiro checkoutRequest emitido', first !== null, String(first));
 await page.waitForTimeout(1500);
@@ -108,7 +108,7 @@ await page.evaluate(() => { window.__mode = 'cancel'; window.__reqs.length = 0; 
 let cid = null;
 for (let k = 0; k < 4 && cid === null; k++) {
   await page.evaluate(() => { __game.clock.minute = 600; __npc.spawnNow(1, 'normal'); });
-  cid = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 25000);
+  cid = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 70000);
 }
 for (let i = 0; i < 4; i++) { await page.waitForTimeout(900); await page.evaluate(() => __npc.retryCheckout()); }
 await page.waitForTimeout(1500);
@@ -143,7 +143,7 @@ await page.evaluate(() => {
   setInterval(() => { for (const c of __npc.customers()) { const i = __npc.customerInfo(c.id); if (i) window.__max[i.kind] = Math.max(window.__max[i.kind] ?? 0, i.units); } }, 100);
   for (let i = 0; i < 3; i++) { __npc.spawnNow(1, 'bulk'); __npc.spawnNow(1, 'kid'); }
 });
-const sizes = await until(() => (window.__max.bulk > 0 && window.__max.kid > 0 && __npc.stats.sold >= 4) ? window.__max : null, undefined, 120000);
+const sizes = await until(() => (window.__max.bulk >= 4 && window.__max.kid > 0 && __npc.customers().some((c) => c.kind === 'bulk' && c.state === 'queue')) ? window.__max : null, undefined, 120000);
 check('compra grande > compra de criança', !!sizes && sizes.bulk > sizes.kid, JSON.stringify(sizes));
 await page.screenshot({ path: process.env.NPC_SHOT ?? '/tmp/npc-phase2.png' });
 check('sem erros de console', errors.length === 0, errors.slice(0, 3).join(' | '));

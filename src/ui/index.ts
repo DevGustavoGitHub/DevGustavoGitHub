@@ -103,6 +103,7 @@ export default function create(): GameModule {
           syncAttend();
         }),
         bus.on('dayStarted', () => report.snapshotDay()),
+        bus.on('quality:auto', (p: { quality: 'low' | 'medium' | 'high' }) => kit.settings.adopt({ quality: p.quality })),
         // Pedido automático feito pelo npc (toast "Pedido automático: 3 cx Arroz, 2 cx Feijão"): guarda para a aba Automático.
         bus.on('toast', (p: { text: string }) => {
           const items = parseAutoToast(p.text, kit.ctx.state);

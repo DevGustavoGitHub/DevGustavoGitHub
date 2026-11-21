@@ -62,6 +62,8 @@ export class SettingsStore {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.value)); } catch { /* modo privado */ }
     this.emit();
   }
+  /** Adota mudança vinda de fora (ex.: `quality:auto` do world) sem emitir de volta. */
+  adopt(p: Partial<Settings>): void { this.value = { ...this.value, ...p }; }
   emit(): void { this.applyClasses(); this.bus.emit('settings:changed', { ...this.value }); }
   buzz(ms: number | number[]): void {
     if (!this.value.haptics) return;

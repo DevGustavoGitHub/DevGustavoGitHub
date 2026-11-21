@@ -100,6 +100,7 @@ button.den:active{transform:translateY(2px) scale(.97)}
   .amt{padding:4px 8px}.ck-ok{min-height:44px;font-size:16px}.ck .btn{min-height:44px}.ck-actions .btn{font-size:14px}
   .key{min-height:40px;font-size:18px}.screen{font-size:22px;padding:4px 8px}.reader{padding:6px 10px}
   .ck-foot .run{font-size:19px}
+  .amts{gap:4px}.amt{min-width:0;padding:4px 6px}.amt b{font-size:13px}.amt.due b{font-size:15px}
 }
 
 /* ---- relatório ---- */

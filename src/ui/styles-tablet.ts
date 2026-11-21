@@ -1,7 +1,7 @@
 /** Estilos do tablet de gestão e seus cartões. */
 export const tabletCss = `
 .tablet{width:min(980px,100%);height:100%;max-height:min(760px,100%);background:var(--c-paper);border-radius:var(--r-3);box-shadow:var(--sh-2);
-  display:grid;grid-template-rows:auto auto 1fr;overflow:hidden;animation:mx-pop .22s ease-out;border:3px solid #2b2937}
+  display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto 1fr;overflow:hidden;animation:mx-pop .22s ease-out;border:3px solid #2b2937}
 .tb-head{display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;background:#2b2937;color:#fff}
 .tb-head h2{margin:0;font-size:18px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tb-head .cash{font-weight:800;color:#ffe9a8;font-size:16px;white-space:nowrap}
@@ -16,7 +16,7 @@ export const tabletCss = `
 .tb-body>*+*{margin-top:10px}
 @media (orientation:landscape) and (max-height:520px){
   .tb-tabs{-webkit-mask-image:none;mask-image:none}
-  .tablet{grid-template-columns:auto 1fr;grid-template-rows:auto 1fr;max-height:100%}
+  .tablet{grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto 1fr;max-height:100%}
   .tb-head{grid-column:1/-1;padding:2px 6px 2px 14px}
   .tb-head .icon-btn{width:44px;height:44px}
   .tb-tabs{flex-direction:column;overflow-y:auto;overflow-x:hidden;border-bottom:0;border-right:2px solid var(--c-line);width:64px;padding:6px;align-items:stretch}
@@ -25,7 +25,7 @@ export const tabletCss = `
 }
 @media (min-width:900px) and (min-height:521px){
   .tb-tabs{-webkit-mask-image:none;mask-image:none}
-  .tablet{grid-template-columns:200px 1fr;grid-template-rows:auto 1fr}
+  .tablet{grid-template-columns:200px minmax(0,1fr);grid-template-rows:auto 1fr}
   .tb-head{grid-column:1/-1}
   .tb-tabs{flex-direction:column;overflow-x:hidden;border-bottom:0;border-right:2px solid var(--c-line);padding:12px}
   .tab-btn{justify-content:flex-start}
