@@ -125,7 +125,7 @@ export class Bubble {
     const inK = Math.min(1, this.t / 0.18);
     const outK = Math.min(1, Math.max(0, (this.life - this.t) / 0.25));
     const k = inK * outK * (1 + 0.12 * Math.sin(Math.min(1, this.t / 0.18) * Math.PI));
-    const s = 0.9 * k;
+    const s = 1.15 * k;
     this.sprite.scale.set(s * 2, s, 1);
     if (this.t >= this.life) this.sprite.visible = false;
   }

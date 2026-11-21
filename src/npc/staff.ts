@@ -122,7 +122,7 @@ export class Stocker extends Staff {
     switch (this.job) {
       case 'idle':
         this.setPose('normal');
-        if (working && this.cooldown <= 0 && !this.moving) this.pickJob();
+        if (working && this.cooldown <= 0 && !this.moving) { this.pickJob(); if (this.job === 'idle') this.cooldown = 0.6; }
         if (this.job === 'idle' && !this.moving && this.distTo(this.homeX, this.homeZ) > 0.7) this.moveTo(this.homeX, this.homeZ);
         break;
       case 'toBox':

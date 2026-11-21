@@ -179,7 +179,7 @@ export default function create(): GameModule {
         spawnNow: (n = 1) => { let k = 0; for (let i = 0; i < n; i++) if (spawnCustomer()) k++; return k; },
         get timeScale() { return timeScale; },
         set timeScale(v: number) { timeScale = clamp(v, 0.1, 20); },
-        customers: () => customers.map((x) => ({ id: x.id, state: x.state, items: x.items.length, x: +x.x.toFixed(1), z: +x.z.toFixed(1) })),
+        customers: () => customers.map((x) => ({ id: x.id, state: x.state, items: x.items.length, bubble: x.bubble.active, x: +x.x.toFixed(1), z: +x.z.toFixed(1) })),
         staff: () => staff.map((s) => ({ role: s.role, x: +s.x.toFixed(1), z: +s.z.toFixed(1), job: (s as { job?: string }).job ?? '' })),
         stats,
         lanes: () => mgr.lanes.map((l) => ({ id: l.furnitureId, line: l.line.length, staffed: l.staffed })),

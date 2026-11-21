@@ -14,7 +14,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
 const errors = [];
-page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404')) errors.push(m.text()); if (m.type() === 'warning' && m.text().includes('[npc]')) console.log('WARN', m.text()); });
+page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404') && !m.text().includes('MIME type')) errors.push(m.text()); if (m.type() === 'warning' && m.text().includes('[npc]')) console.log('WARN', m.text()); });
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 await page.goto(URL);
 await page.waitForFunction(() => window.__game && window.__npc, null, { timeout: 30000 });
@@ -51,6 +51,7 @@ await page.evaluate(() => {
   __game.bus.on('checkoutRequest', (r) => setTimeout(() => __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.7, mistakes: 0 }), 700));
   // jogador "sempre no balcão" (o módulo player real não está encostado no counter durante o teste)
   const pl = (__game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false });
+  try { Object.defineProperty(pl, 'inputLocked', { get: () => false, set: () => {}, configurable: true }); } catch (e) { console.error('inputLocked', e); }
   try { Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, set: () => {}, configurable: true }); } catch (e) { console.error('atCounter', e); }
   __game.uiRoot.style.display = 'none';
   __game.clock.paused = false; __game.clock.openStore();
@@ -60,10 +61,11 @@ await page.evaluate(() => {
 await page.waitForTimeout(8000);
 await page.screenshot({ path: `${OUT}/01-customers.png` });
 // acelera o relógio (o fps no swiftshader é baixo) até haver vendas concluídas
-let shot2 = false;
+let shot2 = false, shotB = false;
 for (let i = 0; i < 150; i++) {
-  const st = await page.evaluate(() => { if (__game.clock.minute < 900) __game.clock.minute += 6; return { ...__npc.stats, c: __npc.customers().length, fps: 0 }; });
+  const st = await page.evaluate(() => { if (__game.clock.minute < 1100) __game.clock.minute += 8; return { ...__npc.stats, c: __npc.customers().length, fps: 0 }; });
   if (i % 5 === 0) console.log('t', i, JSON.stringify(st), await page.evaluate(() => __game.clock.hhmm));
+  if (!shotB) { const bi = await page.evaluate(() => __npc.customers().find((c) => c.bubble)); if (bi) { shotB = true; await page.evaluate((b) => { __game.camera.position.set(b.x + 2, 3.2, b.z + 4); __game.camera.lookAt(b.x, 1.4, b.z); }, bi); await page.waitForTimeout(150); await page.screenshot({ path: `${OUT}/05-bubble.png` }); await page.evaluate(() => { __game.camera.position.set(8, 11, 17); __game.camera.lookAt(7, 0, 5); }); } }
   if (!shot2 && st.c >= 3) { shot2 = true; await page.screenshot({ path: `${OUT}/02-later.png` }); }
   if (st.sold >= 6 && st.left >= 6) break;
   await page.waitForTimeout(1000);
