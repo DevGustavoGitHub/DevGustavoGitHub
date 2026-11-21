@@ -39,6 +39,12 @@ await page.evaluate(() => {
   const pl = (__game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false });
   Object.defineProperty(pl, 'inputLocked', { get: () => false, set: () => {}, configurable: true });
   Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, set: () => {}, configurable: true });
+  window.__mode = 'ok';
+  __game.bus.on('checkoutRequest', (r) => setTimeout(() => {
+    if (window.__mode === 'cancel') { window.__cancels++; __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: false, speed: 0, mistakes: 0 }); }
+    else if (window.__mode === 'ok') __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.8, mistakes: 0 });
+  }, 300));
+  window.__cancels = 0;
   __game.uiRoot.style.display = 'none';
   setInterval(() => { __game.clock.paused = false; }, 100);
 });
@@ -80,12 +86,8 @@ await page.evaluate(() => {
   __game.clock.phase = 'open'; __game.clock.minute = 600; __game.state.employees.stocker = 0;
   for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) __game.state.shelf[id] = 20;
   window.__reqs.length = 0; window.__mode = 'cancel'; window.__cancels = 0;
-  __game.bus.on('checkoutRequest', (r) => setTimeout(() => {
-    if (window.__mode === 'cancel') { window.__cancels++; __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: false, speed: 0, mistakes: 0 }); }
-    else if (window.__mode === 'ok') __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.8, mistakes: 0 });
-  }, 300));
   __game.state.prices = {};
-  __npc.timeScale = 6;
+  __npc.timeScale = 10;
 });
 let first = null;
 for (let k = 0; k < 4 && first === null; k++) {
@@ -93,6 +95,7 @@ for (let k = 0; k < 4 && first === null; k++) {
   first = await until(() => window.__reqs[0]?.customerId ?? null, undefined, 70000);
 }
 check('primeiro checkoutRequest emitido', first !== null, String(first));
+if (first === null) { console.log(JSON.stringify(await page.evaluate(() => ({ c: __npc.customers(), l: __npc.lanes(), m: __game.clock.hhmm, ph: __game.clock.phase, ts: __npc.timeScale, st: __npc.stats, pl: [__game.services.player.inputLocked, __game.services.player.atCounter] })))); await browser.close(); process.exit(1); }
 await page.waitForTimeout(1500);
 const afterCancel = await page.evaluate((id) => ({ info: __npc.customerInfo(id), reqs: window.__reqs.length }), first);
 check('cliente continua esperando após cancelar (não preso nem removido)', !!afterCancel.info && (afterCancel.info.state === 'front' || afterCancel.info.state === 'queue') && afterCancel.info.cancels === 1, JSON.stringify(afterCancel.info));
@@ -129,7 +132,8 @@ await page.evaluate(() => {
   for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) { const w = s.prices[id] ?? 0; s.prices[id] = Math.round(((w || 1500) * 1.5)); }
   __npc.timeScale = 4;
 });
-const spawned = await page.evaluate(() => ({ bulk: __npc.spawnNow(1, 'bulk'), picky: __npc.spawnNow(1, 'picky'), kid: __npc.spawnNow(1, 'kid') }));
+const spawned = {};
+for (const k of ['bulk', 'picky', 'kid']) spawned[k] = !!(await until((kk) => __npc.spawnNow(1, kk) > 0, k, 90000));
 check('spawn forçado dos 3 tipos', spawned.bulk && spawned.picky && spawned.kid, JSON.stringify(spawned));
 const kinds = await page.evaluate(() => __npc.customers().map((c) => c.kind));
 check('tipos presentes na loja', ['bulk', 'picky', 'kid'].every((k) => kinds.includes(k)), kinds.join(','));
@@ -141,7 +145,8 @@ await page.evaluate(() => {
   __game.clock.phase = 'open'; __game.clock.minute = 600;
   window.__max = {};
   setInterval(() => { for (const c of __npc.customers()) { const i = __npc.customerInfo(c.id); if (i) window.__max[i.kind] = Math.max(window.__max[i.kind] ?? 0, i.units); } }, 100);
-  for (let i = 0; i < 3; i++) { __npc.spawnNow(1, 'bulk'); __npc.spawnNow(1, 'kid'); }
+  window.__want = { bulk: 2, kid: 2 };
+  setInterval(() => { for (const k of ['bulk', 'kid']) if (window.__want[k] > 0 && __npc.spawnNow(1, k) > 0) window.__want[k]--; }, 400);
 });
 const sizes = await until(() => (window.__max.bulk >= 4 && window.__max.kid > 0 && __npc.customers().some((c) => c.kind === 'bulk' && c.state === 'queue')) ? window.__max : null, undefined, 120000);
 check('compra grande > compra de criança', !!sizes && sizes.bulk > sizes.kid, JSON.stringify(sizes));

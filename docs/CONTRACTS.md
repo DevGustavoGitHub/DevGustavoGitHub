@@ -81,6 +81,16 @@ Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, 
 - **Layout (mudança aditiva em `core/layout.ts`):** `MAX_EXPANSION = 6` e `storeBounds` aceita expansão 0..6 (salão até 36×22; largura 12+4e, profundidade 10+2e). Expansões 5/6: R$ 140.000 (nív. 24) e R$ 260.000 (nív. 29). Avisem world/npc/ui: nada pode assumir expansão máxima 4 (`ui/tablet/expansion.ts` e `ui/report.ts` usam `< 4`/`/4`; use `MAX_EXPANSION`). `buyExpansion` agora realoca móveis que caírem na nova antessala/passagem (a porta muda de lugar) e `canPlace` não é mais bloqueado por móveis antigos já inalcançáveis; o world deve re-renderizar móveis após `stateChanged {what:'expansion'}`.
 - **Ritmo:** curva de XP mais íngreme após o nível 15 (`xpForLevel`); nível 30 ≈ dia 95 com o bot; ver GDD §3–4.
 
+## Seção `npc` (src/npc) — notas para os outros módulos
+- **Pedido automático:** o npc chama `api.runAutoOrders(state)` (dentro de try/catch; `NOT_IMPLEMENTED` desliga as chamadas) em `storeOpened` e a cada hora cheia de jogo enquanto a loja está aberta. Se algo foi pedido: `toast` info "Pedido automático: 2 cx Arroz, 1 cx Leite", `sfx {name:'buy'}` e `stateChanged {what:'sidewalk'}`. O repositor abastece as caixas novas normalmente (e o depósito, quando houver).
+- **Repositor:** por viagem carrega até 1/2/3 caixas (nível 1 / 2-3 / 4+) de produtos diferentes e próximos, na ordem de **menor % de estoque na prateleira**; repõe cada uma e leva as vazias à lixeira de uma vez. Sem caixas na calçada, busca no depósito (também por menor %, até a mesma capacidade).
+- **Checkout cancelado** (`checkoutResult.ok=false`): o cliente continua no balcão (balão "Opa!"/zangado), perde 4 s e 15% de paciência e o toast avisa. Um novo `checkoutRequest` só sai quando o jogador toca de novo em **Atender** (o npc escuta o clique em `.attend-btn`; também `__npc.retryCheckout()`) ou sai e volta ao balcão. Após 3 cancelamentos o cliente desiste e vai embora (sem loops).
+- **Clientes especiais** (sorteio por chegada: ~5% bulk, ~6% picky, ~7% kid; mesmos meshes dos demais, só cor/acessório/balão):
+  - `bulk` (camisa laranja, cesta enorme, balão "Compra grande!"): lista dobrada e quantidades maiores (cesto até 36 un.); no caixa de funcionário leva 1,6x mais tempo; se atendido rápido (speed >= 0,6) a velocidade enviada a `completeSale` é multiplicada por 1,3 (gorjeta maior), se lento é reduzida.
+  - `picky` (camisa roxa, chapéu dourado, "Hmm, preços..."): rejeita qualquer preço acima de 1,1x a média de mercado (limite exato); a reclamação vale por 2 (`customerComplaint` com `ratio` x1,15, balão "Absurdo!") e a satisfação final cai 0,5.
+  - `kid` (pequeno, camisa amarela, cabeça grande, balão "Doces!"): compra 1-2 itens de padaria/doces (fallback: qualquer produto em estoque), anda e navega mais rápido, tem menos paciência e suja mais (até 6x a chance de sujeira).
+- **Debug (`window.__npc`):** `spawnNow(n, kind?)`, `sampleKinds(n)`, `runAutoOrders()`, `setAutoImpl(fn)`, `retryCheckout()`, `customerInfo(id)`, `customers()` (agora com `kind`), `stats.kinds/autoOrders`. Teste: `tests/e2e/npc-phase2.e2e.mjs` (`npx vite build && npx vite preview --port 5179`).
+
 ## Seção `world` (src/world) — notas para os outros módulos
 - **Serviço:** `ctx.services.world` (`WorldService`). `findPath` devolve centros de tile **sem o tile inicial** (último ponto = destino; origem/destino não andáveis são ajustados ao tile andável mais próximo, raio 3); resultado em cache, mas é uma cópia (pode dar `shift()`). Paredes só são atravessadas na porta (2 tiles centrados) e na passagem do depósito. Navegação inclui calçada (z de depth a depth+3) e uma faixa de rua (2 tiles) para spawn: `spawnPoint()` = (⌊porta.x−5⌋+0,5; depth+3,5), perto da porta.
 - **Convenção de móveis:** `Furniture.x/z` = canto mínimo do footprint **já rotacionado**. Frente (lado do cliente) em rot 0 = +z; 90 = +x; 180 = −z; 270 = −x. `furnitureAccess(id)` = tile em frente (ou ao lado, se bloqueado); `null` se inacessível.
@@ -105,3 +115,8 @@ Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, 
 - Durante `build:start`..`build:end` o HUD é ocultado para não competir com a barra do modo construção do `world`.
 - Estado do relatório/tutorial em localStorage: `mercadinho:lastReport`, `mercadinho:daysnap`, `mercadinho:tutorial`. "Novo jogo" apaga também estas chaves, troca `ctx.save` por no-op (evita o autosave regravar) e recarrega.
 
+
+## Fase 2 — contrato adicional (integração)
+- `PlayerService.carryingAll: Box[]` — todas as caixas carregadas (base → topo, LIFO); `carrying` é o topo. Capacidade: `api.carryCapacity(state)` (1; 3 com dolly).
+- O toast do pedido automático segue o formato `Pedido automático: N cx Nome, ...` — a aba "Automático" da UI o interpreta (mudança de texto exige mudar `src/ui/tablet/auto.ts`).
+- Expansão máxima é `MAX_EXPANSION` (core/layout.ts), hoje 6.

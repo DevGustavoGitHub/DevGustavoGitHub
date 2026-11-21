@@ -26,6 +26,9 @@ export class Lane {
   /** Jogador tocou em 'Atender' de novo depois de cancelar: libera novo checkoutRequest imediato. */
   retry = false;
   blockedT = 0;
+  /** Há quanto tempo o pedido ao jogador está sem resposta (s). */
+  pendingT = 0;
+  awayT = 0;
   readonly belt = new THREE.Group();
   private readonly beltItems: THREE.Mesh[] = [];
   private readonly slotTmp: Vec2 = { x: 0, z: 0 };
@@ -191,6 +194,12 @@ export class CheckoutManager {
     const p = this.env.ctx.services.player;
     let bd = Infinity;
     for (const l of this.lanes) {
+      // pedido sem resposta (jogador saiu do balcão ou a UI descartou): libera o cliente para não travar a fila
+      if (l.pending) {
+        l.pendingT += 0.2;
+        l.awayT = this.playerAt(l) ? 0 : l.awayT + 0.2;
+        if (l.awayT > 1.5 || l.pendingT > 90) { l.pending = null; l.pendingT = 0; l.awayT = 0; l.hideBelt(); }
+      }
       if (l.staffed) continue;
       const front = l.line[0];
       if (l.blockedUntilLeave && !this.playerAt(l)) l.blockedUntilLeave = false;
@@ -210,6 +219,7 @@ export class CheckoutManager {
       const total = safe('basketTotal', () => api.basketTotal(this.env.ctx.state, c.items), 0);
       const paid = c.method === 'cash' ? customerCashPayment(total, this.env.ctx.rand) : undefined;
       availLane.pending = c;
+      availLane.pendingT = 0; availLane.awayT = 0;
       availLane.retry = false;
       c.requestedAt = c.waited;
       availLane.showBelt(c.items, Math.min(8, c.units));

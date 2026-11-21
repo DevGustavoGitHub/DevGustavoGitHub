@@ -12,6 +12,9 @@ export class EventBus {
     return () => s!.delete(fn);
   }
   emit(name: string, payload?: any): void {
-    this.h.get(name)?.forEach((fn) => fn(payload));
+    // Um ouvinte com erro não pode derrubar os demais módulos que escutam o mesmo evento.
+    this.h.get(name)?.forEach((fn) => {
+      try { fn(payload); } catch (err) { console.error(`[bus] erro no ouvinte de "${name}"`, err); }
+    });
   }
 }

@@ -465,9 +465,9 @@ export default function create(): GameModule {
         on('dayStarted', () => sync(false)),
         on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string }) => { sync(false); build.start(p.type, p.productId, p.variant); }),
         on('build:edit', (p: { furnitureId: number }) => { sync(false); build.edit(p.furnitureId); }),
-        on('sfx', (p: { name: string }) => {
-          if (p.name === 'door') doorTimer = 1.6;
-          if (p.name === 'cash') for (const e of entries.values()) if (e.view.drawer) e.drawerT = 1;
+        on('sfx', (p?: { name?: string }) => {
+          if (p?.name === 'door') doorTimer = 1.6;
+          if (p?.name === 'cash') for (const e of entries.values()) if (e.view.drawer) e.drawerT = 1;
         }),
       );
       exposeDebug();
