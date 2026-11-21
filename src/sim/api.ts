@@ -20,7 +20,7 @@ import { makeRng } from './rng';
 import type { Decor, Furniture, StoreState } from './state';
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
-  DECOR_CHANGE_COST, DIRT, EMPLOYEE_TABLE, EXPANSIONS, MAX_EMPLOYEE_LEVEL, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES,
+  DECOR_CHANGE_COST, DIRT, EMPLOYEE_TABLE, EXPANSIONS, MAX_EMPLOYEE_LEVEL, RENT_PER_EXPANSION, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES,
   STORAGE, STORE_NAME_MAX,
 } from './tuning';
 
@@ -114,6 +114,7 @@ export function buyExpansion(state: StoreState): void {
   if (state.money < e.cost) throw new Error('Dinheiro insuficiente');
   state.money -= e.cost;
   state.expansion++;
+  state.rent += RENT_PER_EXPANSION;
 }
 export function storageCost(): { cost: Cents; minLevel: number } { return { cost: STORAGE.cost, minLevel: STORAGE.minLevel }; }
 export function unlockStorage(state: StoreState): void {
@@ -249,13 +250,13 @@ export function arrivalSchedule(state: StoreState): number[] {
 
 /**
  * Lista de compras (produtos distintos, só categorias licenciadas e com prateleira atribuída), sem checar preço/estoque.
- * Pode devolver [] se não houver nada exposto. Nº de itens: 1..(3 + nível/3), até 7.
+ * Pode devolver [] se não houver nada exposto. Nº de itens: 1..(4 + nível/3), até 7 produtos distintos.
  */
 export function makeShoppingList(state: StoreState, rand: () => number): { productId: string; qty: number }[] {
   const pool = PRODUCTS.filter((p) => state.licenses.includes(p.category) && (state.slots[p.id] ?? 0) > 0);
   if (pool.length === 0) return [];
   const maxItems = Math.min(pool.length, 7, 3 + Math.floor(state.level / 3));
-  const count = 1 + Math.floor(rand() * maxItems);
+  const count = Math.min(pool.length, 1 + Math.floor(rand() * (maxItems + 1)));
   const list: { productId: string; qty: number }[] = [];
   const left = [...pool];
   for (let i = 0; i < count && left.length > 0; i++) {
@@ -269,7 +270,7 @@ export function makeShoppingList(state: StoreState, rand: () => number): { produ
     }
     const [p] = left.splice(idx, 1);
     // variedade: quantidade quase sempre 1-2 (itens caros tendem a 1)
-    const qty = rand() < 0.6 ? 1 : rand() < 0.75 ? 2 : 3;
+    const qty = rand() < 0.45 ? 1 : rand() < 0.65 ? 2 : 3;
     list.push({ productId: p!.id, qty });
   }
   return list;

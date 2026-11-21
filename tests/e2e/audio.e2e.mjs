@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PW_PATH ?? '/opt/node-tools/node_modules/playwright');
 
 const PORT = 5199;
-const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: 'pipe' });
+const server = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: 'pipe', detached: true });
 await new Promise((res, rej) => {
   const t = setTimeout(() => rej(new Error('vite não subiu')), 30000);
   server.stdout.on('data', (d) => { if (String(d).includes('Local')) { clearTimeout(t); res(); } });
@@ -22,7 +22,7 @@ const browser = await chromium.launch({
 try {
   const page = await browser.newPage();
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text() + ' ' + (m.location().url ?? '')); });
+  page.on('console', (m) => { if (m.type() === 'error' && !(m.location().url ?? '').endsWith('/favicon.ico')) errors.push(m.text() + ' ' + (m.location().url ?? '')); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1500);
@@ -102,6 +102,6 @@ try {
   }
 } finally {
   await browser.close();
-  server.kill('SIGKILL');
+  try { process.kill(-server.pid, 'SIGKILL'); } catch { /* já encerrado */ }
 }
 process.exit(failed ? 1 : 0);

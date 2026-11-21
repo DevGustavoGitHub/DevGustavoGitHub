@@ -6,11 +6,14 @@ import type { Cents } from './money';
 
 /** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 4 níveis. */
 export const EXPANSIONS: { cost: Cents; minLevel: number }[] = [
-  { cost: 900000, minLevel: 4 },
+  { cost: 600000, minLevel: 4 },
   { cost: 2200000, minLevel: 8 },
   { cost: 5000000, minLevel: 13 },
   { cost: 10000000, minLevel: 19 },
 ];
+
+/** Aluguel diário extra por nível de expansão. */
+export const RENT_PER_EXPANSION: Cents = 5000;
 
 /** Depósito: custo, nível mínimo, capacidade-base (caixas) e capacidade por estante (rack). */
 export const STORAGE = { cost: 400000 as Cents, minLevel: 3, baseBoxes: 6, rackBoxes: 8 };

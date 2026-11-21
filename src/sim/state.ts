@@ -120,7 +120,7 @@ export function newGame(seed = 1): StoreState {
     sidewalk: [],
     costBasis: {},
     employees: { cashier: 0, stocker: 0, janitor: 0 },
-    rent: 20000, // R$ 200/dia (luz incluída) — ver GDD
+    rent: 12000, // R$ 120/dia (luz incluída); +R$ 50 por expansão (tuning.RENT_PER_EXPANSION) — ver GDD
     ledger: emptyLedger(),
     storeName: 'Meu Mercadinho',
     expansion: 0,
