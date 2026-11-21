@@ -23,6 +23,9 @@ export interface Product {
   slotCapacity: number;
   /** Peso de popularidade na lista de compras do cliente. */
   popularity: number;
+  /** Dicas visuais para o módulo world (cor principal CSS e forma). Opcionais: world tem fallback por categoria. */
+  color?: string;
+  shape?: 'box' | 'bottle' | 'can' | 'bag' | 'tray' | 'jar';
 }
 
 export const LICENSES: License[] = [

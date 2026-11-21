@@ -385,3 +385,44 @@ export function priceInfo(state: StoreState, productId: string): { wholesale: Ce
 export const suggestedPrice = (state: StoreState, productId: string): Cents => roundPrice(marketAverage(state, productId) * 1.12);
 
 export { checkoutCapacity, footprintOf, STORAGE_DEPTH };
+
+/* =====================================================================
+ * FASE 2 — assinaturas CONGELADAS (o agente `sim` implementa; demais programam contra elas).
+ * StoreState ganha (o sim cria defaults + migração em deserialize): loan, autoOrders, upgrades, history.
+ * ===================================================================== */
+
+const notImpl = (n: string): never => { throw new Error(`NOT_IMPLEMENTED: ${n}`); };
+
+/* ---------- Empréstimo e falência ---------- */
+export interface LoanInfo { owed: Cents; maxLoan: Cents; available: Cents; dailyInterest: Cents }
+/** Empréstimo com juros baixos diários; limite cresce com o nível. Falha se acima do limite. */
+export function loanInfo(state: StoreState): LoanInfo { return notImpl('loanInfo'); }
+export function takeLoan(state: StoreState, amount: Cents): void { notImpl('takeLoan'); }
+export function repayLoan(state: StoreState, amount: Cents): void { notImpl('repayLoan'); }
+/** Falido = caixa abaixo do piso permitido, sem empréstimo disponível e sem estoque que cubra a dívida. */
+export function isBankrupt(state: StoreState): boolean { return notImpl('isBankrupt'); }
+/** Recomeço guiado: mantém nível/licenças/decoração, zera dívida, devolve capital inicial reduzido; não apaga o save. */
+export function restartAfterBankruptcy(state: StoreState): void { notImpl('restartAfterBankruptcy'); }
+
+/* ---------- Pedidos automáticos e atalhos ---------- */
+export interface AutoOrderRule { minUnits: number; boxes: number }
+/** null remove a regra. Só produtos licenciados. */
+export function setAutoOrder(state: StoreState, productId: string, rule: AutoOrderRule | null): void { notImpl('setAutoOrder'); }
+export function autoOrderRules(state: StoreState): Record<string, AutoOrderRule> { return notImpl('autoOrderRules'); }
+/** Para cada regra com (shelf+storage+sidewalk) < minUnits, compra `boxes` caixas se houver dinheiro. Retorna o que comprou. */
+export function runAutoOrders(state: StoreState): { productId: string; boxes: number; cost: Cents }[] { return notImpl('runAutoOrders'); }
+/** Compra o necessário para encher cada prateleira até `fillRatio` (default 1). Só licenciados com móvel atribuído. */
+export function buyMissing(state: StoreState, fillRatio?: number): { cost: Cents; boxes: number } { return notImpl('buyMissing'); }
+
+/* ---------- Melhorias (upgrades) ---------- */
+export type UpgradeId = 'dolly';
+export interface UpgradeSpec { id: UpgradeId; name: string; description: string; cost: Cents; minLevel: number; owned: boolean }
+export function upgradeCatalog(state: StoreState): UpgradeSpec[] { return notImpl('upgradeCatalog'); }
+export function buyUpgrade(state: StoreState, id: UpgradeId): void { notImpl('buyUpgrade'); }
+/** Quantas caixas o jogador carrega ao mesmo tempo: 1 sem melhoria; 3 com dolly. */
+export function carryCapacity(state: StoreState): number { return notImpl('carryCapacity'); }
+
+/* ---------- Estatísticas ---------- */
+/** Últimos 30 relatórios de dia (closeDay acrescenta). */
+export function dayHistory(state: StoreState): DayReport[] { return notImpl('dayHistory'); }
+export function topProducts(state: StoreState, days?: number): { productId: string; units: number; revenue: Cents; profit: Cents }[] { return notImpl('topProducts'); }
