@@ -70,8 +70,10 @@ export class BuildMode {
   /* ---------- ciclo de vida ---------- */
   start(type: FurnitureType, productId?: string, variant?: string): void {
     this.end(false);
-    this.mode = 'buy'; this.type = type; this.productId = productId; this.variant = variant;
-    this.rot = 0;
+    this.mode = 'buy'; this.type = type; this.rot = 0;
+    // decor: o 'productId' do evento é a variante visual (mesma convenção de api.buyFurniture)
+    this.variant = type === 'decor' ? (variant ?? productId) : variant;
+    this.productId = type === 'decor' ? undefined : productId;
     this.begin();
     this.cost = null;
     try { this.cost = api.furnitureCatalog().find((s) => s.type === type)?.cost ?? null; } catch { /* sim ainda não pronto */ }
@@ -162,9 +164,8 @@ export class BuildMode {
     try {
       ok = api.canPlace(this.d.ctx.state, this.type, this.x, this.z, this.rot, this.mode === 'edit' ? this.editId : undefined);
       this.apiBroken = false;
-    } catch (e) {
+    } catch {
       this.apiBroken = true;
-      void e;
       ok = this.localCanPlace();
     }
     this.valid = ok;
@@ -181,12 +182,10 @@ export class BuildMode {
     const holder = new THREE.Group();
     holder.add(view.group);
     this.ghost = holder; this.d.root.add(holder);
-    const fp = this.footprint();
     const fg = new THREE.PlaneGeometry(1, 1); fg.rotateX(-Math.PI / 2);
     this.foot = new THREE.Mesh(fg, this.footOk);
     this.foot.renderOrder = 5;
     this.d.root.add(this.foot);
-    void fp;
   }
 
   private clearGhost(): void {
@@ -221,7 +220,7 @@ export class BuildMode {
     for (let z = zBack; z <= b.depth; z++) pts.push(0, 0.035, z, b.width, 0.035, z);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    this.grid = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28, depthWrite: false }));
+    this.grid = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false }));
     this.grid.renderOrder = 4;
     this.d.root.add(this.grid);
   }
@@ -243,7 +242,7 @@ export class BuildMode {
     const { ctx } = this.d;
     try {
       if (this.mode === 'buy') {
-        api.buyFurniture(ctx.state, this.type, this.x, this.z, this.rot, this.productId);
+        api.buyFurniture(ctx.state, this.type, this.x, this.z, this.rot, this.type === 'decor' ? this.variant : this.productId);
         ctx.bus.emit('toast', { text: `${NAMES[this.type]} comprada!`, kind: 'good' });
         ctx.bus.emit('sfx', { name: 'buy' });
       } else {

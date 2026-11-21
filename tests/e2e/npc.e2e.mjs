@@ -19,6 +19,8 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 await page.goto(URL);
 await page.waitForFunction(() => window.__game && window.__npc, null, { timeout: 30000 });
 await page.waitForTimeout(1000);
+await page.getByText('Jogar', { exact: true }).first().click({ timeout: 3000 }).catch(() => {}); // fecha a tela de título (modal)
+await page.waitForTimeout(800);
 
 const fails = [];
 const check = (name, ok, extra = '') => { console.log(ok ? 'PASS' : 'FAIL', name, extra); if (!ok) fails.push(name); };
@@ -49,7 +51,7 @@ await page.evaluate(() => {
   __game.bus.on('checkoutRequest', (r) => setTimeout(() => __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.7, mistakes: 0 }), 700));
   // jogador "sempre no balcão" (o módulo player real não está encostado no counter durante o teste)
   const pl = (__game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false });
-  try { Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, configurable: true }); } catch (e) { console.error('atCounter', e); }
+  try { Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, set: () => {}, configurable: true }); } catch (e) { console.error('atCounter', e); }
   __game.uiRoot.style.display = 'none';
   __game.clock.paused = false; __game.clock.openStore();
   __npc.timeScale = 8;
@@ -57,11 +59,16 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(8000);
 await page.screenshot({ path: `${OUT}/01-customers.png` });
-const mid = await page.evaluate(() => ({ stats: { ...__npc.stats }, c: __npc.customers(), in: __game.services.npc.customersInStore(), lanes: __npc.lanes(), min: __game.clock.hhmm }));
-console.log('mid', JSON.stringify(mid));
-await page.waitForTimeout(30000);
-await page.screenshot({ path: `${OUT}/02-later.png` });
-const end = await page.evaluate(() => ({ stats: { ...__npc.stats }, money: __game.state.money, before: __moneyBefore, shelf: Object.values(__game.state.shelf).reduce((a, b) => a + b, 0), shelfBefore: __shelfBefore, ledger: { ...__game.state.ledger }, min: __game.clock.hhmm, phase: __game.clock.phase, dirt: __game.state.dirt.length }));
+// acelera o relógio (o fps no swiftshader é baixo) até haver vendas concluídas
+let shot2 = false;
+for (let i = 0; i < 150; i++) {
+  const st = await page.evaluate(() => { if (__game.clock.minute < 900) __game.clock.minute += 6; return { ...__npc.stats, c: __npc.customers().length, fps: 0 }; });
+  if (!shot2 && st.c >= 3) { shot2 = true; await page.screenshot({ path: `${OUT}/02-later.png` }); }
+  if (st.sold >= 6 && st.left >= 6) break;
+  await page.waitForTimeout(1000);
+}
+await page.screenshot({ path: `${OUT}/03-end.png` });
+const end = await page.evaluate(() => ({ stats: { ...__npc.stats }, money: __game.state.money, before: __moneyBefore, shelf: Object.values(__game.state.shelf).reduce((a, b) => a + b, 0), shelfBefore: __shelfBefore, ledger: { ...__game.state.ledger }, min: __game.clock.hhmm, phase: __game.clock.phase, dirt: __game.state.dirt.length, in: __npc.customers(), lanes: __npc.lanes() }));
 console.log('end', JSON.stringify(end));
 check('clientes spawnaram', end.stats.spawned > 0, String(end.stats.spawned));
 check('clientes saíram', end.stats.left > 0, String(end.stats.left));

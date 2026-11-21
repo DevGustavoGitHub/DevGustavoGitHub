@@ -8,7 +8,6 @@ import type { Vec2, WorldService } from '../core/services';
 import { doorPos, deliveryZone, storeBounds, trashBinPos, FURNITURE_FOOTPRINT, SIDEWALK_DEPTH, type Bounds } from '../core/layout';
 import type { Box, Furniture, StoreState } from '../sim/state';
 import { PRODUCTS, productById } from '../sim/catalog';
-import * as api from '../sim/api';
 import { Shop, Env } from './shop';
 import { buildFurniture, rackSlot, RACK_SLOTS, type FurnitureView } from './furniture';
 import { BoxLayer, BOX_H, type BoxInst } from './products';
@@ -297,7 +296,7 @@ export default function create(): GameModule {
       for (let i = 0; i < 8; i++) {
         const q = localToWorld(cx, cz, f.rot, -0.5, 1.5 + i);
         const t = tileC(q.x, q.z);
-        if (!nav.isWalkable(t.x, t.z)) break;
+        if (!nav.isWalkable(t.x, t.z) || t.z >= bounds.depth) break; // fila só dentro do salão
         queue.push(t);
       }
       return { furnitureId: f.id, operator: tileC(op.x, op.z), queue, scanner: localToWorld(cx, cz, f.rot, 0.52, 0.62) };
@@ -319,6 +318,8 @@ export default function create(): GameModule {
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
       stats: () => ({ calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, geometries: ctx.renderer.info.memory.geometries, textures: ctx.renderer.info.memory.textures }),
       furnitureViews: () => entries.size,
+      boxCounts: () => ({ floor: boxLayer.count, rack: rackLayer.count }),
+      walls: () => shop.faces.map((f) => ({ n: [f.nx, f.nz], fade: +f.fade.toFixed(2) })),
       setCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); },
       startBuild: (type: Furniture['type'], productId?: string) => ctx.bus.emit('build:start', { type, productId }),
       bounds: () => ({ ...bounds }),
@@ -401,4 +402,3 @@ export default function create(): GameModule {
     },
   };
 }
-void api;

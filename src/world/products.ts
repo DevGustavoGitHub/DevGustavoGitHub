@@ -250,6 +250,8 @@ export class BoxLayer {
     }
     for (const m of all) { m.instanceMatrix.needsUpdate = true; }
   }
+  /** Quantidade de caixas desenhadas (debug/testes). */
+  get count(): number { return this.body.count; }
   dispose(): void {
     this.group.traverse((o) => { if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose(); });
   }

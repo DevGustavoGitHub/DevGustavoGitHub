@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { CLOSE_MIN, OPEN_MIN, type Decor } from '../sim/state';
 import { DOOR_WIDTH, SIDEWALK_DEPTH, STORAGE_DEPTH, WALL_HEIGHT, deliveryZone, trashBinPos, type Bounds } from '../core/layout';
-import { Tracker, bx, boxGeo, cylGeo, coneGeo, icoGeo, sphGeo, put, stdMat, scaleUV, makeCanvas, canvasTex, hex, hash01 } from './kit';
+import { Tracker, bx, boxGeo, cylGeo, icoGeo, put, stdMat, scaleUV, makeCanvas, canvasTex, hex, hash01 } from './kit';
 
 /* ---------------- texturas compartilhadas (vivem até o fim) ---------------- */
 let floorTexture: THREE.CanvasTexture | null = null;
@@ -100,6 +100,14 @@ const SKY_TOP: Key[] = [[0, 0x6cb4ec], [0.35, 0x3f9bea], [0.7, 0x4f8fd8], [0.88,
 const SKY_HOR: Key[] = [[0, 0xfde7c4], [0.35, 0xd5ecff], [0.7, 0xe8e0d0], [0.88, 0xffb98a], [1, 0xa86a7a]];
 const SUN_COL: Key[] = [[0, 0xffd7a0], [0.3, 0xfff4e0], [0.7, 0xffe0b0], [0.9, 0xff9d62], [1, 0xff7a4a]];
 const HEM_SKY: Key[] = [[0, 0xcfe4ff], [0.5, 0xcfe4ff], [0.9, 0xa9a4d8], [1, 0x7a78b8]];
+
+/** Ajusta opacidade; ao alternar transparent o shader precisa recompilar (define OPAQUE). */
+function setOpacity(m: THREE.MeshStandardMaterial, op: number): void {
+  const t = op < 0.995;
+  m.opacity = op;
+  m.depthWrite = op > 0.6;
+  if (m.transparent !== t) { m.transparent = t; m.needsUpdate = true; }
+}
 
 /* ---------------- Casca da loja ---------------- */
 export interface WallFace {
@@ -258,7 +266,6 @@ export class Shop {
     const ag = tr.geo(new THREE.BoxGeometry(3.2, 0.05, 1.1)); scaleUV(ag, 1, 1);
     const awning = new THREE.Mesh(ag, aw); awning.position.set(W / 2, 2.75, D + t + 0.55); awning.rotation.x = 0.28; awning.castShadow = true; g.add(awning);
     this.soft.push({ mat: aw });
-    void decor; void name;
   }
   private awningMat: THREE.MeshStandardMaterial | null = null;
   private awningCanvas: HTMLCanvasElement | null = null;
@@ -302,18 +309,19 @@ export class Shop {
     const cx = cam.position.x, cz = cam.position.z;
     for (const f of this.faces) {
       let target = 1;
-      if (!f.never) {
+      if (f.never) target = 0.14; // divisória salão/estoque: sempre recortada para ver o depósito
+      else {
         const out = (cx - f.cx) * f.nx + (cz - f.cz) * f.nz;
         target = this.forceFade || out > 0.4 ? 0.1 : 1;
       }
       f.fade += (target - f.fade) * k;
       const op = Math.abs(f.fade - target) < 0.01 ? target : f.fade;
-      for (const m of f.mats) { m.opacity = op; m.transparent = op < 0.995; m.depthWrite = op > 0.6; }
+      for (const m of f.mats) setOpacity(m, op);
     }
     const front = this.faces.find((f) => f.nz === 1 && f.nx === 0);
     const ft = front ? front.fade : 1;
     const softOp = ft >= 0.995 ? 1 : 0.4 + 0.6 * Math.min(1, (ft - 0.1) / 0.9);
-    for (const s of this.soft) { s.mat.opacity = softOp; s.mat.transparent = softOp < 0.995; }
+    for (const s of this.soft) setOpacity(s.mat, softOp);
     if (this.signMat) this.signMat.emissiveIntensity = 0.12 + night * 0.9;
   }
 
@@ -421,11 +429,9 @@ export class Env {
       const m = new THREE.Mesh(bldGeo(tr, w, h, depth), bldMat(pal[ci % pal.length]!));
       m.position.set((x0 + x1) / 2, 0, zFront - dirFront * depth / 2);
       m.receiveShadow = true; g.add(m);
-      const roof = bx(g, w + 0.3, 0.3, depth + 0.3, stdMat(0x7d838d, { rough: 0.9 }), m.position.x, h, m.position.z, { cast: false });
-      void roof;
+      bx(g, w + 0.3, 0.3, depth + 0.3, stdMat(0x7d838d, { rough: 0.9 }), m.position.x, h, m.position.z, { cast: false });
       if (shop) {
-        const sf = bx(g, w - 1.2, 2.9, 0.12, stdMat(0x35505f, { rough: 0.2, metal: 0.2 }), m.position.x, 0, zFront + dirFront * 0.03, { cast: false });
-        void sf;
+        bx(g, w - 1.2, 2.9, 0.12, stdMat(0x35505f, { rough: 0.2, metal: 0.2 }), m.position.x, 0, zFront + dirFront * 0.03, { cast: false });
         bx(g, w - 0.6, 0.45, 0.25, stdMat(pal[(ci + 3) % pal.length]! ^ 0x303030, { rough: 0.7 }), m.position.x, 3.0, zFront + dirFront * 0.1, { cast: false });
       }
       if (h > 9) {
@@ -438,7 +444,7 @@ export class Env {
     for (let i = 0; i < 5; i++) { const w = 9 + Math.floor(hash01(i, 21) * 5); bld(xr, xr + w, D, D + 10, 6 + hash01(i, 22) * 6, i + 4, 1, true); xr += w + 0.2; }
     const backZ = -STORAGE_DEPTH - 3.4;
     let xb = -34;
-    for (let i = 0; xb < W + 34; i++) { const w = 10 + Math.floor(hash01(i, 31) * 6); bld(xb, xb + w, backZ, 12, 8 + hash01(i, 32) * 10, i + 2, -1, false); xb += w + 1; }
+    for (let i = 0; xb < W + 34; i++) { const w = 10 + Math.floor(hash01(i, 31) * 6); bld(xb, xb + w, backZ, 12, 8 + hash01(i, 32) * 10, i + 2, 1, false); xb += w + 1; }
     let xf = -60; // lado oposto da rua: fachadas voltadas para a loja
     for (let i = 0; xf < W + 60; i++) {
       const w = 9 + Math.floor(hash01(i, 41) * 6);
@@ -572,4 +578,3 @@ export class Env {
     this.sun.shadow.map?.dispose();
   }
 }
-void sphGeo; void coneGeo;

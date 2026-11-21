@@ -202,7 +202,6 @@ function rack(): FurnitureView {
     bx(g, 1.95, 0.09, 0.05, beam, 0, y, -0.43);
     if (y < 1.6) bx(g, 1.86, 0.03, 0.84, plank, 0, y + 0.09, 0, { cast: false });
   }
-  bx(g, 1.9, 0.01, 0.01, post, 0, 0.7, 0.45, { cast: false }).rotation.z = 0.75;
   return { group: g };
 }
 
