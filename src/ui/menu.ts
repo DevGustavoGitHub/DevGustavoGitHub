@@ -3,7 +3,8 @@ import { SAVE_KEY } from '../sim/save';
 import { h } from './dom';
 import { icon } from './icons';
 import { UiKit } from './kit';
-import type { Quality } from './settings';
+import { toggle } from './widgets';
+import type { FontSize, Quality } from './settings';
 
 export interface MenuHooks {
   endDay(): void;
@@ -74,12 +75,22 @@ export class Menus {
     const paint = (): void => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.q === st.value.quality));
     for (const [q, label] of quality) seg.appendChild(h('button', { class: 'btn', 'data-q': q, on: { click: () => { st.set({ quality: q }); paint(); } } }, label));
     paint();
+    const fontSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Tamanho do texto' });
+    const sizes: [FontSize, string][] = [['small', 'P'], ['medium', 'M'], ['large', 'G']];
+    const paintF = (): void => fontSeg.querySelectorAll('button').forEach((b) => { const on = b.dataset.f === st.value.fontSize; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    for (const [f, label] of sizes) fontSeg.appendChild(h('button', { class: 'btn', 'data-f': f, 'aria-label': `Texto ${f === 'small' ? 'pequeno' : f === 'large' ? 'grande' : 'médio'}`, style: `font-size:${f === 'small' ? 14 : f === 'large' ? 20 : 17}px`, on: { click: () => { st.set({ fontSize: f }); paintF(); } } }, label));
+    paintF();
+    const swRm = toggle(st.value.reduceMotion, 'Reduzir movimento', (v) => { st.set({ reduceMotion: v }); swRm.setAttribute('aria-checked', String(v)); });
+    const swCb = toggle(st.value.colorblind, 'Modo daltônico', (v) => { st.set({ colorblind: v }); swCb.setAttribute('aria-checked', String(v)); });
     const back = h('div', { class: 'mx-modal mx-dim mx-z-confirm', role: 'dialog', 'aria-label': 'Opções' },
       h('div', { class: 'menu-card' },
         h('div', { class: 'mx-row' }, h('h2', { style: 'flex:1' }, 'Opções'), UiKit.closeButton(() => back.remove())),
         h('div', { class: 'opt' }, h('label', null, 'Volume', volOut), vol),
         h('div', { class: 'opt' }, h('div', { class: 'lb' }, h('span', null, 'Vibração'), sw)),
         h('div', { class: 'opt' }, h('div', { class: 'lb' }, 'Qualidade gráfica'), seg, h('small', { class: 'muted' }, 'Baixa economiza bateria em celulares mais simples.')),
+        h('div', { class: 'opt' }, h('div', { class: 'lb' }, 'Tamanho do texto'), fontSeg),
+        h('div', { class: 'opt' }, h('div', { class: 'lb' }, h('span', null, 'Reduzir movimento'), swRm), h('small', { class: 'muted' }, 'Desliga animações da interface e o tremor da câmera.')),
+        h('div', { class: 'opt' }, h('div', { class: 'lb' }, h('span', null, 'Modo daltônico'), swCb), h('small', { class: 'muted' }, 'Troca verde/vermelho por azul/laranja e mostra setas ↑↓ em preços e margens.')),
         h('button', { class: 'btn primary block', on: { click: () => back.remove() } }, 'Voltar')));
     this.layer.appendChild(back);
   }

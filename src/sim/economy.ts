@@ -3,13 +3,34 @@ import { buyProbability, customersForDay, pickProduct } from './demand';
 import { advanceMarket, marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
 import { makeRng } from './rng';
-import { CHECKOUT, EMPLOYEE_TABLE, MAX_EMPLOYEE_LEVEL, type EmployeeRole } from './tuning';
+import { CHECKOUT, EMPLOYEE_TABLE, HISTORY_DAYS, LOAN, MAX_EMPLOYEE_LEVEL, type EmployeeRole } from './tuning';
 import { emptyLedger, type Ledger, type StoreState } from './state';
 
 /* ---------- Progressão ---------- */
 
 /** XP acumulado necessário para ALCANÇAR o nível n (n>=2). */
-export const xpForLevel = (n: number): number => (n <= 1 ? 0 : Math.round(130 * Math.pow(n - 1, 1.8)));
+export const xpForLevel = (n: number): number =>
+  n <= 1 ? 0 : Math.round(130 * Math.pow(n - 1, 1.8) * (1 + XP_LATE_SLOPE * Math.max(0, n - XP_LATE_FROM)));
+/** Depois do nível 15 a curva fica mais íngreme (fim de jogo: nível ~30 por volta do dia 90-100 com o bot). */
+const XP_LATE_FROM = 15;
+const XP_LATE_SLOPE = 0.05;
+
+/** Juros diários do empréstimo (múltiplo de R$ 0,05, arredondado para cima; 0 se não há dívida). */
+export const loanInterest = (owed: Cents): Cents => (owed <= 0 ? 0 : Math.ceil((owed * LOAN.dailyRate) / 5) * 5);
+
+/** Acumula unidades/receita/lucro do produto no dia corrente (state.stats, janela de 30 dias). */
+export function recordProductStat(state: StoreState, productId: string, qty: number, revenue: Cents, cogs: Cents): void {
+  let e = state.stats[state.stats.length - 1];
+  if (!e || e.day !== state.day) {
+    e = { day: state.day, p: {} };
+    state.stats.push(e);
+    while (state.stats.length > HISTORY_DAYS) state.stats.shift();
+  }
+  const r = (e.p[productId] ??= [0, 0, 0]);
+  r[0] += qty;
+  r[1] += revenue;
+  r[2] += revenue - cogs;
+}
 
 export function addXp(state: StoreState, amount: number): void {
   state.xp += amount;
@@ -89,6 +110,7 @@ export function recordSale(state: StoreState, productId: string, qty: number): C
   const total = price * qty;
   state.ledger.revenue += total;
   state.ledger.cogs += avg * qty;
+  recordProductStat(state, productId, qty, total, avg * qty);
   addXp(state, qty); // 1 XP por unidade vendida
   return total;
 }
@@ -128,6 +150,10 @@ export interface DayReport {
   served: number;
   lost: number;
   reputation: number;
+  /** Fase 2: juros do empréstimo cobrados no dia (já incluídos em `fixed`). */
+  interest?: Cents;
+  /** Fase 2: saldo devedor ao fechar o dia (depois dos juros). */
+  loan?: Cents;
 }
 
 /**
@@ -190,7 +216,8 @@ export function simulateOpenDay(state: StoreState): void {
 /** Fecha o dia: cobra despesas fixas, gera relatório, avança mercado e calendário. */
 export function endDay(state: StoreState): DayReport {
   const l: Ledger = state.ledger;
-  const fixed = state.rent + dailyWages(state);
+  const interest = loanInterest(state.loan);
+  const fixed = state.rent + dailyWages(state) + interest;
   state.money -= fixed;
   const report: DayReport = {
     day: state.day,
@@ -204,7 +231,11 @@ export function endDay(state: StoreState): DayReport {
     served: l.served,
     lost: l.lost,
     reputation: state.reputation,
+    interest,
+    loan: state.loan,
   };
+  state.history.push(report);
+  while (state.history.length > HISTORY_DAYS) state.history.shift();
   state.day++;
   state.ledger = emptyLedger();
   advanceMarket(state, makeRng(state.seed * 7919 + state.day));

@@ -9,6 +9,8 @@ import { clamp, lerp } from './shared';
 export type Pose = 'normal' | 'basket' | 'carry' | 'mop' | 'grab' | 'scan';
 export type Role = 'customer' | 'cashier' | 'stocker' | 'janitor';
 export type AgeGroup = 'adult' | 'kid' | 'elder';
+/** Tipos de cliente (os especiais são raros e têm visual distinto sem meshes extras). */
+export type CustomerKind = 'normal' | 'bulk' | 'picky' | 'kid';
 
 export interface PersonSpec {
   role: Role;
@@ -20,6 +22,7 @@ export interface PersonSpec {
   pants: number;
   height: number; // multiplicador
   seed: number;
+  kind?: CustomerKind;
 }
 
 const SKINS = [0xf2c9a0, 0xe0a97d, 0xc68b5e, 0x9a6540, 0x6f4429, 0xffdcbf];
@@ -137,17 +140,25 @@ export function productMaterial(productId: string): THREE.MeshLambertMaterial {
 export const MAX_BASKET_ITEMS = 6;
 
 /** Gera uma especificação aleatória de cliente. */
-export function randomCustomerSpec(rand: () => number, seed: number): PersonSpec {
+const KIND_SHIRT: Record<CustomerKind, number | null> = { normal: null, bulk: 0xff7a00, picky: 0x6a2c91, kid: 0xffe03a };
+/** Sorteia o tipo de cliente: ~5% compra grande, ~6% exigente, ~7% criança. */
+export function pickKind(rand: () => number): CustomerKind {
   const r = rand();
-  const age: AgeGroup = r < 0.14 ? 'kid' : r < 0.3 ? 'elder' : 'adult';
+  return r < 0.05 ? 'bulk' : r < 0.11 ? 'picky' : r < 0.18 ? 'kid' : 'normal';
+}
+
+export function randomCustomerSpec(rand: () => number, seed: number, kind: CustomerKind = 'normal'): PersonSpec {
+  const r = rand();
+  const age: AgeGroup = kind === 'kid' ? 'kid' : r < 0.2 ? 'elder' : 'adult';
   const pick = <T,>(a: readonly T[]): T => a[Math.floor(rand() * a.length)]!;
   return {
     role: 'customer',
+    kind,
     age,
     skin: pick(SKINS),
     hair: age === 'elder' ? pick(ELDER_HAIR) : pick(HAIRS),
     hairStyle: age === 'elder' && rand() < 0.3 ? 0 : (Math.floor(rand() * 4) as 0 | 1 | 2 | 3),
-    shirt: pick(SHIRTS),
+    shirt: KIND_SHIRT[kind] ?? pick(SHIRTS),
     pants: pick(PANTS),
     height: age === 'kid' ? 0.62 + rand() * 0.14 : age === 'elder' ? 0.9 + rand() * 0.08 : 0.92 + rand() * 0.16,
     seed,
@@ -212,7 +223,8 @@ export class Person {
     this.head.add(new THREE.Mesh(s.head, skin));
     this.head.add(new THREE.Mesh(s.face, s.faceMat));
     if (spec.role === 'customer') {
-      if (spec.hairStyle !== 0) this.head.add(new THREE.Mesh(s.hair[spec.hairStyle]!, material('hair', spec.hair)));
+      if (spec.kind === 'picky') this.head.add(new THREE.Mesh(s.cap, material('hat', 0xf2c230))); // chapéu dourado no lugar do cabelo
+      else if (spec.hairStyle !== 0) this.head.add(new THREE.Mesh(s.hair[spec.hairStyle]!, material('hair', spec.hair)));
     } else {
       this.head.add(new THREE.Mesh(s.cap, material('cap', spec.shirt)));
     }
@@ -230,6 +242,7 @@ export class Person {
       this.basket.add(it);
       this.basketItems.push(it);
     }
+    if (spec.kind === 'bulk') this.basket.scale.setScalar(1.7); // cesta enorme
     this.basket.position.set(0.3, -0.12, 0.1);
     this.basket.visible = false;
 

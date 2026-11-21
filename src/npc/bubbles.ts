@@ -14,6 +14,10 @@ const DEFS: Record<BubbleKey, Def> = {
   neutral: { color: '#8d6e63', mood: 'neutral' },
   sad: { color: '#5c6bc0', mood: 'sad' },
   coin: { color: '#f9a825', mood: 'coin' },
+  bulk: { text: 'Compra grande!', color: '#e65100' },
+  picky: { text: 'Hmm, preços...', color: '#6a2c91' },
+  pickyno: { text: 'Absurdo!', color: '#8e0000' },
+  kid: { text: 'Doces!', color: '#d81b60' },
 };
 
 const cache = new Map<BubbleKey, THREE.SpriteMaterial>();

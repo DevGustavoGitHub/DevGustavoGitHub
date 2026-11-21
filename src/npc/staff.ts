@@ -56,48 +56,75 @@ export class Cashier extends Staff {
 
 type SJob = 'idle' | 'toBox' | 'lift' | 'toShelf' | 'place' | 'toTrash' | 'toss' | 'toStorage' | 'takeStorage';
 
+/**
+ * Repositor: numa viagem recolhe até `cap` caixas (nível 1: 1, nível 2-3: 2, nível 4+: 3) de produtos diferentes
+ * e próximas entre si, priorizando os produtos com menor % de estoque na prateleira; depois repõe cada uma
+ * e leva as vazias à lixeira de uma vez. Sem caixas na calçada, busca no depósito (também por menor %).
+ */
 export class Stocker extends Staff {
   job: SJob = 'idle';
-  private box: Box | null = null;
+  /** Caixas a buscar nesta viagem (ordem de prioridade). */
+  private plan: Box[] = [];
+  /** Caixas já nas mãos (a primeira é a próxima a repor). */
+  private stack: Box[] = [];
+  /** Caixas esvaziadas a descartar. */
+  private junk: Box[] = [];
   private timer = 0;
   private cooldown = 0;
   private storeCool = 0;
   private furnId = -1;
+  private storePids: string[] = [];
   constructor(env: Env) { super(env, 'stocker'); }
 
-  private sidewalkIdx(): number { return this.box ? this.env.ctx.state.sidewalk.indexOf(this.box) : -1; }
+  private get cap(): number { return this.level >= 4 ? 3 : this.level >= 2 ? 2 : 1; }
 
-  private drop(): void {
-    if (this.box) { this.box.carried = false; this.env.changed('sidewalk'); }
-    this.box = null; this.person.setCarryBox(false); this.setPose('normal');
-    this.job = 'idle'; this.cooldown = 1.5;
+  /** Fração de ocupação da prateleira do produto (0 = vazia). */
+  private fill(pid: string): number {
+    const have = this.env.ctx.state.shelf[pid] ?? 0;
+    const room = shelfRoom(this.env, pid);
+    return have / Math.max(1, have + room);
   }
+
+  private release(b: Box): void { b.carried = false; this.env.changed('sidewalk'); }
 
   private pickJob(): void {
     const { state } = this.env.ctx;
     const player = this.env.ctx.services.player;
-    let best: Box | null = null;
-    let bd = Infinity;
+    const door = this.env.world().door();
+    const cands: Box[] = [];
     for (const b of state.sidewalk) {
       if (b.carried || b.units <= 0 || b === player?.carrying) continue;
       if (shelfRoom(this.env, b.productId) <= 0 || !furnitureFor(this.env, b.productId, this.x, this.z)) continue;
-      const d = dist2(this.x, this.z, b.x ?? this.env.world().door().x, b.z ?? this.env.world().door().z + 1);
-      if (d < bd) { bd = d; best = b; }
+      cands.push(b);
     }
-    if (best) { this.box = best; this.furnId = -1; this.job = 'toBox'; this.walkToBox(best); return; }
+    if (cands.length > 0) {
+      // menor % de estoque primeiro; empate: mais perto
+      const near = (b: Box): number => dist2(this.x, this.z, b.x ?? door.x, b.z ?? door.z + 1);
+      cands.sort((a, b) => (this.fill(a.productId) - this.fill(b.productId)) || (near(a) - near(b)));
+      const first = cands[0]!;
+      this.plan.length = 0;
+      this.plan.push(first);
+      for (let i = 1; i < cands.length && this.plan.length < this.cap; i++) {
+        const b = cands[i]!;
+        if (this.plan.some((p) => p.productId === b.productId)) continue;
+        if (dist2(b.x ?? door.x, b.z ?? door.z + 1, first.x ?? door.x, first.z ?? door.z + 1) > 36) continue;
+        this.plan.push(b);
+      }
+      this.job = 'toBox'; this.walkToBox(first);
+      return;
+    }
     if (state.storageUnlocked && this.storeCool <= 0) {
-      for (const pid of Object.keys(state.storage)) {
-        if ((state.storage[pid] ?? 0) > 0 && shelfRoom(this.env, pid) > 0 && furnitureFor(this.env, pid, this.x, this.z)) {
-          const sp = this.storagePoint();
-          const p = this.env.world().findPath({ x: this.x, z: this.z }, sp);
-          if (!p) { this.storeCool = 15; return; }
-          this.job = 'toStorage'; this.moveTo(sp.x, sp.z); this.storePid = pid;
-          return;
-        }
+      const pids = Object.keys(state.storage).filter((pid) => (state.storage[pid] ?? 0) > 0 && shelfRoom(this.env, pid) > 0 && furnitureFor(this.env, pid, this.x, this.z));
+      if (pids.length > 0) {
+        pids.sort((a, b) => this.fill(a) - this.fill(b));
+        const sp = this.storagePoint();
+        const p = this.env.world().findPath({ x: this.x, z: this.z }, sp);
+        if (!p) { this.storeCool = 15; return; }
+        this.storePids = pids.slice(0, this.cap);
+        this.job = 'toStorage'; this.moveTo(sp.x, sp.z);
       }
     }
   }
-  private storePid = '';
   private tmp = { x: 0, z: 0 };
   private storagePoint(): { x: number; z: number } {
     const b = storeBounds(this.env.ctx.state.expansion);
@@ -110,15 +137,26 @@ export class Stocker extends Staff {
     this.moveTo(b.x ?? door.x - 2, b.z ?? door.z + 1.2);
   }
 
+  private prune(list: Box[], needFree: boolean): void {
+    const { state } = this.env.ctx;
+    const player = this.env.ctx.services.player;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i]!;
+      if (!state.sidewalk.includes(b) || (needFree && (b.carried || b === player?.carrying))) list.splice(i, 1);
+    }
+  }
+
   update(dt: number, working: boolean): void {
     this.cooldown -= dt; this.storeCool -= dt;
     const { state } = this.env.ctx;
-    const player = this.env.ctx.services.player;
-    // caixa sumiu ou o jogador a pegou
-    if (this.box && (this.job === 'toBox' || this.job === 'lift') && (!state.sidewalk.includes(this.box) || (this.box.carried && player?.carrying === this.box))) {
-      this.box = null; this.job = 'idle'; this.cooldown = 1; this.stop();
+    if (this.job !== 'idle') {
+      this.prune(this.plan, true); this.prune(this.stack, false); this.prune(this.junk, false);
+      if ((this.job === 'toBox' || this.job === 'lift') && this.plan.length === 0) {
+        // alvo sumiu (jogador pegou): segue com o que já está nas mãos ou volta ao posto
+        this.stop();
+        if (this.stack.length > 0) this.nextShelf(); else if (this.junk.length > 0) this.finishTrip(); else { this.job = 'idle'; this.cooldown = 1; this.person.setCarryBox(false); this.setPose('normal'); }
+      }
     }
-    if (this.box && !state.sidewalk.includes(this.box) && this.job !== 'idle') { this.box = null; this.person.setCarryBox(false); this.setPose('normal'); this.job = 'idle'; }
     switch (this.job) {
       case 'idle':
         this.setPose('normal');
@@ -131,11 +169,12 @@ export class Stocker extends Staff {
       case 'lift':
         this.timer -= dt;
         if (this.timer <= 0) {
-          const b = this.box!;
+          const b = this.plan.shift()!;
           b.carried = true;
+          this.stack.push(b);
           this.person.setCarryBox(true); this.setPose('carry');
           this.env.sfx('box', this.x); this.env.changed('sidewalk');
-          this.chooseShelf(b);
+          if (this.plan.length > 0) { this.job = 'toBox'; this.walkToBox(this.plan[0]!); } else this.nextShelf();
         }
         break;
       case 'toShelf':
@@ -156,12 +195,13 @@ export class Stocker extends Staff {
       case 'toss':
         this.timer -= dt;
         if (this.timer <= 0) {
-          const idx = this.sidewalkIdx();
-          if (idx >= 0) {
-            safe('discardBox', () => api.discardBox(state, idx), undefined);
-            this.env.sfx('trash', this.x); this.env.changed('sidewalk');
+          for (const b of this.junk) {
+            const idx = state.sidewalk.indexOf(b);
+            if (idx >= 0) safe('discardBox', () => api.discardBox(state, idx), undefined);
           }
-          this.box = null; this.person.setCarryBox(false); this.setPose('normal');
+          if (this.junk.length > 0) { this.env.sfx('trash', this.x); this.env.changed('sidewalk'); }
+          this.junk.length = 0;
+          this.person.setCarryBox(false); this.setPose('normal');
           this.job = 'idle'; this.cooldown = 0.4;
         }
         break;
@@ -171,14 +211,18 @@ export class Stocker extends Staff {
       case 'takeStorage':
         this.timer -= dt;
         if (this.timer <= 0) {
-          const before = state.sidewalk.length;
-          safe('takeFromStorage', () => api.takeFromStorage(state, this.storePid, true), 0);
-          const nb = state.sidewalk.length > before ? state.sidewalk[state.sidewalk.length - 1] : undefined;
-          if (nb) {
-            nb.carried = true; this.box = nb;
+          for (const pid of this.storePids) {
+            if (shelfRoom(this.env, pid) <= 0) continue;
+            const before = state.sidewalk.length;
+            safe('takeFromStorage', () => api.takeFromStorage(state, pid, true), 0);
+            const nb = state.sidewalk.length > before ? state.sidewalk[state.sidewalk.length - 1] : undefined;
+            if (nb) { nb.carried = true; this.stack.push(nb); }
+          }
+          this.storePids.length = 0;
+          if (this.stack.length > 0) {
             this.person.setCarryBox(true); this.setPose('carry');
             this.env.sfx('box', this.x); this.env.changed('sidewalk');
-            this.chooseShelf(nb);
+            this.nextShelf();
           } else { this.job = 'idle'; this.cooldown = 3; this.storeCool = 10; this.setPose('normal'); }
         }
         break;
@@ -186,32 +230,51 @@ export class Stocker extends Staff {
     this.step(dt);
   }
 
-  private chooseShelf(b: Box): void {
-    const f = furnitureFor(this.env, b.productId, this.x, this.z);
-    const acc = f ? this.env.world().furnitureAccess(f.id) : null;
-    if (!f || !acc) { this.drop(); return; }
-    this.furnId = f.id;
-    this.moveTo(acc.x, acc.z);
-    this.job = 'toShelf';
+  /** Vai à prateleira da próxima caixa nas mãos; sem mais caixas, encerra a viagem. */
+  private nextShelf(): void {
+    while (this.stack.length > 0) {
+      const b = this.stack[0]!;
+      const f = furnitureFor(this.env, b.productId, this.x, this.z);
+      const acc = f ? this.env.world().furnitureAccess(f.id) : null;
+      if (f && acc && shelfRoom(this.env, b.productId) > 0) {
+        this.furnId = f.id;
+        this.moveTo(acc.x, acc.z);
+        this.job = 'toShelf';
+        return;
+      }
+      this.stack.shift();
+      this.release(b);
+    }
+    this.finishTrip();
+  }
+
+  /** Fim da viagem: vazias para a lixeira (uma vez) ou volta ao posto. */
+  private finishTrip(): void {
+    if (this.junk.length > 0) {
+      const t = this.env.world().trashBin();
+      this.moveTo(t.x, t.z);
+      this.job = 'toTrash';
+      return;
+    }
+    this.person.setCarryBox(false); this.setPose('normal');
+    this.job = 'idle'; this.cooldown = 0.5;
   }
 
   private placeUnitsNow(): void {
-    const b = this.box;
+    const b = this.stack[0];
     const { state } = this.env.ctx;
-    if (!b) { this.job = 'idle'; return; }
-    const idx = this.sidewalkIdx();
-    if (idx < 0) { this.box = null; this.person.setCarryBox(false); this.job = 'idle'; return; }
+    if (!b) { this.nextShelf(); return; }
+    const idx = state.sidewalk.indexOf(b);
+    if (idx < 0) { this.stack.shift(); this.nextShelf(); return; }
     const room = shelfRoom(this.env, b.productId);
     const n = Math.min(b.units, Math.max(0, room));
     if (n > 0) {
       safe('placeUnits', () => api.placeUnits(state, idx, n), 0);
       this.env.sfx('box', this.x); this.env.changed('shelf');
     }
-    if (b.units <= 0) {
-      const t = this.env.world().trashBin();
-      this.moveTo(t.x, t.z);
-      this.job = 'toTrash';
-    } else this.drop();
+    this.stack.shift();
+    if (b.units <= 0) this.junk.push(b); else this.release(b);
+    this.nextShelf();
   }
 }
 

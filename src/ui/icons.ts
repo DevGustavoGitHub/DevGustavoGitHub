@@ -31,6 +31,7 @@ const P: Record<string, string> = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.600 5.600L7 7M17 17l1.400 1.400M18.400 5.600L17 7M7 17l-1.400 1.400"/>',
   clock: '<circle cx="12" cy="12" r="8.500"/><path d="M12 7v5l3 2"/>',
   warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4.500M12 17.300v.2"/>',
+  bank: '<path d="M3.500 9.500L12 4l8.500 5.500z"/><path d="M6 11v6M10 11v6M14 11v6M18 11v6M4 20h16"/>',
   play: '<path d="M8 5.500v13l11-6.500z"/>',
 };
 export type IconName = keyof typeof P;

@@ -27,9 +27,10 @@ Uso as mecânicas como loop de gameplay. Nome, arte, sons e textos do jogo de re
 
 ## 3. Progressão
 
-- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `130·(n−1)^1,8` XP acumulado (n=2: 130, n=5: 1.585, n=10: 6.900, n=20: 26.500).
-- **Licenças** (nível mínimo / custo): Mercearia 1 / grátis · Bebidas 3 / R$ 1.500 · Laticínios 5 / R$ 4.000 · Padaria 7 / R$ 8.000 · Limpeza 9 / R$ 12.000 · Congelados 11 / R$ 20.000.
-- **Móveis, expansão, depósito, funcionários e personalização:** implementados em `src/sim/furniture.ts`, `api.ts` e `tuning.ts` (tabelas abaixo).
+- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `130·(n−1)^1,8 · (1 + 0,05·max(0, n−15))` XP acumulado: igual à curva original até o nível 15 (n=5: 1.585, n=10: 6.900, n=15: 15.000) e mais íngreme depois (n=20: 32.600, n=25: 59.500, n=30: 97.600), para o nível ~30 chegar por volta do dia 95 com o bot.
+- **Licenças** (nível mínimo / custo): Mercearia 1 / grátis · Bebidas 3 / R$ 1.500 · Laticínios 5 / R$ 4.000 · Padaria 7 / R$ 8.000 · Limpeza 9 / R$ 12.000 · Congelados 11 / R$ 20.000 · **Hortifrúti 13 / R$ 25.000 · Higiene e Beleza 16 / R$ 35.000 · Açougue e Frios 20 / R$ 55.000 · Eletrônicos e Utilidades 25 / R$ 90.000**.
+- **Móveis, expansão, depósito, funcionários, melhorias e personalização:** implementados em `src/sim/furniture.ts`, `api.ts` e `tuning.ts` (tabelas abaixo).
+- **Marcos de desbloqueio** (nenhuma lacuna maior que 3 níveis até o 28; `tests/phase2.test.ts` valida): 3 depósito/bebidas/geladeira/caixa · 4 expansão 1 · 5 laticínios/repositor · 6 carrinho de carga · 7 padaria · 8 expansão 2 · 9 limpeza · 10 freezer · 11 congelados · 13 hortifrúti/expansão 3 · 16 higiene · 19 expansão 4 · 20 açougue e frios · 24 expansão 5 · 25 eletrônicos · 26 estátua · 29 expansão 6.
 
 ## 4. Números do jogo (balanceamento v1, bot `src/sim/bot.ts`, validado em `tests/balance.test.ts`)
 
@@ -39,24 +40,31 @@ Todos os números ficam em `src/sim/tuning.ts` (+ `furniture.ts`, `catalog.ts`, 
 
 | Móvel | Custo | Nível | Slots | Categorias | Footprint |
 |---|---|---|---|---|---|
-| Prateleira | 350 | 1 | 2 | mercearia, limpeza, padaria | 2×1 |
-| Geladeira | 900 | 3 | 3 | bebidas, laticínios | 2×1 |
+| Prateleira | 350 | 1 | 2 | mercearia, limpeza, padaria, hortifrúti, higiene, eletrônicos | 2×1 |
+| Geladeira | 900 | 3 | 3 | bebidas, laticínios, hortifrúti, açougue e frios | 2×1 |
 | Freezer | 1.800 | 10 | 3 | congelados | 2×1 |
 | Caixa registradora | 1.200 | 3 | – | – | 2×2 |
 | Estante do depósito | 600 | 3 | 8 caixas | – | 2×1 |
-| Decoração | 80 | 1 | – | – | 1×1 |
+| Decoração | 80 (base) | 1 | – | – | 1×1 |
 
-Venda de móvel devolve 50%. Início: 1 caixa em (8,6) + 4 prateleiras em z=2 (arroz, feijão, macarrão, café) = 16/24/32/20 unidades de capacidade. Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta.
+**Decoração** (`decorCatalog()`; o id vai como 5º argumento de `buyFurniture`, vira `Furniture.variant`): planta R$ 80 (nív. 1) · faixa R$ 80 (1) · cartaz R$ 100 (5) · tapete R$ 150 (6) · luminária R$ 120 (4) · árvore R$ 200 (8) · fonte R$ 600 (18) · estátua R$ 1.200 (26). O world reconhece `plant|tree|banner|lamp`; as demais caem no visual padrão até o world desenhá-las.
+
+Venda de móvel devolve 50% (do preço da variante, no caso de decoração). Início: 1 caixa em (8,6) + 4 prateleiras em z=2 (arroz, feijão, macarrão, café) = 16/24/32/20 unidades de capacidade. Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta (móveis que já estavam inalcançáveis antes da compra não bloqueiam compras novas). Como a porta muda de lugar a cada expansão, `buyExpansion` realoca para o ponto válido mais próximo qualquer móvel que caia na nova antessala/passagem (`relocateBlocking`).
 
 ### 4.2 Loja
 
 | Item | Valor |
 |---|---|
 | Dinheiro inicial / aluguel | R$ 5.000 / R$ 120 por dia (+R$ 50 por expansão) |
-| Expansão 1 / 2 / 3 / 4 | R$ 4.500 (nív. 4) / R$ 16.000 (nív. 8) / R$ 35.000 (nív. 13) / R$ 70.000 (nív. 19) — salão 12×10 → 16×12 → 20×14 → 24×16 → 28×18 |
+| Expansão 1 / 2 / 3 / 4 / 5 / 6 | R$ 4.500 (nív. 4) / R$ 16.000 (nív. 8) / R$ 35.000 (nív. 13) / R$ 70.000 (nív. 19) / R$ 140.000 (nív. 24) / R$ 260.000 (nív. 29) — salão 12×10 → 16×12 → 20×14 → 24×16 → 28×18 → 32×20 → 36×22 (`core/layout.MAX_EXPANSION = 6`) |
 | Depósito | R$ 4.000 (nív. 3); 6 caixas base + 8 por estante |
 | Calçada | máx. 48 caixas |
 | Personalização | renomear grátis (≤24 letras); cada cor alterada R$ 10 |
+| Empréstimo | limite = R$ 1.000 + R$ 1.200 × nível (nív. 1: R$ 2.200; nív. 30: R$ 37.000); juros de 0,4% do saldo por dia (múltiplo de R$ 0,05, arredondado para cima), cobrados em `closeDay` e somados a `fixed`/`netProfit` (campo `DayReport.interest`) |
+| Falência | `isBankrupt`: caixa < 0 e rombo > crédito disponível + 50% do custo do estoque. `restartAfterBankruptcy`: mantém nível/XP/licenças/melhorias/decoração/nome/histórico; zera dívida, estoque, funcionários, expansões, depósito e volta ao layout inicial; caixa R$ 3.000 |
+| Carrinho de carga (dolly) | R$ 6.000, nível 6; `carryCapacity` 1 → 3 caixas |
+| Pedido automático | `setAutoOrder(produto, {minUnits, boxes})`: `runAutoOrders` compra `boxes` caixas quando prateleira+depósito+calçada < `minUnits`, só com dinheiro (tudo ou nada) e calçada com espaço; `buyMissing(fillRatio)` enche as prateleiras com caixas inteiras, comprando o que o caixa permitir (mais populares primeiro) |
+| Histórico | `state.history` guarda 30 `DayReport`; `state.stats` guarda unidades/receita/lucro por produto dos últimos 30 dias (`topProducts(state, dias)`). Save com 45+ dias de bot ≈ 30 KB |
 | Sujeira | máx. 12 manchas; > 3 manchas tiram 0,06 de satisfação por mancha (máx. 0,5) |
 
 ### 4.3 Funcionários (nível 1→5; custo para chegar ao nível / nível do jogador / salário diário / segundos por ação)
@@ -81,29 +89,41 @@ Capacidade de checkout/dia = 45 (jogador) + `40·(1+0,25·(nível_caixa−1))` (
 
 | Preço vs. mercado | Lucro/dia | Atendidos/dia | Perdidos/dia | Reputação | Nível no dia 30 |
 |---|---|---|---|---|---|
-| ×0,8 | R$ 469 | 67 | 2 | 4,41 | 17 |
-| ×0,9 | R$ 1.020 | 67 | 2 | 4,05 | 17 |
-| ×1,0 | R$ 1.377 | 64 | 2 | 4,31 | 17 |
-| **×1,1** | **R$ 1.412** | 57 | 3 | 4,38 | 15 |
-| ×1,15 | R$ 1.191 | 50 | 4 | 4,22 | 13 |
-| ×1,2 | R$ 859 | 40 | 5 | 3,52 | 11 |
-| ×1,3 | R$ 387 | 23 | 9 | 2,34 | 7 |
+| ×0,8 | R$ 460 | 67 | 2 | 4,42 | 16 |
+| ×0,9 | R$ 1.007 | 68 | 1 | 4,43 | 17 |
+| ×1,0 | R$ 1.314 | 63 | 2 | 4,32 | 16 |
+| **×1,1** | **R$ 1.313** | 56 | 3 | 4,42 | 15 |
+| ×1,15 | R$ 1.124 | 49 | 4 | 4,22 | 13 |
+| ×1,2 | R$ 807 | 40 | 5 | 3,47 | 11 |
+| ×1,3 | R$ 355 | 23 | 9 | 2,34 | 7 |
 | ×1,6 | −R$ 67 | 2 | 15 | 1,79 | 2 |
 
 Leitura: o ótimo fica entre mercado e +10% (volume compensa a margem); +15% ainda rende ~85%; +30% rende ~27%; +60% quebra a loja (prejuízo e reputação no chão). Preço abaixo do mercado perde margem sem ganhar volume proporcional (checkout e prateleira limitam).
 
-Linha do tempo do bot (semente 11; as outras ficam ±1 dia): nível 2 no fim do dia 1; licença de bebidas no dia 4 (nível 3 no dia 3); expansão 1 no dia 10; caixa contratado ~dia 11; laticínios ~dia 14; expansão 2 ~dia 26; expansão 3 ~dia 48; expansão 4 ~dia 70.
+Linha do tempo do bot (semente 11; as outras ficam ±3 dias): nível 2 no fim do dia 1; bebidas no dia 4; expansão 1 no dia ~10; caixa contratado ~dia 15; depósito logo após laticínios; expansão 2 ~dia 26; repositor ~dia 20-30; carrinho de carga ~dia 35-40; expansão 3 ~dia 55; hortifrúti ~dia 60; higiene ~dia 70; açougue e frios ~dia 85; expansão 4 ~dia 95; nível 30 por volta do dia 95; eletrônicos ~dia 110. O bot usa depósito (repõe a prateleira do depósito antes de comprar e abastece 2 caixas quando o atacado está < 0,9), repositor e carrinho de carga.
 
 | Dia | Nível | Chegadas | Atendidos | Lucro/dia |
 |---|---|---|---|---|
 | 1 | 2 | 23 | 21 | R$ 471 |
 | 10 | 5 | 47 | 42 | R$ 978 |
-| 20 | 10 | 68 | 63 | R$ 1.462 |
-| 30 | 14 | 87 | 84 | R$ 2.277 |
-| 60 | 28 | 191 | 179 | R$ 4.707 |
-| 80 | 38 | 216 | 206 | R$ 6.876 |
+| 30 | 14 | 77 | 75 | R$ 1.905 |
+| 50 | 20 | 132 | 127 | R$ 3.295 |
+| 70 | 25 | 166 | 162 | R$ 4.134 |
+| 90 | 29 | 183 | 174 | R$ 5.118 |
+| 120 | 35 | 207 | 191 | R$ 6.225 |
 
-O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30). Depois do dia ~70 não há mais o que comprar (caixa acumula): conteúdo de fim de jogo é trabalho futuro. Limitações do modelo: o bot não usa depósito/repositor/faxineiro (estes poupam tempo do jogador, não mudam regra de venda).
+O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30 conta). Depois do dia ~120 ainda restam as expansões 5 e 6 (R$ 400 mil somados) e a licença de eletrônicos como metas; `tests/balance.test.ts` valida 120 dias (nível 30 entre os dias 75 e 120, sempre há algo a comprar até lá, estado válido). Limitação do modelo: repositor/faxineiro poupam tempo do jogador, não mudam a regra de venda.
+
+### 4.6 Catálogo de produtos (custo atacado / markup / caixa / unid. por slot / popularidade)
+
+Existentes: arroz 22,00 · feijão 6,00 · macarrão 3,50 · café 13,00 (mercearia) · refrigerante 5,50 · água 1,80 (bebidas) · leite 4,00 · queijo 11,00 (laticínios) · pão 3,00 (padaria) · detergente 1,80 (limpeza) · sorvete 14,00 (congelados). Todos têm `color` e `shape` (`box|bottle|can|bag|tray|jar`).
+
+| Categoria | Produtos (id: atacado R$ × markup, caixa, slot, pop.) |
+|---|---|
+| Hortifrúti (prateleira ou geladeira) | banana 4,50×1,7 (10/12/5) · tomate 5,00×1,7 (10/10/4) · batata 4,00×1,6 (12/12/4) · alface 2,00×1,9 (12/12/3) · maca 7,00×1,6 (10/10/3) |
+| Higiene e Beleza (prateleira) | sabonete 2,50×1,8 (24/20/4) · papelhig 12,00×1,5 (8/8/5) · cremedental 3,50×1,7 (24/16/4) · shampoo 9,00×1,6 (12/10/3) · desodorante 8,00×1,7 (12/10/3) |
+| Açougue e Frios (geladeira) | carne 18,00×1,4 (8/8/4) · frango 13,00×1,45 (8/8/4) · linguica 11,00×1,5 (10/10/3) · presunto 9,00×1,5 (10/10/4) · mortadela 5,00×1,7 (12/12/3) |
+| Eletrônicos e Utilidades (prateleira) | pilha 9,00×1,8 (20/16/3) · lampada 7,00×1,8 (20/16/3) · fone 35,00×1,6 (8/6/2) · carregador 45,00×1,6 (8/6/2) · ventilador 120,00×1,35 (2/4/1) |
 
 ## 5. Arquitetura
 

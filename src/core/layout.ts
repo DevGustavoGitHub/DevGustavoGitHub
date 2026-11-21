@@ -10,9 +10,12 @@ export const WALL_HEIGHT = 3;
 
 export interface Bounds { width: number; depth: number }
 
+/** Nº máximo de expansões do salão (0..6): 12x10 → 36x22. */
+export const MAX_EXPANSION = 6;
+
 /** Dimensões do salão de vendas por nível de expansão (0 = inicial). Sempre inteiros. */
 export function storeBounds(expansion: number): Bounds {
-  const e = Math.max(0, Math.min(expansion, 4));
+  const e = Math.max(0, Math.min(expansion, MAX_EXPANSION));
   return { width: 12 + 4 * e, depth: 10 + 2 * e };
 }
 /** Sala de estoque (storage room) fica ATRÁS do salão: z de -STORAGE_DEPTH a 0, mesma largura. */

@@ -3,7 +3,9 @@ import * as api from '../sim/api';
 import type { Lane, CheckoutManager } from './checkout';
 import { Agent } from './agent';
 import { footprint, furnitureFor, maybeDirt } from './helpers';
-import { MAX_BASKET_ITEMS, Person, randomCustomerSpec } from './model';
+import { PRODUCTS } from '../sim/catalog';
+import { sellPrice, marketAverage } from '../sim/market';
+import { type CustomerKind, MAX_BASKET_ITEMS, Person, type PersonSpec, pickKind, randomCustomerSpec } from './model';
 import { type Env, clamp, safe } from './shared';
 
 export type CState =
@@ -35,19 +37,53 @@ export class Customer extends Agent {
   private warned = false;
   private baseSpeed: number;
 
-  constructor(env: Env, private mgr: CheckoutManager, person: Person, readonly age: 'adult' | 'kid' | 'elder') {
+  /** Cancelamentos do minigame de checkout (máx. 3, depois desiste). */
+  cancels = 0;
+  readonly age: 'adult' | 'kid' | 'elder';
+  private announced = false;
+
+  constructor(env: Env, private mgr: CheckoutManager, person: Person, spec: PersonSpec, readonly kind: CustomerKind = 'normal') {
     super(env, person);
+    const age = spec.age;
+    this.age = age;
     const r = env.ctx.rand;
-    this.list = safe('makeShoppingList', () => api.makeShoppingList(env.ctx.state, r), []).map((i) => ({ ...i }));
-    this.patience = (40 + r() * 20) * (age === 'elder' ? 1.2 : 1);
-    this.baseSpeed = (age === 'kid' ? 1.35 : age === 'elder' ? 0.85 : 1.15 + r() * 0.35);
+    this.list = this.buildList(r);
+    this.patience = (40 + r() * 20) * (age === 'elder' ? 1.2 : 1) * (kind === 'kid' ? 0.8 : kind === 'bulk' ? 1.25 : 1);
+    this.baseSpeed = (age === 'kid' ? 1.6 : age === 'elder' ? 0.85 : 1.15 + r() * 0.35);
     this.maxSpeed = this.baseSpeed;
     this.arriveR = 0.18;
   }
 
-  static spawn(env: Env, mgr: CheckoutManager): Customer {
-    const spec = randomCustomerSpec(env.ctx.rand, Math.floor(env.ctx.rand() * 1000));
-    const c = new Customer(env, mgr, new Person(spec), spec.age);
+  /** Lista de compras conforme o tipo: bulk = o dobro de itens e quantidades maiores; kid = doces/pão (1-2 itens). */
+  private buildList(r: () => number): Item[] {
+    const { state } = this.env.ctx;
+    const base = (): Item[] => safe('makeShoppingList', () => api.makeShoppingList(state, r), []).map((i) => ({ ...i }));
+    if (this.kind === 'bulk') {
+      const out = base();
+      for (const it of base()) { const e = out.find((o) => o.productId === it.productId); if (!e) out.push(it); }
+      for (const it of out) it.qty = Math.max(it.qty, 1) + 1 + Math.floor(r() * 3);
+      return out;
+    }
+    if (this.kind === 'kid') {
+      const treats = PRODUCTS.filter((p) => (state.slots[p.id] ?? 0) > 0 && state.licenses.includes(p.category)
+        && (p.category === 'padaria' || /doce|bala|choco|biscoit|bolo|sorvete|suco|refri|pao/i.test(p.id)));
+      const pool = treats.length > 0 ? treats : PRODUCTS.filter((p) => (state.slots[p.id] ?? 0) > 0 && state.licenses.includes(p.category));
+      const n = Math.min(pool.length, 1 + Math.floor(r() * 2));
+      const out: Item[] = [];
+      for (let i = 0; i < n; i++) {
+        const k = Math.floor(r() * pool.length);
+        const p = pool.splice(k, 1)[0]!;
+        out.push({ productId: p.id, qty: 1 + Math.floor(r() * 2) });
+      }
+      return out;
+    }
+    return base();
+  }
+
+  static spawn(env: Env, mgr: CheckoutManager, forced?: CustomerKind): Customer {
+    const kind = forced ?? pickKind(env.ctx.rand);
+    const spec = randomCustomerSpec(env.ctx.rand, Math.floor(env.ctx.rand() * 1000), kind);
+    const c = new Customer(env, mgr, new Person(spec), spec, kind);
     const sp = env.world().spawnPoint();
     const d = env.world().door();
     c.place(sp.x + (env.ctx.rand() - 0.5) * 1.5, sp.z, Math.atan2(d.x - sp.x, d.z - sp.z));
@@ -63,7 +99,7 @@ export class Customer extends Agent {
     this.totalT += dt;
     this.stepState(dt);
     this.step(dt);
-    if (this.walked > 9) { this.walked = 0; maybeDirt(this.env, this.x, this.z, 0.05); }
+    if (this.walked > 9) { this.walked = 0; maybeDirt(this.env, this.x, this.z, this.kind === 'kid' ? 0.2 : 0.05); }
   }
 
   private waiting(): boolean {
@@ -82,7 +118,7 @@ export class Customer extends Agent {
         }
         break;
       case 'enter2':
-        if (this.arrived) { this.state = 'basketPick'; this.timer = 0.5; this.setPose('basket'); this.person.setBasket(true); this.person.setBasketItems([]); }
+        if (this.arrived) { this.announce(); this.state = 'basketPick'; this.timer = 0.5; this.setPose('basket'); this.person.setBasket(true); this.person.setBasketItems([]); }
         break;
       case 'basketPick':
         this.timer -= dt;
@@ -96,7 +132,7 @@ export class Customer extends Agent {
           const f = this.env.ctx.state.furniture.find((x) => x.id === this.furnId);
           if (f) { const fp = footprint(f); this.faceTowards(f.x + fp.w / 2, f.z + fp.d / 2); }
           this.state = 'browse';
-          this.timer = (0.6 + this.env.ctx.rand() * 0.9) * (this.age === 'elder' ? 1.4 : 1);
+          this.timer = (0.6 + this.env.ctx.rand() * 0.9) * (this.age === 'elder' ? 1.4 : this.kind === 'kid' ? 0.55 : 1);
         }
         break;
       case 'browse':
@@ -138,6 +174,23 @@ export class Customer extends Agent {
     if (this.totalT > 200 && (st === 'pickNext' || st === 'walkShelf' || st === 'browse' || st === 'react')) this.toCheckout();
   }
 
+  private announce(): void {
+    if (this.announced) return;
+    this.announced = true;
+    if (this.kind === 'bulk') this.env.say(this, 'bulk', 2.4);
+    else if (this.kind === 'picky') this.env.say(this, 'picky', 2.4);
+    else if (this.kind === 'kid') this.env.say(this, 'kid', 2.4);
+  }
+
+  /** O minigame foi cancelado: feedback, menos paciência; desiste após 3 cancelamentos. */
+  onCheckoutCancel(): void {
+    this.cancels++;
+    this.patience = Math.max(12, this.patience * 0.85);
+    this.waited += 4;
+    if (this.cancels >= 3) { this.mgr.remove(this.lane!, this); this.giveUp('cancelamentos'); return; }
+    this.env.say(this, this.cancels === 1 ? 'oops' : 'angry', 2.2);
+  }
+
   private pickNext(): void {
     // escolhe o próximo item cujo móvel esteja mais perto; descarta os sem móvel
     let bi = -1, bd = Infinity, bf = null as ReturnType<typeof furnitureFor>;
@@ -163,14 +216,17 @@ export class Customer extends Agent {
     if (!e) { this.state = 'pickNext'; return; }
     const { state, rand, bus } = this.env.ctx;
     const ap = safe('acceptsPrice', () => api.acceptsPrice(state, e.productId, rand), { ok: true, ratio: 1 });
-    if (!ap.ok) {
-      this.complaints++;
-      this.env.say(this, 'caro', 1.8);
-      bus.emit('customerComplaint', { customerId: this.id, productId: e.productId, ratio: ap.ratio });
+    const picky = this.kind === 'picky';
+    // exigente: rejeita qualquer preço acima de ~1,1x o mercado (limite exato, sem sorteio)
+    const ratio = picky ? safe('ratio', () => sellPrice(state, e.productId) / marketAverage(state, e.productId), ap.ratio) : ap.ratio;
+    if (picky ? (ratio > 1.1 || !ap.ok) : !ap.ok) {
+      this.complaints += picky ? 2 : 1;
+      this.env.say(this, picky ? 'pickyno' : 'caro', picky ? 2.6 : 1.8);
+      bus.emit('customerComplaint', { customerId: this.id, productId: e.productId, ratio: picky ? Math.max(ratio, ap.ratio) * 1.15 : ap.ratio });
       this.entry = null; this.state = 'react'; this.timer = 1.4;
       return;
     }
-    if (this.units >= MAX_BASKET_ITEMS * 3) { this.entry = null; this.state = 'react'; this.timer = 0.2; return; }
+    if (this.units >= MAX_BASKET_ITEMS * (this.kind === 'bulk' ? 6 : 3)) { this.entry = null; this.state = 'react'; this.timer = 0.2; return; }
     this.state = 'grab';
     this.timer = 0.55;
     this.setPose('grab');
@@ -193,7 +249,7 @@ export class Customer extends Agent {
     this.refreshBasket();
     this.env.sfx('pop', this.x);
     this.env.changed('shelf');
-    maybeDirt(this.env, this.x, this.z, 0.05);
+    maybeDirt(this.env, this.x, this.z, this.kind === 'kid' ? 0.3 : 0.05);
     this.setPose('basket');
     this.state = 'react'; this.timer = 0.25;
   }
@@ -297,10 +353,13 @@ export class Customer extends Agent {
   finishSale(speed: number, mistakes: number): void {
     const frac = this.waited / this.patience;
     let sat = 5 - mistakes - (frac > 0.75 ? 1.5 : frac > 0.5 ? 1 : frac > 0.25 ? 0.5 : 0) - this.complaints * 0.5 - this.outOfStock * 0.5;
+    if (this.kind === 'picky') sat -= 0.5;
     sat = clamp(Math.round(sat), 1, 5);
     const { state } = this.env.ctx;
     const items = this.items.map((i) => ({ productId: i.productId, qty: i.qty }));
-    const res = safe('completeSale', () => api.completeSale(state, items, speed, sat), null);
+    // compra grande: atendimento rápido rende gorjeta maior (a sim calcula a gorjeta a partir de speed)
+    const sp = this.kind === 'bulk' ? (speed >= 0.6 ? Math.min(1, speed * 1.3) : speed * 0.85) : speed;
+    const res = safe('completeSale', () => api.completeSale(state, items, sp, sat), null);
     this.recorded = true;
     this.env.changed('money');
     this.env.say(this, sat >= 4 ? (res && res.tip > 0 ? 'coin' : 'obrigado') : sat >= 3 ? 'happy' : 'neutral', 2.2);

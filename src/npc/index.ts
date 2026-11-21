@@ -12,8 +12,9 @@ import { Agent } from './agent';
 import { disposeBubbles } from './bubbles';
 import { CheckoutManager } from './checkout';
 import { Customer } from './customer';
+import { productById } from '../sim/catalog';
 import { createFallbackWorld } from './fallbackWorld';
-import { disposeModels } from './model';
+import { type CustomerKind, disposeModels, pickKind } from './model';
 import { type AgentLike, type BubbleKey, type Env, clamp, safe } from './shared';
 import { Cashier, Janitor, Staff, Stocker, type StaffRole } from './staff';
 
@@ -55,7 +56,51 @@ export default function create(): GameModule {
   let emptyEmitted = false;
   let syncT = 0;
   let timeScale = 1;
-  const stats = { spawned: 0, sold: 0, gaveUp: 0, left: 0 };
+  const stats = { spawned: 0, sold: 0, gaveUp: 0, left: 0, kinds: { normal: 0, bulk: 0, picky: 0, kid: 0 } as Record<CustomerKind, number>, autoOrders: 0 };
+  let lastAutoHour = -1;
+  let autoBroken = false;
+  /** Gancho de teste: substitui api.runAutoOrders (útil enquanto a sim não implementa). */
+  let autoImpl: ((s: typeof ctx.state) => { productId: string; boxes: number; cost: number }[]) | null = null;
+
+  const shortName = (id: string): string => {
+    const n = safe('productById', () => productById(id).name, id);
+    return n.replace(/\s+[\d(].*$/, '');
+  };
+
+  /** Pedido automático (sim.runAutoOrders): toast resumindo, sfx buy e stateChanged 'sidewalk'. */
+  function runAuto(): { productId: string; boxes: number; cost: number }[] {
+    if (autoBroken && !autoImpl) return [];
+    let res: { productId: string; boxes: number; cost: number }[] = [];
+    try {
+      res = (autoImpl ?? api.runAutoOrders)(ctx.state);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.startsWith('NOT_IMPLEMENTED')) autoBroken = true; // não insiste enquanto a sim não existe
+      else console.warn('[npc] runAutoOrders:', msg);
+      return [];
+    }
+    if (!res || res.length === 0) return [];
+    const parts = res.map((r) => `${r.boxes} cx ${shortName(r.productId)}`);
+    stats.autoOrders += res.length;
+    ctx.bus.emit('toast', { text: `Pedido automático: ${parts.join(', ')}`, kind: 'info' });
+    ctx.bus.emit('sfx', { name: 'buy' });
+    ctx.bus.emit('stateChanged', { what: 'sidewalk' });
+    return res;
+  }
+
+  /** Dispara na abertura e a cada hora cheia de jogo enquanto aberta. */
+  function autoTick(): void {
+    if (ctx.clock.phase !== 'open') return;
+    const hour = Math.floor(ctx.clock.minute / 60);
+    if (hour === lastAutoHour) return;
+    lastAutoHour = hour;
+    runAuto();
+  }
+
+  const onAttendClick = (e: Event): void => {
+    const t = e.target as Element | null;
+    if (t && t.closest && t.closest('.attend-btn')) mgr.retryCheckout();
+  };
 
   const env: Env = {
     get ctx() { return ctx; },
@@ -84,10 +129,12 @@ export default function create(): GameModule {
 
   const maxCustomers = (): number => Math.min(14, 10 + ctx.state.expansion, 16 - staff.length);
 
-  function spawnCustomer(): boolean {
+  function spawnCustomer(kind?: CustomerKind): boolean {
     if (customers.length >= maxCustomers()) return false;
-    customers.push(Customer.spawn(env, mgr));
+    const c = Customer.spawn(env, mgr, kind);
+    customers.push(c);
     stats.spawned++;
+    stats.kinds[c.kind]++;
     return true;
   }
 
@@ -136,6 +183,7 @@ export default function create(): GameModule {
   function tick(h: number): void {
     const phase = ctx.clock.phase;
     if (phase === 'open' && schedDay !== ctx.state.day) buildSchedule();
+    if (phase === 'open') autoTick();
     if (phase === 'open') {
       while (schedIdx < sched.length && ctx.clock.minute >= sched[schedIdx]!) {
         if (!spawnCustomer()) break;
@@ -168,18 +216,32 @@ export default function create(): GameModule {
       for (const b of ctx.state.sidewalk) if (b.carried && ctx.services.player?.carrying !== b) b.carried = false;
       mgr = new CheckoutManager(env, () => { stats.sold++; });
       ctx.services.npc = { customersInStore: () => customers.length };
-      unsub.push(ctx.bus.on('storeOpened', () => { emptyEmitted = false; if (schedDay !== ctx.state.day) buildSchedule(); }));
+      unsub.push(ctx.bus.on('storeOpened', () => {
+        emptyEmitted = false;
+        if (schedDay !== ctx.state.day) buildSchedule();
+        lastAutoHour = Math.floor(ctx.clock.minute / 60);
+        runAuto();
+      }));
+      document.addEventListener('click', onAttendClick, true);
       unsub.push(ctx.bus.on('dayStarted', () => {
         for (const cu of customers) { cu.abort(); cu.remove(); }
+        lastAutoHour = -1;
         customers.length = 0; schedDay = -1; sched = []; emptyEmitted = false;
       }));
       unsub.push(ctx.bus.on('checkoutResult', (r) => { if (r) mgr.onResult(r); }));
       syncStaff(true);
       (window as unknown as { __npc: unknown }).__npc = {
-        spawnNow: (n = 1) => { let k = 0; for (let i = 0; i < n; i++) if (spawnCustomer()) k++; return k; },
+        spawnNow: (n = 1, kind?: CustomerKind) => { let k = 0; for (let i = 0; i < n; i++) if (spawnCustomer(kind)) k++; return k; },
+        /** Amostra a distribuição de tipos sorteados (não cria clientes). */
+        sampleKinds: (n = 1000) => { const o = { normal: 0, bulk: 0, picky: 0, kid: 0 } as Record<CustomerKind, number>; for (let i = 0; i < n; i++) o[pickKind(ctx.rand)]++; return o; },
+        runAutoOrders: () => runAuto(),
+        setAutoImpl: (f: typeof autoImpl) => { autoImpl = f; autoBroken = false; },
+        retryCheckout: () => mgr.retryCheckout(),
+        /** Estado interno de um cliente para testes. */
+        customerInfo: (id: number) => { const c = customers.find((x) => x.id === id); return c ? { kind: c.kind, state: c.state, patience: c.patience, waited: c.waited, cancels: c.cancels, units: c.units, items: c.items.map((i) => ({ ...i })) } : null; },
         get timeScale() { return timeScale; },
         set timeScale(v: number) { timeScale = clamp(v, 0.1, 20); },
-        customers: () => customers.map((x) => ({ id: x.id, state: x.state, items: x.items.length, bubble: x.bubble.active, x: +x.x.toFixed(1), z: +x.z.toFixed(1) })),
+        customers: () => customers.map((x) => ({ id: x.id, kind: x.kind, state: x.state, items: x.items.length, bubble: x.bubble.active, x: +x.x.toFixed(1), z: +x.z.toFixed(1) })),
         staff: () => staff.map((s) => ({ role: s.role, x: +s.x.toFixed(1), z: +s.z.toFixed(1), job: (s as { job?: string }).job ?? '' })),
         stats,
         lanes: () => mgr.lanes.map((l) => ({ id: l.furnitureId, line: l.line.length, staffed: l.staffed })),
@@ -199,6 +261,7 @@ export default function create(): GameModule {
     dispose() {
       for (const u of unsub) u();
       unsub.length = 0;
+      document.removeEventListener('click', onAttendClick, true);
       for (const cu of customers) cu.remove();
       for (const s of staff) s.remove();
       customers.length = 0; staff.length = 0;

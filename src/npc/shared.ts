@@ -31,7 +31,7 @@ export function safe<T>(label: string, fn: () => T, fallback: T): T {
   }
 }
 
-export type BubbleKey = 'caro' | 'obrigado' | 'semestoque' | 'demora' | 'oops' | 'happy' | 'angry' | 'neutral' | 'sad' | 'coin';
+export type BubbleKey = 'caro' | 'obrigado' | 'semestoque' | 'demora' | 'oops' | 'happy' | 'angry' | 'neutral' | 'sad' | 'coin' | 'bulk' | 'picky' | 'pickyno' | 'kid';
 
 /** Ambiente comum entregue aos agentes. */
 export interface Env {

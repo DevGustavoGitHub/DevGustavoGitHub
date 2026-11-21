@@ -16,6 +16,8 @@ const writeJson = (k: string, v: unknown): void => { try { localStorage.setItem(
 
 export class Report {
   private el: HTMLElement | null = null;
+  /** Chamado depois de "Próximo dia" (ex.: verificar falência). */
+  afterNext: (() => void) | null = null;
   constructor(private kit: UiKit, private layer: HTMLElement) {}
   get isOpen(): boolean { return this.el !== null; }
 
@@ -119,5 +121,6 @@ export class Report {
     this.el = null;
     this.kit.modalClose('report');
     this.kit.toast(`Dia ${ctx.state.day} começou. Prepare a loja e abra quando quiser.`, 'info');
+    this.afterNext?.();
   }
 }

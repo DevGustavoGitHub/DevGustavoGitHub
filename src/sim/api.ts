@@ -8,19 +8,19 @@ import { STORAGE_DEPTH, type FurnitureType } from '../core/layout';
 import { PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay } from './demand';
 import {
-  addXp, buyBoxes, checkoutCapacity, dailyWages, endDay, type DayReport,
+  addXp, buyBoxes, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
 } from './economy';
 import {
-  canPlace as canPlaceImpl, footprintOf, furnitureById, furnitureCatalog as catalogImpl, isDisplay, reconcile,
+  canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay, reconcile,
   specOf, storageCapacity as storageCapacityImpl, storageUsed as storageUsedImpl, productCapacity as productCapacityImpl,
 } from './furniture';
 import { marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
 import { makeRng } from './rng';
-import type { Decor, Furniture, StoreState } from './state';
+import { emptyLedger, initialFurniture, newGame, type AutoOrderRule, type Decor, type Furniture, type StoreState } from './state';
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
-  DECOR_CHANGE_COST, DIRT, EMPLOYEE_TABLE, EXPANSIONS, MAX_EMPLOYEE_LEVEL, RENT_PER_EXPANSION, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES,
+  BANKRUPTCY, BASE_CARRY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS, MAX_EMPLOYEE_LEVEL, RENT_PER_EXPANSION, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES,
   STORAGE, STORE_NAME_MAX,
 } from './tuning';
 
@@ -30,6 +30,9 @@ export type { DayReport };
 /** `slots`: shelf/fridge/freezer = slots de produto (× slotCapacity do produto); rack = nº de caixas no depósito. */
 export interface FurnitureSpec { type: FurnitureType; name: string; cost: Cents; minLevel: number; slots: number; /** categorias aceitas (vazio = qualquer/nenhuma) */ categories: string[] }
 export function furnitureCatalog(): FurnitureSpec[] { return catalogImpl(); }
+/** Itens de decoração (id = variante passada como 5º argumento de buyFurniture). Preço/nível próprios; `furnitureCatalog()` traz o preço-base. */
+export interface DecorItem { id: string; name: string; cost: Cents; minLevel: number }
+export function decorCatalog(): DecorItem[] { return DECOR_ITEMS.map((d) => ({ ...d })); }
 /** Footprint considerando rotação. Valida limites do salão (storeBounds), colisões, porta e passagem mínima. */
 export function canPlace(state: StoreState, type: FurnitureType, x: number, z: number, rot: 0 | 90 | 180 | 270, ignoreId?: number): boolean {
   return canPlaceImpl(state, type, x, z, rot, ignoreId);
@@ -46,11 +49,14 @@ function checkAssign(state: StoreState, type: FurnitureType, productId: string):
 
 export function buyFurniture(state: StoreState, type: FurnitureType, x: number, z: number, rot: 0 | 90 | 180 | 270, productId?: string): Furniture {
   const spec = specOf(type);
-  if (state.level < spec.minLevel) throw new Error(`Requer nível ${spec.minLevel}`);
-  if (state.money < spec.cost) throw new Error('Dinheiro insuficiente');
+  const decorItem = type === 'decor' && productId !== undefined ? DECOR_ITEMS.find((d) => d.id === productId) : undefined;
+  const minLevel = Math.max(spec.minLevel, decorItem?.minLevel ?? 0);
+  const cost = furnitureCost(type, type === 'decor' ? productId : undefined);
+  if (state.level < minLevel) throw new Error(`Requer nível ${minLevel}`);
+  if (state.money < cost) throw new Error('Dinheiro insuficiente');
   if (!canPlaceImpl(state, type, x, z, rot)) throw new Error('Posição inválida');
   if (productId !== undefined && isDisplay(type)) checkAssign(state, type, productId);
-  state.money -= spec.cost;
+  state.money -= cost;
   const f: Furniture = { id: state.nextFurnitureId++, type, x, z, rot };
   if (productId !== undefined) {
     if (isDisplay(type)) f.productId = productId;
@@ -81,7 +87,7 @@ export function sellFurniture(state: StoreState, id: number): Cents {
     state.furniture.splice(idx, 0, f);
     throw new Error('Esvazie o depósito antes de vender a estante');
   }
-  const refund = Math.round(specOf(f.type).cost * SELL_REFUND);
+  const refund = Math.round(furnitureCost(f.type, f.variant) * SELL_REFUND);
   state.money += refund;
   reconcile(state);
   return refund;
@@ -115,6 +121,7 @@ export function buyExpansion(state: StoreState): void {
   state.money -= e.cost;
   state.expansion++;
   state.rent += RENT_PER_EXPANSION;
+  relocateBlocking(state); // a porta muda de lugar: tira móveis da nova antessala/passagem
 }
 export function storageCost(): { cost: Cents; minLevel: number } { return { cost: STORAGE.cost, minLevel: STORAGE.minLevel }; }
 export function unlockStorage(state: StoreState): void {
@@ -325,9 +332,12 @@ export function completeSale(state: StoreState, items: { productId: string; qty:
     productById(it.productId);
   }
   for (const it of items) {
-    total += sellPrice(state, it.productId) * it.qty;
+    const rev = sellPrice(state, it.productId) * it.qty;
     const basis = state.costBasis[it.productId];
-    cogs += (basis && basis.avg > 0 ? basis.avg : wholesale(state, it.productId)) * it.qty;
+    const cost = (basis && basis.avg > 0 ? basis.avg : wholesale(state, it.productId)) * it.qty;
+    total += rev;
+    cogs += cost;
+    recordProductStat(state, it.productId, it.qty, rev, cost);
     if (basis) basis.units = Math.max(0, basis.units - it.qty);
     units += it.qty;
   }
@@ -391,38 +401,168 @@ export { checkoutCapacity, footprintOf, STORAGE_DEPTH };
  * StoreState ganha (o sim cria defaults + migração em deserialize): loan, autoOrders, upgrades, history.
  * ===================================================================== */
 
-const notImpl = (n: string): never => { throw new Error(`NOT_IMPLEMENTED: ${n}`); };
-
 /* ---------- Empréstimo e falência ---------- */
 export interface LoanInfo { owed: Cents; maxLoan: Cents; available: Cents; dailyInterest: Cents }
+const maxLoanFor = (state: StoreState): Cents => LOAN.base + LOAN.perLevel * Math.max(1, state.level);
 /** Empréstimo com juros baixos diários; limite cresce com o nível. Falha se acima do limite. */
-export function loanInfo(state: StoreState): LoanInfo { return notImpl('loanInfo'); }
-export function takeLoan(state: StoreState, amount: Cents): void { notImpl('takeLoan'); }
-export function repayLoan(state: StoreState, amount: Cents): void { notImpl('repayLoan'); }
+export function loanInfo(state: StoreState): LoanInfo {
+  const maxLoan = maxLoanFor(state);
+  return { owed: state.loan, maxLoan, available: Math.max(0, maxLoan - state.loan), dailyInterest: loanInterest(state.loan) };
+}
+const validAmount = (n: number): boolean => Number.isInteger(n) && n > 0;
+export function takeLoan(state: StoreState, amount: Cents): void {
+  if (!validAmount(amount)) throw new Error('Valor inválido');
+  if (amount > loanInfo(state).available) throw new Error('Acima do limite de crédito');
+  state.loan += amount;
+  state.money += amount;
+}
+/** Paga parte ou toda a dívida (até o saldo devedor). */
+export function repayLoan(state: StoreState, amount: Cents): void {
+  if (!validAmount(amount)) throw new Error('Valor inválido');
+  if (amount > state.loan) throw new Error('Valor maior que a dívida');
+  if (amount > state.money) throw new Error('Dinheiro insuficiente');
+  state.loan -= amount;
+  state.money -= amount;
+}
+/** Valor de liquidação do estoque (custo médio × `stockRecovery`) — o que daria para levantar vendendo tudo. */
+function stockLiquidation(state: StoreState): Cents {
+  let v = 0;
+  for (const p of PRODUCTS) {
+    const n = unitsOwned(state, p.id);
+    if (n <= 0) continue;
+    const b = state.costBasis[p.id];
+    v += n * (b && b.avg > 0 ? b.avg : wholesale(state, p.id));
+  }
+  return Math.floor(v * BANKRUPTCY.stockRecovery);
+}
 /** Falido = caixa abaixo do piso permitido, sem empréstimo disponível e sem estoque que cubra a dívida. */
-export function isBankrupt(state: StoreState): boolean { return notImpl('isBankrupt'); }
-/** Recomeço guiado: mantém nível/licenças/decoração, zera dívida, devolve capital inicial reduzido; não apaga o save. */
-export function restartAfterBankruptcy(state: StoreState): void { notImpl('restartAfterBankruptcy'); }
+export function isBankrupt(state: StoreState): boolean {
+  if (state.money >= BANKRUPTCY.floor) return false;
+  const shortfall = BANKRUPTCY.floor - state.money;
+  return shortfall > loanInfo(state).available + stockLiquidation(state);
+}
+/**
+ * Recomeço guiado: mantém nível, XP, licenças, melhorias, decoração, nome e histórico; zera dívida, estoque,
+ * funcionários, expansões, depósito e layout (volta ao inicial) e devolve capital reduzido (BANKRUPTCY.restartMoney).
+ */
+export function restartAfterBankruptcy(state: StoreState): void {
+  const base = newGame(state.seed);
+  state.money = BANKRUPTCY.restartMoney;
+  state.loan = 0;
+  state.autoOrders = {};
+  state.prices = {};
+  state.shelf = {};
+  state.storage = {};
+  state.sidewalk = [];
+  state.costBasis = {};
+  state.employees = { cashier: 0, stocker: 0, janitor: 0 };
+  state.expansion = 0;
+  state.rent = base.rent;
+  state.storageUnlocked = false;
+  state.furniture = initialFurniture();
+  state.nextFurnitureId = 6;
+  state.dirt = [];
+  state.ledger = emptyLedger();
+  state.reputation = Math.max(state.reputation, 3);
+  state.bankruptcies++;
+  reconcile(state);
+}
 
 /* ---------- Pedidos automáticos e atalhos ---------- */
-export interface AutoOrderRule { minUnits: number; boxes: number }
+export type { AutoOrderRule };
 /** null remove a regra. Só produtos licenciados. */
-export function setAutoOrder(state: StoreState, productId: string, rule: AutoOrderRule | null): void { notImpl('setAutoOrder'); }
-export function autoOrderRules(state: StoreState): Record<string, AutoOrderRule> { return notImpl('autoOrderRules'); }
+export function setAutoOrder(state: StoreState, productId: string, rule: AutoOrderRule | null): void {
+  const p = productById(productId);
+  if (rule === null) { delete state.autoOrders[productId]; return; }
+  if (!state.licenses.includes(p.category)) throw new Error('Categoria não licenciada');
+  if (!Number.isInteger(rule.minUnits) || rule.minUnits < 0 || rule.minUnits > 9999) throw new Error('Estoque mínimo inválido');
+  if (!Number.isInteger(rule.boxes) || rule.boxes < 1 || rule.boxes > 24) throw new Error('Quantidade de caixas inválida (1 a 24)');
+  state.autoOrders[productId] = { minUnits: rule.minUnits, boxes: rule.boxes };
+}
+export function autoOrderRules(state: StoreState): Record<string, AutoOrderRule> {
+  const out: Record<string, AutoOrderRule> = {};
+  for (const [k, v] of Object.entries(state.autoOrders)) out[k] = { ...v };
+  return out;
+}
 /** Para cada regra com (shelf+storage+sidewalk) < minUnits, compra `boxes` caixas se houver dinheiro. Retorna o que comprou. */
-export function runAutoOrders(state: StoreState): { productId: string; boxes: number; cost: Cents }[] { return notImpl('runAutoOrders'); }
+export function runAutoOrders(state: StoreState): { productId: string; boxes: number; cost: Cents }[] {
+  const out: { productId: string; boxes: number; cost: Cents }[] = [];
+  for (const p of PRODUCTS) {
+    const rule = state.autoOrders[p.id];
+    if (!rule || !state.licenses.includes(p.category)) continue;
+    if (unitsOwned(state, p.id) >= rule.minUnits) continue;
+    try {
+      out.push({ productId: p.id, boxes: rule.boxes, cost: orderBoxes(state, p.id, rule.boxes) });
+    } catch {
+      /* sem dinheiro ou calçada cheia: pula esta regra */
+    }
+  }
+  return out;
+}
 /** Compra o necessário para encher cada prateleira até `fillRatio` (default 1). Só licenciados com móvel atribuído. */
-export function buyMissing(state: StoreState, fillRatio?: number): { cost: Cents; boxes: number } { return notImpl('buyMissing'); }
+export function buyMissing(state: StoreState, fillRatio = 1): { cost: Cents; boxes: number } {
+  const ratio = clamp(Number.isFinite(fillRatio) ? fillRatio : 1, 0, 1);
+  let cost = 0;
+  let boxes = 0;
+  for (const p of [...PRODUCTS].sort((a, b) => b.popularity - a.popularity)) {
+    if (!state.licenses.includes(p.category)) continue;
+    const cap = productCapacityImpl(state, p.id);
+    if (cap === 0) continue;
+    let need = Math.ceil((cap * ratio - unitsOwned(state, p.id)) / p.boxSize);
+    const room = SIDEWALK_MAX_BOXES - state.sidewalk.length;
+    need = Math.min(need, room);
+    while (need > 0) {
+      try {
+        cost += orderBoxes(state, p.id, need);
+        boxes += need;
+        break;
+      } catch {
+        need--; // sem dinheiro para tudo: compra o que der
+      }
+    }
+  }
+  return { cost, boxes };
+}
 
 /* ---------- Melhorias (upgrades) ---------- */
 export type UpgradeId = 'dolly';
 export interface UpgradeSpec { id: UpgradeId; name: string; description: string; cost: Cents; minLevel: number; owned: boolean }
-export function upgradeCatalog(state: StoreState): UpgradeSpec[] { return notImpl('upgradeCatalog'); }
-export function buyUpgrade(state: StoreState, id: UpgradeId): void { notImpl('buyUpgrade'); }
+export function upgradeCatalog(state: StoreState): UpgradeSpec[] {
+  return (Object.keys(UPGRADES) as UpgradeId[]).map((id) => ({
+    id, name: UPGRADES[id].name, description: UPGRADES[id].description, cost: UPGRADES[id].cost, minLevel: UPGRADES[id].minLevel,
+    owned: state.upgrades.includes(id),
+  }));
+}
+export function buyUpgrade(state: StoreState, id: UpgradeId): void {
+  const u = UPGRADES[id];
+  if (!u) throw new Error('Melhoria inexistente');
+  if (state.upgrades.includes(id)) throw new Error('Melhoria já adquirida');
+  if (state.level < u.minLevel) throw new Error(`Requer nível ${u.minLevel}`);
+  if (state.money < u.cost) throw new Error('Dinheiro insuficiente');
+  state.money -= u.cost;
+  state.upgrades.push(id);
+}
 /** Quantas caixas o jogador carrega ao mesmo tempo: 1 sem melhoria; 3 com dolly. */
-export function carryCapacity(state: StoreState): number { return notImpl('carryCapacity'); }
+export function carryCapacity(state: StoreState): number {
+  return state.upgrades.includes('dolly') ? UPGRADES.dolly.carry : BASE_CARRY;
+}
 
 /* ---------- Estatísticas ---------- */
 /** Últimos 30 relatórios de dia (closeDay acrescenta). */
-export function dayHistory(state: StoreState): DayReport[] { return notImpl('dayHistory'); }
-export function topProducts(state: StoreState, days?: number): { productId: string; units: number; revenue: Cents; profit: Cents }[] { return notImpl('topProducts'); }
+export function dayHistory(state: StoreState): DayReport[] { return state.history.map((r) => ({ ...r })); }
+/** Ranking por lucro dos últimos `days` dias (default 7; máx. 30): dias fechados + o dia em andamento. */
+export function topProducts(state: StoreState, days = 7): { productId: string; units: number; revenue: Cents; profit: Cents }[] {
+  const from = state.day - Math.max(1, Math.min(30, Math.round(days)));
+  const acc = new Map<string, { productId: string; units: number; revenue: Cents; profit: Cents }>();
+  for (const e of state.stats) {
+    if (e.day < from) continue;
+    for (const [productId, [units, revenue, profit]] of Object.entries(e.p)) {
+      const r = acc.get(productId) ?? { productId, units: 0, revenue: 0, profit: 0 };
+      r.units += units;
+      r.revenue += revenue;
+      r.profit += profit;
+      acc.set(productId, r);
+    }
+  }
+  return [...acc.values()].sort((a, b) => b.profit - a.profit || b.units - a.units);
+}

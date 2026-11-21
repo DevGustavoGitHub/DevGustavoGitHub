@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { newBot, playDay, playDays, type DayStats } from '../src/sim/bot';
-import { productCapacity, storageCapacity, storageUsed } from '../src/sim/api';
-import { PRODUCTS } from '../src/sim/catalog';
+import { employeeCost, expansionMinLevel, productCapacity, storageCapacity, storageUsed, upgradeCatalog } from '../src/sim/api';
+import { LICENSES, PRODUCTS } from '../src/sim/catalog';
 import { recomputeSlots } from '../src/sim/furniture';
 import { newGame, type StoreState } from '../src/sim/state';
 
@@ -119,5 +119,47 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
     const one = sum(playDays(newGame(11), 15, { invest: false, restocks: 1 }).map((d) => d.netProfit));
     const many = sum(playDays(newGame(11), 15, { invest: false, restocks: 5 }).map((d) => d.netProfit));
     expect(many).toBeGreaterThanOrEqual(one);
+  });
+});
+
+/** Ainda há algo a destravar/comprar (licença, expansão, funcionário, melhoria ou depósito)? */
+function somethingLeftToBuy(s: StoreState): boolean {
+  if (LICENSES.some((l) => !s.licenses.includes(l.id))) return true;
+  if (expansionMinLevel(s) !== null) return true;
+  if ((['cashier', 'stocker', 'janitor'] as const).some((r) => employeeCost(s, r) !== null)) return true;
+  if (upgradeCatalog(s).some((u) => !u.owned)) return true;
+  return !s.storageUnlocked;
+}
+
+describe('ritmo de fim de jogo (dias 1–120)', () => {
+  it('nível ~30 entre os dias 75 e 120, sempre há o que comprar até lá, estado válido e lucro limitado', { timeout: 90000 }, () => {
+    for (const seed of [3, 11]) {
+      const s = newGame(seed);
+      const bot = newBot();
+      let lvl30 = 0;
+      const profits: number[] = [];
+      for (let d = 1; d <= 120; d++) {
+        const r = playDay(s, bot);
+        profits.push(r.netProfit);
+        checkInvariants(s);
+        expect(s.loan).toBe(0);
+        expect(s.history.length).toBeLessThanOrEqual(30);
+        if (s.level < 30) expect(somethingLeftToBuy(s)).toBe(true);
+        if (!lvl30 && s.level >= 30) lvl30 = d;
+        expect(r.netProfit).toBeLessThan(1_500_000); // < R$ 15 mil/dia
+      }
+      expect(lvl30).toBeGreaterThanOrEqual(75);
+      expect(lvl30).toBeLessThanOrEqual(120);
+      expect(s.licenses.length).toBeGreaterThanOrEqual(LICENSES.length - 2);
+      expect(s.expansion).toBeGreaterThanOrEqual(4);
+      // o bot usa depósito, repositor e dolly
+      expect(s.storageUnlocked).toBe(true);
+      expect(s.employees.stocker).toBeGreaterThan(0);
+      expect(s.upgrades).toContain('dolly');
+      // produtos de fim de jogo realmente vendem: há exposição de categorias novas
+      expect(PRODUCTS.some((p) => ['hortifruti', 'higiene'].includes(p.category) && productCapacity(s, p.id) > 0)).toBe(true);
+      const avg = (a: number, b: number): number => profits.slice(a, b).reduce((x, y) => x + y, 0) / (b - a);
+      expect(avg(90, 120)).toBeGreaterThan(avg(40, 70));
+    }
   });
 });

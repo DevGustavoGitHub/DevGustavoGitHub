@@ -43,8 +43,8 @@ describe('layout inicial e capacidade', () => {
     const cat = furnitureCatalog();
     expect(cat.map((c) => c.type).sort()).toEqual(['counter', 'decor', 'freezer', 'fridge', 'rack', 'shelf']);
     for (const c of cat) { expect(c.cost).toBeGreaterThan(0); expect(Number.isInteger(c.cost)).toBe(true); }
-    expect(cat.find((c) => c.type === 'shelf')!.categories).toEqual(['mercearia', 'limpeza', 'padaria']);
-    expect(cat.find((c) => c.type === 'fridge')!.categories).toEqual(['bebidas', 'laticinios']);
+    expect(cat.find((c) => c.type === 'shelf')!.categories).toEqual(['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos']);
+    expect(cat.find((c) => c.type === 'fridge')!.categories).toEqual(['bebidas', 'laticinios', 'hortifruti', 'frios']);
     expect(cat.find((c) => c.type === 'freezer')!.categories).toEqual(['congelados']);
   });
 });
@@ -167,20 +167,22 @@ describe('comprar, atribuir e vender móveis', () => {
 });
 
 describe('expansão, depósito, funcionários, personalização', () => {
-  it('expansão: até 4, custo e nível crescentes, aluguel sobe', () => {
+  it('expansão: até 6, custo e nível crescentes, aluguel sobe', () => {
     const s = rich(30);
     const costs: number[] = [];
     const levels: number[] = [];
     const rent0 = s.rent;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       costs.push(expansionCost(s)!);
       levels.push(expansionMinLevel(s)!);
       buyExpansion(s);
     }
     expect(costs).toEqual([...costs].sort((a, b) => a - b));
-    expect(new Set(costs).size).toBe(4);
+    expect(new Set(costs).size).toBe(6);
     expect(levels).toEqual([...levels].sort((a, b) => a - b));
-    expect(s.expansion).toBe(4);
+    expect(s.expansion).toBe(6);
+    expect(storeBounds(s.expansion)).toEqual({ width: 36, depth: 22 });
+    expect(storeBounds(99)).toEqual({ width: 36, depth: 22 });
     expect(s.rent).toBeGreaterThan(rent0);
     expect(expansionCost(s)).toBeNull();
     expect(expansionMinLevel(s)).toBeNull();

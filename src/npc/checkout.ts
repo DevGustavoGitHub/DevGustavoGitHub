@@ -23,6 +23,8 @@ export class Lane {
   pending: Customer | null = null;
   /** Bloqueia novo pedido ao jogador até ele sair do balcão (após cancelar). */
   blockedUntilLeave = false;
+  /** Jogador tocou em 'Atender' de novo depois de cancelar: libera novo checkoutRequest imediato. */
+  retry = false;
   blockedT = 0;
   readonly belt = new THREE.Group();
   private readonly beltItems: THREE.Mesh[] = [];
@@ -173,7 +175,7 @@ export class CheckoutManager {
         l.serving = front;
         front.state = 'serving';
         l.serveT = 0; l.scanned = 0;
-        l.serveDur = Math.max(1.2, safe('employeeSpeed', () => api.employeeSpeed('cashier', ctx.state.employees.cashier), 4));
+        l.serveDur = Math.max(1.2, safe('employeeSpeed', () => api.employeeSpeed('cashier', ctx.state.employees.cashier), 4)) * (front.kind === 'bulk' ? 1.6 : 1);
         front.method = ctx.rand() < 0.6 ? 'cash' : 'card';
         l.showBelt(front.items, Math.min(8, front.units));
       }
@@ -192,6 +194,8 @@ export class CheckoutManager {
       if (l.staffed) continue;
       const front = l.line[0];
       if (l.blockedUntilLeave && !this.playerAt(l)) l.blockedUntilLeave = false;
+      if (l.blockedUntilLeave && l.retry && !l.pending) { l.blockedUntilLeave = false; }
+      if (!front || front.state !== 'front') l.retry = false;
       if (!front || front.state !== 'front') continue;
       let d = 0;
       if (p) { const dx = p.position.x - l.operator.x, dz = p.position.z - l.operator.z; d = dx * dx + dz * dz; }
@@ -206,6 +210,7 @@ export class CheckoutManager {
       const total = safe('basketTotal', () => api.basketTotal(this.env.ctx.state, c.items), 0);
       const paid = c.method === 'cash' ? customerCashPayment(total, this.env.ctx.rand) : undefined;
       availLane.pending = c;
+      availLane.retry = false;
       c.requestedAt = c.waited;
       availLane.showBelt(c.items, Math.min(8, c.units));
       const payload: { customerId: number; items: { productId: string; qty: number }[]; total: number; method: 'cash' | 'card'; paid?: number } = {
@@ -228,11 +233,26 @@ export class CheckoutManager {
         c.finishSale(clamp(r.speed, 0, 1), Math.max(0, r.mistakes));
         this.onSale();
       } else {
+        // cancelar: o cliente reclama, perde paciência e fica esperando; novo toque em 'Atender' reabre
         l.blockedUntilLeave = true;
-        c.penalize(4); // cancelar custa paciência
+        l.retry = false;
+        l.hideBelt();
+        c.onCheckoutCancel();
+        if (c.state === 'front' || c.state === 'queue') this.env.ctx.bus.emit('toast', { text: 'Cliente esperando: toque em Atender para tentar de novo', kind: 'info' });
       }
       return;
     }
+  }
+
+  /** O jogador tocou em 'Atender' após cancelar: permite novo pedido na próxima varredura (<=0,2 s). */
+  retryCheckout(): boolean {
+    let any = false;
+    for (const l of this.lanes) {
+      if (l.staffed || l.pending || !l.blockedUntilLeave || l.line[0]?.state !== 'front') continue;
+      l.retry = true; any = true;
+    }
+    if (any) this.acc = 0.2;
+    return any;
   }
 
   /** Remove um cliente da fila (atendido, desistiu ou lane perdida). */

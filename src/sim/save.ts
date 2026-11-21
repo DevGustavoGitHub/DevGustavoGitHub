@@ -15,7 +15,8 @@ export const serialize = (s: StoreState): string => JSON.stringify(s);
  * Mescla sobre um jogo novo (saves antigos ganham campos novos) e migra:
  * - sem móveis (save anterior ao sistema de móveis) => layout inicial;
  * - state.slots sempre recalculado a partir dos móveis (fonte da verdade);
- * - levelAck ausente => nível atual (não dispara avisos antigos).
+ * - levelAck ausente => nível atual (não dispara avisos antigos);
+ * - Fase 2: loan/autoOrders/upgrades/history/stats/bankruptcies ausentes => defaults.
  */
 export function deserialize(raw: string): StoreState {
   const data = JSON.parse(raw) as Partial<StoreState>;
@@ -35,6 +36,13 @@ export function deserialize(raw: string): StoreState {
   }
   s.nextFurnitureId = Math.max(s.nextFurnitureId, ...s.furniture.map((f) => f.id + 1));
   if (data.levelAck === undefined) s.levelAck = s.level;
+  // Fase 2: saves antigos não têm estes campos (o spread já deu os defaults); sanea tipos inválidos.
+  if (!Number.isFinite(s.loan) || s.loan < 0) s.loan = 0;
+  if (typeof s.autoOrders !== 'object' || s.autoOrders === null || Array.isArray(s.autoOrders)) s.autoOrders = {};
+  if (!Array.isArray(s.upgrades)) s.upgrades = [];
+  if (!Array.isArray(s.history)) s.history = [];
+  if (!Array.isArray(s.stats)) s.stats = [];
+  if (!Number.isFinite(s.bankruptcies)) s.bankruptcies = 0;
   recomputeSlots(s);
   return s;
 }

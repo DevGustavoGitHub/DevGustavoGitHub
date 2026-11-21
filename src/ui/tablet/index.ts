@@ -10,8 +10,16 @@ import { expansionTab } from './expansion';
 import { staffTab } from './staff';
 import { decorTab } from './decor';
 import { financeTab } from './finance';
+import { autoTab } from './auto';
+import { upgradesTab } from './upgrades';
 
-export interface TabApi { refresh(): void; close(): void; goto(id: string): void }
+export interface TabApi {
+  refresh(): void;
+  close(): void;
+  goto(id: string): void;
+  /** Congela o re-render automático (ex.: enquanto um tooltip de gráfico está visível). Solta sozinho após alguns segundos. */
+  hold(v: boolean): void;
+}
 export interface TabDef {
   id: string;
   label: string;
@@ -27,7 +35,9 @@ const TABS: TabDef[] = [
   { id: 'licenses', label: 'Licenças', icon: 'badge', render: licensesTab },
   { id: 'furniture', label: 'Móveis', icon: 'sofa', render: furnitureTab },
   { id: 'expansion', label: 'Expansão', icon: 'expand', render: expansionTab },
+  { id: 'auto', label: 'Automático', icon: 'clock', render: autoTab },
   { id: 'staff', label: 'Equipe', icon: 'users', render: staffTab },
+  { id: 'upgrades', label: 'Melhorias', icon: 'star', render: upgradesTab },
   { id: 'decor', label: 'Decoração', icon: 'brush', render: decorTab },
   { id: 'finance', label: 'Finanças', icon: 'chart', live: true, render: financeTab },
 ];
@@ -41,9 +51,12 @@ export class Tablet {
   private liveT = 0;
   private api: TabApi;
   onOpen: (() => void) | null = null;
+  /** Retorna true para impedir a abertura (ex.: tela de falência). */
+  guard: (() => boolean) | null = null;
+  private heldUntil = 0;
 
   constructor(private kit: UiKit, private layer: HTMLElement) {
-    this.api = { refresh: () => this.refresh(), close: () => this.close(), goto: (id) => this.show(id) };
+    this.api = { refresh: () => this.refresh(), close: () => this.close(), goto: (id) => this.show(id), hold: (v) => { this.heldUntil = v ? performance.now() + 6000 : 0; } };
     kit.ctx.bus.on('stateChanged', () => this.refresh());
   }
 
@@ -52,6 +65,7 @@ export class Tablet {
   open(tab?: string): void {
     if (this.overlay) { if (tab) this.show(tab); return; }
     if (this.kit.isModalOpen()) return;
+    if (this.guard?.()) return;
     if (tab) this.current = tab;
     this.cash = h('span', { class: 'cash' });
     this.body = h('div', { class: 'tb-body' });
@@ -83,6 +97,7 @@ export class Tablet {
 
   show(id: string): void {
     this.current = id;
+    this.heldUntil = 0;
     for (const [k, b] of this.tabBtns) { b.classList.toggle('on', k === id); b.setAttribute('aria-selected', String(k === id)); }
     this.body.scrollTop = 0;
     this.refresh();
@@ -92,6 +107,7 @@ export class Tablet {
 
   refresh(): void {
     if (!this.overlay) return;
+    if (performance.now() < this.heldUntil) return;
     const def = TABS.find((t) => t.id === this.current);
     if (!def) return;
     // não destrói um campo de texto em edição

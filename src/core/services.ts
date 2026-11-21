@@ -27,6 +27,8 @@ export interface PlayerService {
   position: THREE.Vector3;
   /** Caixa na mão (a mesma referência que está em state.sidewalk com carried=true). */
   carrying: Box | null;
+  /** Fase 2: todas as caixas carregadas, da base ao topo (LIFO); `carrying` = topo. Até `api.carryCapacity`. */
+  carryingAll: Box[];
   /** true enquanto uma UI modal (tablet, checkout, relatório) está aberta — para travar o movimento. */
   inputLocked: boolean;
   /** furnitureId do balcão (caixa) junto do qual o jogador está; null se não está em nenhum. */

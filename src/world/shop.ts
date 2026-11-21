@@ -1,11 +1,14 @@
 /**
  * Casca da loja (piso, paredes com recorte, fachada com letreiro, porta de vidro, sala de estoque)
  * e o ambiente externo (céu, rua, calçada, prédios, árvores, postes, carros, nuvens, luz do dia).
+ * Toda geometria estática é fundida por material (Batch / paredes por face): poucas dezenas de draw calls no total.
  */
 import * as THREE from 'three';
 import { CLOSE_MIN, OPEN_MIN, type Decor } from '../sim/state';
 import { DOOR_WIDTH, SIDEWALK_DEPTH, STORAGE_DEPTH, WALL_HEIGHT, deliveryZone, trashBinPos, type Bounds } from '../core/layout';
-import { Tracker, bx, boxGeo, cylGeo, icoGeo, put, stdMat, scaleUV, makeCanvas, canvasTex, hex, hash01 } from './kit';
+import { Tracker, icoGeo, stdMat, scaleUV, makeCanvas, canvasTex, hex, hash01 } from './kit';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Batch, kindMaterial, meshesOf, type Spec } from './batch';
 
 /* ---------------- texturas compartilhadas (vivem até o fim) ---------------- */
 let floorTexture: THREE.CanvasTexture | null = null;
@@ -116,6 +119,37 @@ export interface WallFace {
   fade: number; never: boolean;
 }
 
+/** Peças de parede de uma face: cada caixa vira 6 quadriláteros distribuídos em 3 materiais (interno, externo, topo) numa geometria só. */
+class FacePieces {
+  private lists: THREE.BufferGeometry[][] = [[], [], []];
+  box(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, inIdx: number, outIdx: number): void {
+    const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0).toNonIndexed();
+    g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    const pos = g.getAttribute('position') as THREE.BufferAttribute, nor = g.getAttribute('normal') as THREE.BufferAttribute, uv = g.getAttribute('uv') as THREE.BufferAttribute;
+    for (let f = 0; f < 6; f++) {
+      const mi = f === inIdx ? 0 : f === outIdx ? 1 : 2;
+      const q = new THREE.BufferGeometry();
+      const sl = (a: THREE.BufferAttribute): THREE.BufferAttribute => new THREE.BufferAttribute((a.array as Float32Array).slice(f * 6 * a.itemSize, (f + 1) * 6 * a.itemSize), a.itemSize);
+      q.setAttribute('position', sl(pos)); q.setAttribute('normal', sl(nor)); q.setAttribute('uv', sl(uv));
+      this.lists[mi]!.push(q);
+    }
+    g.dispose();
+  }
+  build(): THREE.BufferGeometry {
+    const all = this.lists.flat();
+    const merged = mergeGeometries(all, false)!;
+    merged.clearGroups();
+    let start = 0;
+    this.lists.forEach((l, mi) => {
+      const count = l.reduce((a, q) => a + q.getAttribute('position').count, 0);
+      if (count) merged.addGroup(start, count, mi);
+      start += count;
+    });
+    all.forEach((q) => q.dispose());
+    return merged;
+  }
+}
+
 export class Shop {
   readonly group = new THREE.Group();
   readonly faces: WallFace[] = [];
@@ -138,6 +172,7 @@ export class Shop {
     const { width: W, depth: D } = b;
     const tr = this.tr;
     const g = this.group;
+    const sb = new Batch(); // estático fosco: rodapés, tapetes, faixa, ferragens, vidros
     // pisos
     const floorG = tr.geo(new THREE.PlaneGeometry(W, D)); floorG.rotateX(-Math.PI / 2); scaleUV(floorG, W / 2, D / 2);
     this.floorMat = tr.mat(new THREE.MeshStandardMaterial({ color: hex(decor.floorColor), map: floorTex(), roughness: 0.55 }));
@@ -146,115 +181,109 @@ export class Shop {
       const sg = tr.geo(new THREE.PlaneGeometry(W, STORAGE_DEPTH)); sg.rotateX(-Math.PI / 2); scaleUV(sg, W / 2, STORAGE_DEPTH / 2);
       const sm = tr.mat(new THREE.MeshStandardMaterial({ color: 0x9aa1a8, map: floorTex(), roughness: 0.8 }));
       const sf = new THREE.Mesh(sg, sm); sf.position.set(W / 2, 0.01, -STORAGE_DEPTH / 2); sf.receiveShadow = true; g.add(sf);
-      // faixa de corredor amarela
-      const lane = tr.mat(new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.7 }));
-      for (const z of [-0.12]) {
-        const l = new THREE.Mesh(tr.geo(new THREE.PlaneGeometry(W - 0.4, 0.12).rotateX(-Math.PI / 2)), lane); l.position.set(W / 2, 0.02, z); g.add(l);
-      }
+      sb.box(W - 0.4, 0.004, 0.12, ['matte', 0xf2c230], W / 2, 0.016, -0.12); // faixa de corredor amarela
     }
     // paredes
     const zBack = storage ? -STORAGE_DEPTH : 0;
     const wallH = WALL_HEIGHT;
-    const mkFace = (nx: number, nz: number, cx: number, cz: number, never = false): WallFace => {
+    const mkFace = (nx: number, nz: number, cx: number, cz: number, never = false): { f: WallFace; p: FacePieces } => {
       const inner = tr.mat(new THREE.MeshStandardMaterial({ color: hex(decor.wallColor), roughness: 0.9 }));
       const outer = tr.mat(new THREE.MeshStandardMaterial({ color: 0xe6d3b3, roughness: 0.9 }));
       const cap = tr.mat(new THREE.MeshStandardMaterial({ color: 0x4a4f5a, roughness: 0.8 }));
       this.innerMats.push(inner);
       const f: WallFace = { mats: [inner, outer, cap], nx, nz, cx, cz, fade: 1, never };
       this.faces.push(f);
-      return f;
+      return { f, p: new FacePieces() };
     };
-    const piece = (f: WallFace, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, inIdx: number, outIdx: number): void => {
-      const geo = tr.geo(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0));
-      const arr: THREE.Material[] = [f.mats[2]!, f.mats[2]!, f.mats[2]!, f.mats[2]!, f.mats[2]!, f.mats[2]!];
-      arr[inIdx] = f.mats[0]!; arr[outIdx] = f.mats[1]!;
-      const m = new THREE.Mesh(geo, arr);
-      m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    const finish = (fp: { f: WallFace; p: FacePieces }): void => {
+      const m = new THREE.Mesh(tr.geo(fp.p.build()), fp.f.mats);
       m.receiveShadow = true; m.castShadow = false;
       g.add(m);
     };
     const t = 0.2;
     const left = mkFace(-1, 0, 0, (zBack + D) / 2);
-    piece(left, -t, 0, 0, wallH, zBack - t, D + t, 0, 1);
+    left.p.box(-t, 0, 0, wallH, zBack - t, D + t, 0, 1); finish(left);
     const right = mkFace(1, 0, W, (zBack + D) / 2);
-    piece(right, W, W + t, 0, wallH, zBack - t, D + t, 1, 0);
+    right.p.box(W, W + t, 0, wallH, zBack - t, D + t, 1, 0); finish(right);
     if (!storage) {
       const back = mkFace(0, -1, W / 2, 0);
-      piece(back, -t, W + t, 0, wallH, -t, 0, 4, 5);
+      back.p.box(-t, W + t, 0, wallH, -t, 0, 4, 5); finish(back);
     } else {
       const back = mkFace(0, -1, W / 2, zBack);
-      piece(back, -t, W + t, 0, wallH, zBack - t, zBack, 4, 5);
+      back.p.box(-t, W + t, 0, wallH, zBack - t, zBack, 4, 5); finish(back);
       const div = mkFace(0, 0, W / 2, 0, true);
       const gx0 = W / 2 - DOOR_WIDTH / 2, gx1 = W / 2 + DOOR_WIDTH / 2;
-      piece(div, -t, gx0, 0, wallH, -t, 0, 4, 5);
-      piece(div, gx1, W + t, 0, wallH, -t, 0, 4, 5);
-      piece(div, gx0, gx1, 2.5, wallH, -t, 0, 4, 5);
+      div.p.box(-t, gx0, 0, wallH, -t, 0, 4, 5);
+      div.p.box(gx1, W + t, 0, wallH, -t, 0, 4, 5);
+      div.p.box(gx0, gx1, 2.5, wallH, -t, 0, 4, 5);
+      finish(div);
     }
-    this.buildFront(mkFace(0, 1, W / 2, D), W, D, piece, decor, name);
+    const front = mkFace(0, 1, W / 2, D);
+    this.buildFront(front.f, front.p, W, D, sb, decor, name);
+    finish(front);
     // rodapé interno
-    const skirt = stdMat(0x59606c, { rough: 0.8 });
-    bx(g, 0.04, 0.14, D, skirt, 0.02, 0.01, D / 2, { cast: false });
-    bx(g, 0.04, 0.14, D, skirt, W - 0.02, 0.01, D / 2, { cast: false });
-    bx(g, W, 0.14, 0.04, skirt, W / 2, 0.01, 0.02, { cast: false });
+    const skirt: Spec = ['matte', 0x59606c];
+    sb.box(0.04, 0.14, D, skirt, 0.02, 0.01, D / 2);
+    sb.box(0.04, 0.14, D, skirt, W - 0.02, 0.01, D / 2);
+    sb.box(W, 0.14, 0.04, skirt, W / 2, 0.01, 0.02);
     // tapetes da porta
-    const mat = stdMat(0x7a2e2e, { rough: 1 });
-    bx(g, 1.8, 0.02, 0.9, mat, W / 2, 0.01, D - 0.6, { cast: false });
-    bx(g, 1.8, 0.02, 0.9, stdMat(0x3b3f47, { rough: 1 }), W / 2, 0.02, D + 0.7, { cast: false });
+    sb.box(1.8, 0.02, 0.9, ['matte', 0x7a2e2e], W / 2, 0.01, D - 0.6);
+    sb.box(1.8, 0.02, 0.9, ['matte', 0x3b3f47], W / 2, 0.02, D + 0.7);
+    for (const m of meshesOf(sb.build(), g, { cast: false })) tr.geo(m.geometry);
     this.setDecor(decor, name);
   }
 
-  private buildFront(face: WallFace, W: number, D: number,
-    piece: (f: WallFace, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, i: number, o: number) => void,
-    decor: Decor, name: string): void {
+  private buildFront(face: WallFace, p: FacePieces, W: number, D: number, sb: Batch, decor: Decor, name: string): void {
     const tr = this.tr, g = this.group;
     const t = 0.2;
     const gx0 = W / 2 - DOOR_WIDTH / 2, gx1 = W / 2 + DOOR_WIDTH / 2;
     const z0 = D, z1 = D + t;
     // faixa baixa, faixa alta (cobre a porta) e platibanda
-    piece(face, -t, gx0, 0, 0.9, z0, z1, 5, 4);
-    piece(face, gx1, W + t, 0, 0.9, z0, z1, 5, 4);
-    piece(face, -t, W + t, 2.5, WALL_HEIGHT, z0, z1, 5, 4);
-    piece(face, -t, W + t, WALL_HEIGHT, WALL_HEIGHT + 1.15, z0, z1, 5, 4);
+    p.box(-t, gx0, 0, 0.9, z0, z1, 5, 4);
+    p.box(gx1, W + t, 0, 0.9, z0, z1, 5, 4);
+    p.box(-t, W + t, 2.5, WALL_HEIGHT, z0, z1, 5, 4);
+    p.box(-t, W + t, WALL_HEIGHT, WALL_HEIGHT + 1.15, z0, z1, 5, 4);
     // montantes e janelas de cada lado
-    const glass = stdMat(0xbfe3f5, { opacity: 0.22, rough: 0.05, metal: 0.1 });
+    const glass: Spec = ['glass', 0xbfe3f5];
     const side = (s: number, e: number, padL: number, padR: number): void => {
-      piece(face, s, s + padL, 0.9, 2.5, z0, z1, 5, 4);
-      piece(face, e - padR, e, 0.9, 2.5, z0, z1, 5, 4);
+      p.box(s, s + padL, 0.9, 2.5, z0, z1, 5, 4);
+      p.box(e - padR, e, 0.9, 2.5, z0, z1, 5, 4);
       const inner0 = s + padL, inner1 = e - padR;
       const n = Math.max(1, Math.round((inner1 - inner0) / 3.4));
       const pw = 0.3, ww = (inner1 - inner0 - (n - 1) * pw) / n;
       for (let i = 0; i < n; i++) {
         const x0 = inner0 + i * (ww + pw);
-        const gm = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(ww, 1.6, 0.04)), glass);
-        gm.position.set(x0 + ww / 2, 1.7, D + t / 2); g.add(gm);
-        if (i < n - 1) piece(face, x0 + ww, x0 + ww + pw, 0.9, 2.5, z0, z1, 5, 4);
+        sb.box(ww, 1.6, 0.04, glass, x0 + ww / 2, 0.9, D + t / 2);
+        if (i < n - 1) p.box(x0 + ww, x0 + ww + pw, 0.9, 2.5, z0, z1, 5, 4);
       }
     };
     side(-t, gx0, 0.6, 0.45);
     side(gx1, W + t, 0.45, 0.6);
-    // porta de vidro deslizante
-    const frame = stdMat(0x8f99a6, { rough: 0.35, metal: 0.6 });
+    // porta de vidro deslizante (cada folha: 1 malha de vidro + 1 de ferragem)
+    const frame: Spec = ['metal', 0x8f99a6];
     const mkDoor = (cx: number): THREE.Group => {
       const dg = new THREE.Group();
-      put(dg, tr.geo(new THREE.BoxGeometry(0.96, 2.3, 0.03)), glass, 0, 1.15, 0, { cast: false });
-      bx(dg, 0.96, 0.06, 0.06, frame, 0, 0, 0); bx(dg, 0.96, 0.06, 0.06, frame, 0, 2.28, 0);
-      bx(dg, 0.05, 2.3, 0.06, frame, -0.455, 0, 0); bx(dg, 0.05, 2.3, 0.06, frame, 0.455, 0, 0);
-      bx(dg, 0.03, 0.5, 0.05, frame, cx < W / 2 ? 0.4 : -0.4, 0.9, 0.04);
+      const db = new Batch();
+      db.box(0.96, 2.3, 0.03, glass, 0, 0, 0);
+      db.box(0.96, 0.06, 0.06, frame, 0, 0, 0); db.box(0.96, 0.06, 0.06, frame, 0, 2.28, 0);
+      db.box(0.05, 2.3, 0.06, frame, -0.455, 0, 0); db.box(0.05, 2.3, 0.06, frame, 0.455, 0, 0);
+      db.box(0.03, 0.5, 0.05, frame, cx < W / 2 ? 0.4 : -0.4, 0.9, 0.04);
+      for (const m of meshesOf(db.build(), dg, { cast: false })) tr.geo(m.geometry);
       dg.position.set(cx, 0, D + t + 0.03);
       g.add(dg);
       return dg;
     };
     this.doorBaseL = W / 2 - 0.49; this.doorBaseR = W / 2 + 0.49;
     this.doorL = mkDoor(this.doorBaseL); this.doorR = mkDoor(this.doorBaseR);
-    bx(g, DOOR_WIDTH, 0.1, 0.1, frame, W / 2, 2.4, D + t + 0.03);
-    // letreiro
+    sb.box(DOOR_WIDTH, 0.1, 0.1, frame, W / 2, 2.4, D + t + 0.03 - 0.05 + 0.05);
+    // letreiro: caixa escura (lote estático) + placa com a textura do nome
     const sw = Math.min(W - 1.6, 8.5), sh = 0.95;
     this.signCanvas = document.createElement('canvas'); this.signCanvas.width = 1024; this.signCanvas.height = Math.round(1024 * sh / sw);
     const tex = tr.tex(canvasTex(this.signCanvas));
     this.signMat = tr.mat(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.18 }));
-    const dark = tr.mat(new THREE.MeshStandardMaterial({ color: 0x2b2e35, roughness: 0.6 }));
-    const board = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(sw, sh, 0.12)), [dark, dark, dark, dark, this.signMat, dark]);
-    board.position.set(W / 2, WALL_HEIGHT + 0.58, D + t + 0.06); g.add(board);
+    sb.box(sw, sh, 0.12, ['matte', 0x2b2e35], W / 2, WALL_HEIGHT + 0.58 - sh / 2, D + t + 0.06);
+    const board = new THREE.Mesh(tr.geo(new THREE.PlaneGeometry(sw, sh)), this.signMat);
+    board.position.set(W / 2, WALL_HEIGHT + 0.58, D + t + 0.122); g.add(board);
     this.soft.push({ mat: this.signMat });
     // toldo listrado sobre a porta
     const aw = tr.mat(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
@@ -266,6 +295,7 @@ export class Shop {
     const ag = tr.geo(new THREE.BoxGeometry(3.2, 0.05, 1.1)); scaleUV(ag, 1, 1);
     const awning = new THREE.Mesh(ag, aw); awning.position.set(W / 2, 2.75, D + t + 0.55); awning.rotation.x = 0.28; awning.castShadow = true; g.add(awning);
     this.soft.push({ mat: aw });
+    void face;
   }
   private awningMat: THREE.MeshStandardMaterial | null = null;
   private awningCanvas: HTMLCanvasElement | null = null;
@@ -326,7 +356,6 @@ export class Shop {
   }
 
   private clear(): void {
-    this.group.traverse((o) => { if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose(); });
     while (this.group.children.length) this.group.remove(this.group.children[0]!);
     this.tr.disposeAll();
     this.faces.length = 0; this.innerMats.length = 0; this.soft.length = 0;
@@ -339,6 +368,22 @@ export class Shop {
 export const ROAD_LANE_Z = { near: 6.5, far: 9.5 }; // relativo a D + SIDEWALK_DEPTH - 3 ... ver Env
 export const ROAD_WIDTH = 8;
 
+const CAR_COLORS = [0xd94f4f, 0x3a7bd5, 0xf2c230, 0x58b368];
+/** Carro numa única malha fosca (cores por vértice). */
+function carGeometry(color: number): THREE.BufferGeometry {
+  const b = new Batch();
+  const body: Spec = ['matte', color], dark: Spec = ['matte', 0x273140], wheel: Spec = ['matte', 0x17191d];
+  b.box(3.8, 0.55, 1.7, body, 0, 0.3, 0);
+  b.box(1.9, 0.5, 1.5, dark, -0.2, 0.85, 0);
+  b.box(1.7, 0.04, 1.6, body, -0.2, 1.33, 0);
+  for (const x of [-1.2, 1.2]) for (const z of [-0.85, 0.85]) b.add(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 10), wheel, x, 0.36, z, { rx: Math.PI / 2 });
+  for (const z of [-0.55, 0.55]) {
+    b.box(0.06, 0.16, 0.3, ['matte', 0xfff3b0], 1.9, 0.5, z);
+    b.box(0.06, 0.14, 0.3, ['matte', 0xd62828], -1.9, 0.5, z);
+  }
+  return b.build().get('matte')!;
+}
+
 export class Env {
   readonly group = new THREE.Group();
   /** Tiles bloqueados por árvores/postes (ix,iz inteiros). */
@@ -349,11 +394,14 @@ export class Env {
   private sky: THREE.Mesh | null = null;
   private skyMat: THREE.ShaderMaterial;
   private lampMat = stdMat(0xfff1c2, { emissive: 0xffd36b, ei: 0.2 });
-  private cars: { g: THREE.Group; dir: number; speed: number }[] = [];
-  private clouds: THREE.Group[] = [];
+  private cars: { g: THREE.Object3D; dir: number; speed: number }[] = [];
+  private cloudMesh: THREE.InstancedMesh | null = null;
+  private clouds: { x: number; y: number; z: number; parts: { dx: number; dy: number; dz: number; r: number }[] }[] = [];
+  private cloudT = 0;
   private b: Bounds = { width: 12, depth: 10 };
   private cTop = new THREE.Color(); private cHor = new THREE.Color(); private tmp = new THREE.Color();
   private lastT = -1;
+  private dm = new THREE.Object3D();
 
   constructor(private scene: THREE.Scene) {
     this.skyMat = new THREE.ShaderMaterial({
@@ -369,6 +417,17 @@ export class Env {
     this.group.add(this.sun, this.sun.target, this.hemi);
   }
 
+  /** Muda a resolução do mapa de sombra (0 desliga a sombra do sol). */
+  setShadow(size: number): void {
+    const on = size > 0;
+    this.sun.castShadow = on;
+    if (on && this.sun.shadow.mapSize.x !== size) {
+      this.sun.shadow.mapSize.set(size, size);
+      this.sun.shadow.map?.dispose(); this.sun.shadow.map = null;
+    }
+    if (!on) { this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
+  }
+
   rebuild(b: Bounds): void {
     this.clearGeo();
     this.b = b;
@@ -376,6 +435,7 @@ export class Env {
     const tr = this.tr, g = this.group;
     this.blocked = [];
     const cx = W / 2;
+    const sb = new Batch(); // estático fosco que só recebe sombra
     // céu
     this.sky = new THREE.Mesh(tr.geo(new THREE.SphereGeometry(170, 24, 12)), this.skyMat);
     this.sky.position.set(cx, 0, D / 2); this.sky.renderOrder = -10; this.sky.frustumCulled = false; g.add(this.sky);
@@ -398,21 +458,16 @@ export class Env {
     const farZ0 = roadZ0 + ROAD_WIDTH;
     plane(xw, SIDEWALK_DEPTH, paver, xc, 0.02, farZ0 + SIDEWALK_DEPTH / 2, 1, 1);
     // meios-fios
-    const curb = stdMat(0xbfc3c9, { rough: 0.9 });
-    bx(g, xw, 0.1, 0.16, curb, xc, 0, roadZ0 + 0.02, { cast: false });
-    bx(g, xw, 0.1, 0.16, curb, xc, 0, farZ0 - 0.02, { cast: false });
+    const curb: Spec = ['matte', 0xbfc3c9];
+    sb.box(xw, 0.1, 0.16, curb, xc, 0, roadZ0 + 0.02);
+    sb.box(xw, 0.1, 0.16, curb, xc, 0, farZ0 - 0.02);
     // faixas: borda branca contínua, centro amarelo tracejado, zebra
-    const white = stdMat(0xf3f3ee, { rough: 0.8 }), yellow = stdMat(0xf2c230, { rough: 0.8 });
-    bx(g, xw, 0.01, 0.12, white, xc, 0.0, roadZ0 + 2, { cast: false });
-    bx(g, xw, 0.01, 0.12, white, xc, 0.0, farZ0 - 0.4, { cast: false });
+    const white: Spec = ['matte', 0xf3f3ee], yellow: Spec = ['matte', 0xf2c230];
+    sb.box(xw, 0.01, 0.12, white, xc, 0.0, roadZ0 + 2);
+    sb.box(xw, 0.01, 0.12, white, xc, 0.0, farZ0 - 0.4);
     const nd = Math.floor(xw / 3);
-    const dashes = new THREE.InstancedMesh(boxGeo(1.6, 0.01, 0.14), yellow, nd);
-    const dm = new THREE.Object3D();
-    for (let i = 0; i < nd; i++) { dm.position.set(X0 + 1.5 + i * 3, 0, roadZ0 + 5); dm.updateMatrix(); dashes.setMatrixAt(i, dm.matrix); }
-    dashes.receiveShadow = true; g.add(dashes);
-    const zebra = new THREE.InstancedMesh(boxGeo(3.2, 0.012, 0.5), white, 8);
-    for (let i = 0; i < 8; i++) { dm.position.set(-3.5, 0, roadZ0 + 0.5 + i); dm.updateMatrix(); zebra.setMatrixAt(i, dm.matrix); }
-    zebra.receiveShadow = true; g.add(zebra);
+    for (let i = 0; i < nd; i++) sb.box(1.6, 0.01, 0.14, yellow, X0 + 1.5 + i * 3, 0, roadZ0 + 5);
+    for (let i = 0; i < 8; i++) sb.box(3.2, 0.012, 0.5, white, -3.5, 0, roadZ0 + 0.5 + i);
     // área de entrega (pintada na calçada)
     const dz = deliveryZone(b);
     const dzc = makeCanvas(256, 128);
@@ -422,21 +477,25 @@ export class Env {
     const dzt = tr.tex(canvasTex(dzc.c));
     const dzm = tr.mat(new THREE.MeshBasicMaterial({ map: dzt, transparent: true, depthWrite: false, opacity: 0.9 }));
     plane(dz.w, dz.d, dzm, dz.x + dz.w / 2, 0.03, dz.z + dz.d / 2);
-    // prédios vizinhos (laterais, mesmo alinhamento da fachada), fundo e do outro lado da rua
+    // prédios vizinhos (laterais, mesmo alinhamento da fachada), fundo e do outro lado da rua.
+    // Corpos fundidos POR COR (material com janelas); detalhes (platibanda, vitrines, caixa d'água) no lote fosco.
     const pal = [0xe9c9a0, 0xcfe0c3, 0xd9c3e6, 0xf2d6a2, 0xb9d3e8, 0xf0b7a4, 0xd8d8c8, 0xc3dcd2];
+    const bodies = new Map<number, THREE.BufferGeometry[]>();
     const bld = (x0: number, x1: number, zFront: number, depth: number, h: number, ci: number, dirFront: 1 | -1, shop: boolean): void => {
       const w = x1 - x0;
-      const m = new THREE.Mesh(bldGeo(tr, w, h, depth), bldMat(pal[ci % pal.length]!));
-      m.position.set((x0 + x1) / 2, 0, zFront - dirFront * depth / 2);
-      m.receiveShadow = true; g.add(m);
-      bx(g, w + 0.3, 0.3, depth + 0.3, stdMat(0x7d838d, { rough: 0.9 }), m.position.x, h, m.position.z, { cast: false });
+      const color = pal[ci % pal.length]!;
+      const bg = bldGeo(tr, w, h, depth);
+      const px = (x0 + x1) / 2, pz = zFront - dirFront * depth / 2;
+      bg.translate(px, 0, pz);
+      let l = bodies.get(color);
+      if (!l) bodies.set(color, (l = []));
+      l.push(bg);
+      sb.box(w + 0.3, 0.3, depth + 0.3, ['matte', 0x7d838d], px, h, pz);
       if (shop) {
-        bx(g, w - 1.2, 2.9, 0.12, stdMat(0x35505f, { rough: 0.2, metal: 0.2 }), m.position.x, 0, zFront + dirFront * 0.03, { cast: false });
-        bx(g, w - 0.6, 0.45, 0.25, stdMat(pal[(ci + 3) % pal.length]! ^ 0x303030, { rough: 0.7 }), m.position.x, 3.0, zFront + dirFront * 0.1, { cast: false });
+        sb.box(w - 1.2, 2.9, 0.12, ['metal', 0x35505f], px, 0, zFront + dirFront * 0.03);
+        sb.box(w - 0.6, 0.45, 0.25, ['matte', pal[(ci + 3) % pal.length]! ^ 0x303030], px, 3.0, zFront + dirFront * 0.1);
       }
-      if (h > 9) {
-        put(g, cylGeo(0.9, 0.9, 1.4, 10), stdMat(0xa6764a, { rough: 0.9 }), m.position.x + w * 0.2, h + 0.3, m.position.z, { cast: false });
-      }
+      if (h > 9) sb.add(new THREE.CylinderGeometry(0.9, 0.9, 1.4, 10), ['matte', 0xa6764a], px + w * 0.2, h + 0.3 + 0.7, pz);
     };
     let xl = -0.2;
     for (let i = 0; i < 5; i++) { const w = 9 + Math.floor(hash01(i, 11) * 5); bld(xl - w, xl, D, D + 10, 6 + hash01(i, 12) * 6, i + 1, 1, true); xl -= w + 0.2; }
@@ -451,59 +510,63 @@ export class Env {
       bld(xf, xf + w, farZ0 + SIDEWALK_DEPTH + 0.5, 12, 7 + hash01(i, 42) * 12, i, -1, false);
       xf += w + 0.4;
     }
-    // árvores (instanciadas) e postes
-    const treeX = [-6.5, -2.2, W + 2.2, W + 6.5, W / 2 + 7.5, -11];
-    const trunk = new THREE.InstancedMesh(cylGeo(0.12, 0.17, 1.6, 6), stdMat(0x6d4a2c, { rough: 1 }), treeX.length);
-    const can1 = new THREE.InstancedMesh(icoGeo(1.2, 0), stdMat(0x4fa85a, { flat: true }), treeX.length);
-    const can2 = new THREE.InstancedMesh(icoGeo(0.85, 0), stdMat(0x66bb6a, { flat: true }), treeX.length);
-    const tz = D + 2.4;
-    treeX.forEach((x, i) => {
-      const s = 0.9 + hash01(i, 51) * 0.35;
-      dm.rotation.set(0, i, 0); dm.scale.set(s, s, s);
-      dm.position.set(x, 0.02, tz); dm.updateMatrix(); trunk.setMatrixAt(i, dm.matrix);
-      dm.position.set(x, 2.35 * s, tz); dm.updateMatrix(); can1.setMatrixAt(i, dm.matrix);
-      dm.position.set(x + 0.35 * s, 3.2 * s, tz + 0.15); dm.updateMatrix(); can2.setMatrixAt(i, dm.matrix);
-      this.blocked.push({ x: Math.floor(x), z: Math.floor(tz) });
-    });
-    dm.rotation.set(0, 0, 0); dm.scale.set(1, 1, 1);
-    for (const m of [trunk, can1, can2]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; g.add(m); }
-    const pole = stdMat(0x2f3540, { rough: 0.5, metal: 0.5 });
+    for (const [color, list] of bodies) {
+      const merged = tr.geo(mergeGeometries(list, false)!);
+      const m = new THREE.Mesh(merged, bldMat(color)); m.receiveShadow = true; g.add(m);
+      // as geometrias de entrada já foram copiadas para `merged`
+      list.forEach((q) => q.dispose());
+    }
+    // postes (haste/braço no lote fosco; lâmpadas numa malha própria que acende à noite) e lixeira externa
+    const pole: Spec = ['metal', 0x2f3540];
+    const lamps = new Batch();
     for (const x of [-4.5, W / 2 + 4, W + 4.5]) {
-      put(g, cylGeo(0.07, 0.1, 4.2, 8), pole, x, 0.02, D + 2.7);
-      bx(g, 0.08, 0.08, 1.0, pole, x, 4.15, D + 2.35);
-      put(g, boxGeo(0.4, 0.12, 0.22), this.lampMat, x, 4.05, D + 1.95, { cast: false });
+      sb.add(new THREE.CylinderGeometry(0.07, 0.1, 4.2, 8).translate(0, 2.1, 0), pole, x, 0.02, D + 2.7);
+      sb.box(0.08, 0.08, 1.0, pole, x, 4.15, D + 2.35);
+      lamps.box(0.4, 0.12, 0.22, ['matte', 0xfff1c2], x, 4.05, D + 1.95);
       this.blocked.push({ x: Math.floor(x), z: Math.floor(D + 2.7) });
     }
-    // lixeira externa
+    const lampGeo = lamps.build().get('matte')!;
+    const lampMesh = new THREE.Mesh(tr.geo(lampGeo), this.lampMat); g.add(lampMesh);
     const tb = trashBinPos(b);
-    const bin = stdMat(0x2f7d4a, { rough: 0.7 }), binD = stdMat(0x1f5c36, { rough: 0.7 });
-    bx(g, 0.62, 0.95, 0.62, bin, tb.x, 0.02, tb.z);
-    bx(g, 0.68, 0.1, 0.68, binD, tb.x, 0.97, tb.z);
-    bx(g, 0.2, 0.06, 0.04, stdMat(0xddeee3), tb.x, 0.6, tb.z + 0.32, { cast: false });
+    sb.box(0.62, 0.95, 0.62, ['matte', 0x2f7d4a], tb.x, 0.02, tb.z);
+    sb.box(0.68, 0.1, 0.68, ['matte', 0x1f5c36], tb.x, 0.97, tb.z);
+    sb.box(0.2, 0.06, 0.04, ['matte', 0xddeee3], tb.x, 0.6, tb.z + 0.32);
     this.blocked.push({ x: Math.floor(tb.x), z: Math.floor(tb.z) });
-    // carros
+    for (const m of meshesOf(sb.build(), g, { cast: false })) tr.geo(m.geometry);
+    // árvores: uma malha fundida (as únicas do cenário externo que projetam sombra)
+    const treeX = [-6.5, -2.2, W + 2.2, W + 6.5, W / 2 + 7.5, -11];
+    const tz = D + 2.4;
+    const trees = new Batch();
+    treeX.forEach((x, i) => {
+      const s = 0.9 + hash01(i, 51) * 0.35;
+      trees.add(new THREE.CylinderGeometry(0.12, 0.17, 1.6, 6).translate(0, 0.8, 0), ['flat', 0x6d4a2c], x, 0.02, tz, { ry: i, sx: s, sy: s, sz: s });
+      trees.add(icoGeo(1.2, 0), ['flat', 0x4fa85a], x, 2.35 * s, tz, { ry: i, sx: s, sy: s, sz: s });
+      trees.add(icoGeo(0.85, 0), ['flat', 0x66bb6a], x + 0.35 * s, 3.2 * s, tz + 0.15, { ry: i, sx: s, sy: s, sz: s });
+      this.blocked.push({ x: Math.floor(x), z: Math.floor(tz) });
+    });
+    for (const m of meshesOf(trees.build(), g, { cast: true })) { tr.geo(m.geometry); m.frustumCulled = false; }
+    // carros (1 malha cada, sem sombra)
     this.cars = [];
-    const carCols = [0xd94f4f, 0x3a7bd5, 0xf2c230, 0x58b368];
     for (let i = 0; i < 4; i++) {
       const dir = i % 2 === 0 ? 1 : -1;
-      const car = this.makeCar(carCols[i]!);
+      const car = new THREE.Mesh(tr.geo(carGeometry(CAR_COLORS[i]!)), kindMaterial('matte'));
+      car.castShadow = false; car.receiveShadow = false;
       car.position.set(X0 + hash01(i, 61) * (X1 - X0), 0, roadZ0 + (dir > 0 ? 3.4 : 6.6));
       car.rotation.y = dir > 0 ? 0 : Math.PI;
       g.add(car);
       this.cars.push({ g: car, dir, speed: 4 + hash01(i, 62) * 4 });
     }
-    // nuvens
+    // nuvens: uma InstancedMesh (28 esferas achatadas), matrizes atualizadas conforme se movem
     this.clouds = [];
     for (let i = 0; i < 7; i++) {
-      const c = new THREE.Group();
-      const cm = stdMat(0xffffff, { rough: 1, flat: true, emissive: 0xffffff, ei: 0.35 });
-      for (let k = 0; k < 4; k++) {
-        const s = put(c, icoGeo(2 + hash01(i, k) * 2, 0), cm, k * 2.4 - 3.5, hash01(k, i) * 0.8, hash01(i, 9 + k) * 1.5, { cast: false, recv: false });
-        s.scale.y = 0.55;
-      }
-      c.position.set(-80 + hash01(i, 71) * 200, 38 + hash01(i, 72) * 14, -40 + hash01(i, 73) * 90);
-      g.add(c); this.clouds.push(c);
+      const parts: { dx: number; dy: number; dz: number; r: number }[] = [];
+      for (let k = 0; k < 4; k++) parts.push({ dx: k * 2.4 - 3.5, dy: hash01(k, i) * 0.8, dz: hash01(i, 9 + k) * 1.5, r: 2 + hash01(i, k) * 2 });
+      this.clouds.push({ x: -80 + hash01(i, 71) * 200, y: 38 + hash01(i, 72) * 14, z: -40 + hash01(i, 73) * 90, parts });
     }
+    this.cloudMesh = new THREE.InstancedMesh(icoGeo(1, 0), stdMat(0xffffff, { rough: 1, flat: true, emissive: 0xffffff, ei: 0.35 }), this.clouds.length * 4);
+    this.cloudMesh.castShadow = false; this.cloudMesh.receiveShadow = false; this.cloudMesh.frustumCulled = false;
+    g.add(this.cloudMesh);
+    this.writeClouds();
     // sol e sombra cobrindo a loja
     const R = 0.5 * Math.hypot(W + 8, D + STORAGE_DEPTH + 8) + 2;
     const sc = this.sun.shadow.camera;
@@ -512,21 +575,16 @@ export class Env {
     this.lastT = -1;
   }
 
-  private makeCar(color: number): THREE.Group {
-    const c = new THREE.Group();
-    const body = stdMat(color, { rough: 0.4, metal: 0.2 });
-    bx(c, 3.8, 0.55, 1.7, body, 0, 0.3, 0);
-    bx(c, 1.9, 0.5, 1.5, stdMat(0x273140, { rough: 0.2, metal: 0.4 }), -0.2, 0.85, 0);
-    bx(c, 1.7, 0.04, 1.6, body, -0.2, 1.33, 0);
-    const wheel = stdMat(0x17191d, { rough: 0.9 });
-    for (const x of [-1.2, 1.2]) for (const z of [-0.85, 0.85]) {
-      const w = put(c, cylGeo(0.36, 0.36, 0.26, 12), wheel, x, 0.0, z); w.rotation.x = Math.PI / 2; w.position.y = 0.36; w.position.z = z + (z > 0 ? 0.0 : -0.0);
+  private writeClouds(): void {
+    if (!this.cloudMesh) return;
+    const o = this.dm;
+    o.rotation.set(0, 0, 0);
+    let n = 0;
+    for (const c of this.clouds) for (const p of c.parts) {
+      o.position.set(c.x + p.dx, c.y + p.dy, c.z + p.dz); o.scale.set(p.r, p.r * 0.55, p.r); o.updateMatrix();
+      this.cloudMesh.setMatrixAt(n++, o.matrix);
     }
-    bx(c, 0.06, 0.16, 0.3, stdMat(0xfff3b0, { emissive: 0xfff0a0, ei: 1 }), 1.9, 0.5, 0.55, { cast: false });
-    bx(c, 0.06, 0.16, 0.3, stdMat(0xfff3b0, { emissive: 0xfff0a0, ei: 1 }), 1.9, 0.5, -0.55, { cast: false });
-    bx(c, 0.06, 0.14, 0.3, stdMat(0xd62828, { emissive: 0xaa1010, ei: 0.8 }), -1.9, 0.5, 0.55, { cast: false });
-    bx(c, 0.06, 0.14, 0.3, stdMat(0xd62828, { emissive: 0xaa1010, ei: 0.8 }), -1.9, 0.5, -0.55, { cast: false });
-    return c;
+    this.cloudMesh.instanceMatrix.needsUpdate = true;
   }
 
   /** Luz/céu conforme o minuto do relógio (0 = abertura, 1 = fechamento). */
@@ -559,7 +617,11 @@ export class Env {
       if (c.dir > 0 && c.g.position.x > X1) c.g.position.x = X0;
       if (c.dir < 0 && c.g.position.x < X0) c.g.position.x = X1;
     }
-    for (const c of this.clouds) { c.position.x += dt * 0.8; if (c.position.x > 140) c.position.x = -90; }
+    this.cloudT += dt;
+    if (this.cloudT > 0.1) { // nuvens: 10 atualizações por segundo bastam (movimento lentíssimo)
+      for (const c of this.clouds) { c.x += this.cloudT * 0.8; if (c.x > 140) c.x = -90; }
+      this.cloudT = 0; this.writeClouds();
+    }
   }
 
   private clearGeo(): void {
@@ -571,6 +633,7 @@ export class Env {
       this.group.remove(ch);
     }
     this.tr.disposeAll();
+    this.cloudMesh = null;
   }
   dispose(): void {
     this.clearGeo();

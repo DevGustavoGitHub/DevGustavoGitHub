@@ -1,18 +1,16 @@
 /**
- * Visuais procedurais dos produtos (≈11 formas distintas), rótulos em canvas e a camada instanciada de caixas de papelão.
+ * Visuais procedurais dos produtos (11 formas feitas à mão + gerador genérico por `shape`/`color`/categoria),
+ * a camada instanciada global de itens (prateleiras + caixas abertas) e a camada instanciada de caixas de papelão.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PRODUCTS, productById, type Category } from '../sim/catalog';
-import { boxGeo, cylGeo, sphGeo, stdMat, makeCanvas, canvasTex, planeGeo } from './kit';
+import { productById, type Product } from '../sim/catalog';
+import { boxGeo, cylGeo, sphGeo, stdMat, planeGeo } from './kit';
+import { Batch, type Spec } from './batch';
+import { labelCell, labelMaterial, uvToCell, uvToWhite, whiteCell } from './atlas';
+import { productColorOf, productShapeOf, type Shape } from './look';
 
-export const CATEGORY_COLOR: Record<Category, number> = {
-  mercearia: 0xe08a24, bebidas: 0x2a86d6, laticinios: 0x5d8fd9, congelados: 0x22b5c9, padaria: 0xb7742c, limpeza: 0x3fae4f,
-};
-export const categoryColor = (pid: string | undefined): number => {
-  if (!pid) return 0x9aa3ad;
-  try { return CATEGORY_COLOR[productById(pid).category]; } catch { return 0x9aa3ad; }
-};
+export { CATEGORY_COLOR, categoryColor } from './look';
 
 export interface ProductVisual { geo: THREE.BufferGeometry; w: number; h: number; d: number }
 
@@ -116,143 +114,188 @@ const builders: Record<string, () => ProductVisual> = {
   ]) }),
 };
 
+
+/* ---------- visual genérico por shape/cor (qualquer produto novo do catálogo) ---------- */
+const mix = (c: number, to: number, k: number): number => new THREE.Color(c).lerp(new THREE.Color(to), k).getHex();
+const cylUp = (rt: number, rb: number, h: number): THREE.BufferGeometry => cylGeo(rt, rb, h, 12);
+
+/** Constrói o visual de um produto a partir de `shape` + `color` (ou do padrão da categoria). Não depende do id. */
+export function genericVisual(p: Pick<Product, 'color' | 'shape' | 'category'>): ProductVisual {
+  const c = productColorOf(p), light = mix(c, 0xffffff, 0.62), dark = mix(c, 0x000000, 0.5);
+  const shape: Shape = productShapeOf(p);
+  switch (shape) {
+    case 'bottle': return { w: 0.09, h: 0.25, d: 0.09, geo: merge([
+      part(cylUp(0.042, 0.042, 0.17), c, 0, 0, 0),
+      part(cylUp(0.044, 0.044, 0.07), light, 0, 0.05, 0),
+      part(cylUp(0.018, 0.042, 0.05), c, 0, 0.17, 0),
+      part(cylUp(0.02, 0.02, 0.03), dark, 0, 0.22, 0),
+    ]) };
+    case 'can': return { w: 0.075, h: 0.13, d: 0.075, geo: merge([
+      part(cylUp(0.036, 0.036, 0.12), c, 0, 0, 0),
+      part(cylUp(0.0375, 0.0375, 0.05), light, 0, 0.035, 0),
+      part(cylUp(0.033, 0.033, 0.01), 0xd0d4d8, 0, 0.12, 0),
+    ]) };
+    case 'bag': return { w: 0.2, h: 0.29, d: 0.075, geo: merge([
+      part(boxGeo(0.19, 0.26, 0.068), c, 0, 0, 0),
+      part(boxGeo(0.195, 0.07, 0.072), light, 0, 0.09, 0),
+      part(boxGeo(0.19, 0.03, 0.04), dark, 0, 0.26, 0),
+    ]) };
+    case 'tray': {
+      const parts = [
+        part(boxGeo(0.26, 0.04, 0.18), 0xe9e6df, 0, 0, 0),
+        part(boxGeo(0.27, 0.02, 0.19), 0xffffff, 0, 0.035, 0),
+      ];
+      for (let r = 0; r < 2; r++) for (let i = 0; i < 3; i++) parts.push(part(sphGeo(0.034, 8, 6), i % 2 ? light : c, -0.07 + i * 0.07, 0.065, -0.04 + r * 0.08, { sy: 0.8 }));
+      return { w: 0.27, h: 0.1, d: 0.19, geo: merge(parts) };
+    }
+    case 'jar': return { w: 0.105, h: 0.13, d: 0.105, geo: merge([
+      part(cylUp(0.05, 0.05, 0.1), c, 0, 0, 0),
+      part(cylUp(0.0515, 0.0515, 0.04), light, 0, 0.035, 0),
+      part(cylUp(0.053, 0.053, 0.03), dark, 0, 0.1, 0),
+    ]) };
+    default: return { w: 0.16, h: 0.22, d: 0.08, geo: merge([
+      part(boxGeo(0.15, 0.2, 0.075), c, 0, 0, 0),
+      part(boxGeo(0.155, 0.07, 0.078), light, 0, 0.07, 0),
+      part(boxGeo(0.152, 0.02, 0.077), dark, 0, 0.2, 0),
+    ]) };
+  }
+}
+
 const cache = new Map<string, ProductVisual>();
 export function productVisual(id: string): ProductVisual {
   let v = cache.get(id);
   if (!v) {
-    v = (builders[id] ?? (() => ({ w: 0.15, h: 0.2, d: 0.1, geo: merge([part(boxGeo(0.15, 0.2, 0.1), 0xaaaaaa, 0, 0, 0)]) })))();
+    const hand = builders[id];
+    if (hand) v = hand();
+    else {
+      let p: Product | null = null;
+      try { p = productById(id); } catch { /* id desconhecido */ }
+      v = p ? genericVisual(p) : genericVisual({ category: '?' as Product['category'], shape: 'box', color: '#aaaaaa' });
+    }
     cache.set(id, v);
   }
   return v;
 }
 export const productMat = (): THREE.MeshStandardMaterial => stdMat(0xffffff, { vertexColors: true, rough: 0.55 });
 
-/* ---------- rótulos em canvas ---------- */
-const css = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
-function fitText(g: CanvasRenderingContext2D, text: string, maxW: number, size: number, weight = '800'): number {
-  let s = size;
-  do { g.font = `${weight} ${s}px system-ui, sans-serif`; s -= 2; } while (g.measureText(text).width > maxW && s > 12);
-  return s;
+/* ---------- camada global de itens expostos (prateleiras, geladeiras e caixas abertas): 1 InstancedMesh por produto ---------- */
+export function pushMatrix(arr: number[], m: THREE.Matrix4): void { const e = m.elements; for (let i = 0; i < 16; i++) arr.push(e[i]!); }
+export function growMesh(map: Map<string, THREE.InstancedMesh>, parent: THREE.Object3D, key: string, geo: THREE.BufferGeometry, mat: THREE.Material, n: number, cast: boolean): THREE.InstancedMesh {
+  let im = map.get(key);
+  if (im && im.instanceMatrix.count >= n) return im;
+  let cap = Math.max(64, im ? im.instanceMatrix.count * 2 : 64);
+  while (cap < n) cap *= 2;
+  if (im) { parent.remove(im); im.dispose(); }
+  im = new THREE.InstancedMesh(geo, mat, cap);
+  im.count = 0; im.frustumCulled = false; im.castShadow = cast; im.receiveShadow = true;
+  parent.add(im); map.set(key, im);
+  return im;
+}
+export class ItemLayer {
+  readonly group = new THREE.Group();
+  private meshes = new Map<string, THREE.InstancedMesh>();
+  private src = new Map<string, Map<string, number[]>>();
+  /** Troca os itens de uma origem (`furniture`, `box:floor`...) por matrizes de mundo agrupadas por produto. */
+  setSource(name: string, data: Map<string, number[]>): void { this.src.set(name, data); this.flush(); }
+  private flush(): void {
+    const totals = new Map<string, number>();
+    for (const d of this.src.values()) for (const [pid, a] of d) totals.set(pid, (totals.get(pid) ?? 0) + a.length / 16);
+    for (const m of this.meshes.values()) m.count = 0;
+    for (const [pid, n] of totals) {
+      const im = growMesh(this.meshes, this.group, pid, productVisual(pid).geo, productMat(), n, false);
+      let k = 0;
+      const arr = im.instanceMatrix.array as Float32Array;
+      for (const d of this.src.values()) { const a = d.get(pid); if (!a) continue; arr.set(a, k * 16); k += a.length / 16; }
+      im.count = n; im.instanceMatrix.needsUpdate = true;
+    }
+  }
+  get count(): number { let n = 0; for (const m of this.meshes.values()) n += m.count; return n; }
+  dispose(): void { for (const m of this.meshes.values()) m.dispose(); this.meshes.clear(); this.src.clear(); this.group.clear(); }
 }
 
-const signCache = new Map<string, THREE.MeshStandardMaterial>();
-/** Placa de topo da prateleira com o nome do produto (ou "VAZIO"). */
-export function shelfSignMat(pid: string | undefined): THREE.MeshStandardMaterial {
-  const key = pid ?? '-';
-  let m = signCache.get(key);
-  if (m) return m;
-  const { c, g } = makeCanvas(512, 96);
-  const col = categoryColor(pid);
-  g.fillStyle = css(col); g.fillRect(0, 0, 512, 96);
-  g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(0, 0, 512, 12);
-  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  const text = pid ? productById(pid).name : 'VAZIO';
-  fitText(g, text, 460, 56);
-  g.fillText(text, 256, 52);
-  m = new THREE.MeshStandardMaterial({ map: canvasTex(c), roughness: 0.6, emissive: col, emissiveIntensity: 0.12 });
-  signCache.set(key, m);
-  return m;
-}
-
-const labelCache = new Map<string, THREE.MeshStandardMaterial>();
-/** Etiqueta colada na caixa de papelão. */
-export function boxLabelMat(pid: string): THREE.MeshStandardMaterial {
-  let m = labelCache.get(pid);
-  if (m) return m;
-  const { c, g } = makeCanvas(256, 128);
-  g.fillStyle = '#fbfaf4'; g.fillRect(0, 0, 256, 128);
-  g.fillStyle = css(categoryColor(pid)); g.fillRect(0, 0, 256, 26);
-  g.fillStyle = '#222'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  let name = pid;
-  try { name = productById(pid).name; } catch { /* id desconhecido */ }
-  const words = name.split(' ');
-  const l1 = words.length > 1 ? words.slice(0, -1).join(' ') : name;
-  const l2 = words.length > 1 ? words[words.length - 1]! : '';
-  const s = fitText(g, l1.length > l2.length ? l1 : l2 || l1, 220, 40);
-  g.font = `800 ${s}px system-ui, sans-serif`;
-  g.fillText(l1, 128, l2 ? 58 : 72);
-  if (l2) g.fillText(l2, 128, 58 + s);
-  // código de barras decorativo
-  g.fillStyle = '#222';
-  for (let i = 0; i < 28; i++) g.fillRect(24 + i * 7, 104, (i * 7) % 3 === 0 ? 3 : 2, 16);
-  m = new THREE.MeshStandardMaterial({ map: canvasTex(c), roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  labelCache.set(pid, m);
-  return m;
-}
-
-/* ---------- caixas de papelão (instanciadas) ---------- */
+/* ---------- caixas de papelão (instanciadas, etiqueta no atlas) ---------- */
 export const BOX_W = 0.46, BOX_H = 0.32, BOX_D = 0.34;
 export interface BoxInst { pid: string; x: number; y: number; z: number; ry: number; open: boolean; fill: number }
 
-/** Camada instanciada de caixas: poucas draw calls independentemente da quantidade. */
+const KRAFT: Spec = ['matte', 0xc99a5c], KRAFT_D: Spec = ['matte', 0xb4854a], TAPE: Spec = ['matte', 0xe9d6a8];
+const boxGeoCache = new Map<string, THREE.BufferGeometry>();
+/** Geometria da caixa (fechada ou aberta) já com a etiqueta do produto: tudo num único mesh. */
+function boxVisual(pid: string, open: boolean): THREE.BufferGeometry {
+  const key = `${pid}|${open ? 1 : 0}`;
+  let g = boxGeoCache.get(key);
+  if (g) return g;
+  const white = whiteCell();
+  const parts: THREE.BufferGeometry[] = [];
+  const push = (geo: THREE.BufferGeometry, spec: Spec, x: number, y: number, z: number, o: { rx?: number; rz?: number } = {}): void => {
+    const b = new Batch().add(geo, spec, x, y, z, o);
+    const m = b.build().get('matte')!;
+    uvToWhite(m, white); parts.push(m);
+  };
+  push(boxGeo(BOX_W, BOX_H, BOX_D), KRAFT, 0, 0, 0);
+  if (!open) push(boxGeo(0.07, 0.004, BOX_D + 0.004), TAPE, 0, BOX_H + 0.002, 0);
+  else {
+    const a = 1.1, Lfb = BOX_D / 2, Llr = BOX_W / 2;
+    push(boxGeo(BOX_W, 0.012, BOX_D / 2), KRAFT_D, 0, BOX_H + Math.sin(a) * Lfb / 2, BOX_D / 2 + Math.cos(a) * Lfb / 2, { rx: -a });
+    push(boxGeo(BOX_W, 0.012, BOX_D / 2), KRAFT_D, 0, BOX_H + Math.sin(a) * Lfb / 2, -(BOX_D / 2 + Math.cos(a) * Lfb / 2), { rx: a });
+    push(boxGeo(BOX_W / 2, 0.012, BOX_D), KRAFT_D, BOX_W / 2 + Math.cos(a) * Llr / 2, BOX_H + Math.sin(a) * Llr / 2, 0, { rz: a });
+    push(boxGeo(BOX_W / 2, 0.012, BOX_D), KRAFT_D, -(BOX_W / 2 + Math.cos(a) * Llr / 2), BOX_H + Math.sin(a) * Llr / 2, 0, { rz: -a });
+  }
+  const lab = uvToCell(new Batch().add(planeGeo(0.3, 0.15), ['matte', 0xffffff], 0, BOX_H * 0.5, BOX_D / 2 + 0.003).build().get('matte')!, labelCell(pid));
+  parts.push(lab);
+  g = mergeGeometries(parts, false)!;
+  parts.forEach((p) => p.dispose());
+  boxGeoCache.set(key, g);
+  return g;
+}
+
+/** Camada instanciada de caixas (chão + racks): 1 draw call por produto/estado (fechada/aberta). Itens das abertas vão para a ItemLayer. */
 export class BoxLayer {
   readonly group = new THREE.Group();
-  private body: THREE.InstancedMesh;
-  private tape: THREE.InstancedMesh;
-  private flapFB: THREE.InstancedMesh;
-  private flapLR: THREE.InstancedMesh;
-  private labels = new Map<string, THREE.InstancedMesh>();
-  private items = new Map<string, THREE.InstancedMesh>();
+  private meshes = new Map<string, THREE.InstancedMesh>();
+  private lists = new Map<string, BoxInst[]>();
   private dummy = new THREE.Object3D();
   private P = new THREE.Matrix4();
   private C = new THREE.Matrix4();
-  constructor(private cap = 160) {
-    const kraft = stdMat(0xc99a5c, { rough: 0.95 });
-    const kraftDark = stdMat(0xb4854a, { rough: 0.95 });
-    const tapeM = stdMat(0xe9d6a8, { rough: 0.7 });
-    this.body = this.mk(boxGeo(BOX_W, BOX_H, BOX_D), kraft, cap, true);
-    this.tape = this.mk(boxGeo(0.07, 0.004, BOX_D + 0.004), tapeM, cap, false);
-    this.flapFB = this.mk(boxGeo(BOX_W, 0.012, BOX_D / 2), kraftDark, cap * 2, false);
-    this.flapLR = this.mk(boxGeo(BOX_W / 2, 0.012, BOX_D), kraftDark, cap * 2, false);
-    for (const p of PRODUCTS) {
-      this.labels.set(p.id, this.mk(planeGeo(0.3, 0.15), boxLabelMat(p.id), cap, false));
-      this.items.set(p.id, this.mk(productVisual(p.id).geo, productMat(), cap * 4, true));
+  constructor(private items: ItemLayer, private cap = 400) {}
+  /** Atualiza as caixas de uma origem (`floor`, `rack`). */
+  setSource(name: string, list: BoxInst[]): void { this.lists.set(name, list.slice(0, this.cap)); this.flush(name); }
+  private flush(changed: string): void {
+    for (const m of this.meshes.values()) m.count = 0;
+    const need = new Map<string, number>();
+    for (const l of this.lists.values()) for (const b of l) { const k = `${b.pid}|${b.open ? 1 : 0}`; need.set(k, (need.get(k) ?? 0) + 1); }
+    const mat = labelMaterial();
+    for (const [k, n] of need) {
+      const [pid, o] = k.split('|') as [string, string];
+      growMesh(this.meshes, this.group, k, boxVisual(pid, o === '1'), mat, n, true);
     }
-  }
-  private mk(g: THREE.BufferGeometry, m: THREE.Material, n: number, cast: boolean): THREE.InstancedMesh {
-    const im = new THREE.InstancedMesh(g, m, n);
-    im.count = 0; im.frustumCulled = false; im.castShadow = cast; im.receiveShadow = true;
-    this.group.add(im);
-    return im;
-  }
-  private set(im: THREE.InstancedMesh, P: THREE.Matrix4, lx: number, ly: number, lz: number, rx = 0, ry = 0, rz = 0): void {
-    if (im.count >= im.instanceMatrix.count) return;
-    this.dummy.position.set(lx, ly, lz); this.dummy.rotation.set(rx, ry, rz); this.dummy.updateMatrix();
-    this.C.multiplyMatrices(P, this.dummy.matrix);
-    im.setMatrixAt(im.count++, this.C);
-  }
-  update(list: BoxInst[]): void {
-    const all = [this.body, this.tape, this.flapFB, this.flapLR, ...this.labels.values(), ...this.items.values()];
-    for (const m of all) m.count = 0;
-    for (const b of list.slice(0, this.cap)) {
-      this.dummy.position.set(b.x, b.y, b.z); this.dummy.rotation.set(0, b.ry, 0); this.dummy.updateMatrix();
-      this.P.copy(this.dummy.matrix);
-      this.set(this.body, this.P, 0, 0, 0);
-      const lab = this.labels.get(b.pid);
-      if (lab) this.set(lab, this.P, 0, BOX_H * 0.5, BOX_D / 2 + 0.003);
-      if (!b.open) {
-        this.set(this.tape, this.P, 0, BOX_H + 0.002, 0);
-      } else {
-        const a = 1.1; // flaps abertos
-        const Lfb = BOX_D / 2, Llr = BOX_W / 2;
-        this.set(this.flapFB, this.P, 0, BOX_H + Math.sin(a) * Lfb / 2, BOX_D / 2 + Math.cos(a) * Lfb / 2, -a);
-        this.set(this.flapFB, this.P, 0, BOX_H + Math.sin(a) * Lfb / 2, -(BOX_D / 2 + Math.cos(a) * Lfb / 2), a);
-        this.set(this.flapLR, this.P, BOX_W / 2 + Math.cos(a) * Llr / 2, BOX_H + Math.sin(a) * Llr / 2, 0, 0, 0, a);
-        this.set(this.flapLR, this.P, -(BOX_W / 2 + Math.cos(a) * Llr / 2), BOX_H + Math.sin(a) * Llr / 2, 0, 0, 0, -a);
-        const it = this.items.get(b.pid);
-        const n = b.fill > 0 ? Math.max(1, Math.round(b.fill * 4)) : 0;
-        if (it && n) {
+    const itemSrc = new Map<string, Map<string, number[]>>();
+    for (const [name, l] of this.lists) {
+      const items = new Map<string, number[]>();
+      for (const b of l) {
+        this.dummy.position.set(b.x, b.y, b.z); this.dummy.rotation.set(0, b.ry, 0); this.dummy.updateMatrix();
+        this.P.copy(this.dummy.matrix);
+        const im = this.meshes.get(`${b.pid}|${b.open ? 1 : 0}`)!;
+        im.setMatrixAt(im.count++, this.P);
+        if (b.open && b.fill > 0) {
+          const n = Math.max(1, Math.round(b.fill * 4));
           const v = productVisual(b.pid);
           const slots: [number, number][] = [[-0.11, -0.07], [0.11, -0.07], [-0.11, 0.08], [0.11, 0.08]];
-          for (let i = 0; i < n; i++) this.set(it, this.P, slots[i]![0], BOX_H - Math.min(0.13, v.h * 0.55), slots[i]![1], 0, (i % 2) * 0.5);
+          let arr = items.get(b.pid);
+          if (!arr) items.set(b.pid, (arr = []));
+          for (let i = 0; i < n; i++) {
+            this.dummy.position.set(slots[i]![0], BOX_H - Math.min(0.13, v.h * 0.55), slots[i]![1]); this.dummy.rotation.set(0, (i % 2) * 0.5, 0); this.dummy.updateMatrix();
+            this.C.multiplyMatrices(this.P, this.dummy.matrix);
+            pushMatrix(arr, this.C);
+          }
         }
       }
+      itemSrc.set(name, items);
     }
-    for (const m of all) { m.instanceMatrix.needsUpdate = true; }
+    for (const m of this.meshes.values()) m.instanceMatrix.needsUpdate = true;
+    void changed;
+    for (const [name, data] of itemSrc) this.items.setSource(`box:${name}`, data);
   }
-  /** Quantidade de caixas desenhadas (debug/testes). */
-  get count(): number { return this.body.count; }
-  dispose(): void {
-    this.group.traverse((o) => { if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose(); });
-  }
+  /** Quantidade de caixas desenhadas por origem (debug/testes). */
+  countOf(name: string): number { return this.lists.get(name)?.length ?? 0; }
+  dispose(): void { for (const m of this.meshes.values()) m.dispose(); this.meshes.clear(); this.lists.clear(); this.group.clear(); }
 }

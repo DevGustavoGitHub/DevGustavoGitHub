@@ -3,6 +3,7 @@
  * Eventos: ver docs/CONTRACTS.md. Só muda estado via sim/api.ts (e economy.ts para licenças/preços).
  */
 import type { GameContext, GameModule } from '../core/module';
+import { Bankruptcy } from './bankruptcy';
 import { Checkout, type CheckoutRequest } from './checkout';
 import { h } from './dom';
 import { Hud } from './hud';
@@ -11,9 +12,11 @@ import { Menus } from './menu';
 import { Report } from './report';
 import { baseCss } from './styles-base';
 import { playCss } from './styles-play';
+import { phase2Css } from './styles-phase2';
 import { tabletCss } from './styles-tablet';
 import { Tablet } from './tablet';
 import { Tutorial } from './tutorial';
+import { parseAutoToast, recordToday } from './tablet/auto';
 
 export default function create(): GameModule {
   let kit: UiKit;
@@ -24,6 +27,7 @@ export default function create(): GameModule {
   let report: Report;
   let menus: Menus;
   let tutorial: Tutorial;
+  let bankrupt: Bankruptcy;
   let pending: CheckoutRequest | null = null;
   let available = false;
   let keyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -55,11 +59,12 @@ export default function create(): GameModule {
     init(ctx: GameContext) {
       kit = new UiKit(ctx);
       const style = h('style', { id: 'mx-style' });
-      style.textContent = baseCss + tabletCss + playCss;
+      style.textContent = baseCss + tabletCss + playCss + phase2Css;
       document.head.appendChild(style);
       root = h('div', { class: 'mx-root', style: 'pointer-events:none' });
       ctx.uiRoot.appendChild(root);
       kit.attachLayer(root);
+      kit.settings.bindRoot(root);
 
       hud = new Hud(kit, root, {
         openTablet: () => tablet.open(),
@@ -71,14 +76,17 @@ export default function create(): GameModule {
         },
       });
       tablet = new Tablet(kit, root);
+      bankrupt = new Bankruptcy(kit, root);
+      tablet.guard = () => bankrupt.check();
       tablet.onOpen = () => tutorial.noteTabletOpened();
       checkout = new Checkout(kit, root);
       report = new Report(kit, root);
+      report.afterNext = () => { bankrupt.check(); };
       tutorial = new Tutorial(kit, hud);
       menus = new Menus(kit, root, {
         endDay,
         replayTutorial: () => tutorial.start(true),
-        onStart: () => { kit.settings.emit(); tutorial.start(); },
+        onStart: () => { kit.settings.emit(); if (!bankrupt.check()) tutorial.start(); },
       });
 
       const bus = ctx.bus;
@@ -95,6 +103,11 @@ export default function create(): GameModule {
           syncAttend();
         }),
         bus.on('dayStarted', () => report.snapshotDay()),
+        // Pedido automático feito pelo npc (toast "Pedido automático: 3 cx Arroz, 2 cx Feijão"): guarda para a aba Automático.
+        bus.on('toast', (p: { text: string }) => {
+          const items = parseAutoToast(p.text, kit.ctx.state);
+          if (items.length) recordToday(kit.ctx.state.day, items);
+        }),
       );
       keyHandler = (e: KeyboardEvent): void => {
         if (e.key === 'Escape') kit.escape();

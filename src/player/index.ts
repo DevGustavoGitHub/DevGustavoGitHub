@@ -8,7 +8,7 @@ import {
 import type { Box, Furniture } from '../sim/state';
 import { productById } from '../sim/catalog';
 import * as api from '../sim/api';
-import { Avatar, CarryBoxFactory } from './avatar';
+import { Avatar, CarryBoxFactory, Dolly } from './avatar';
 import { Input } from './input';
 
 const RADIUS = 0.28;
@@ -25,7 +25,7 @@ const COUNTER_RANGE = 1.4;
 const BIN_RANGE = 2.4;
 const STEP_DIST = 0.8;
 
-interface Cand { label: string; run: () => void }
+interface Cand { key: string; label: string; run: () => void; place?: Box }
 
 const isStockFurniture = (f: Furniture): boolean => f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer';
 
@@ -63,7 +63,16 @@ export default function create(): GameModule {
   let placing: { box: Box; placed: number; t: number } | null = null;
   let badge: HTMLDivElement;
   let badgeT = 0;
-  let carriedMeshFor: Box | null = null;
+  let carried: Box[] = []; // pilha (base → topo), a mesma referência de svc.carryingAll
+  let capNow = 1;
+  let visSig = '';
+  let dolly: Dolly | null = null;
+  const stack = new THREE.Group();
+  let lastPick: Box | null = null;
+  let pendLabel: string | null | undefined;
+  let pendN = 0;
+  let wasPlacing = false;
+  let forcePub = false;
 
   /* ---------------- colisão ---------------- */
   const furnRect = (f: Furniture): { x0: number; z0: number; x1: number; z1: number } => {
@@ -144,27 +153,66 @@ export default function create(): GameModule {
   };
   const nameOf = (pid: string): string => { try { return productById(pid).name; } catch { return pid; } };
 
-  const setCarrying = (b: Box | null): void => {
-    svc.carrying = b;
-    if (b === carriedMeshFor) return;
-    carriedMeshFor = b;
-    avatar.attachCarry(b ? boxes.get(b.productId, nameOf(b.productId)) : null);
+  let capForce: number | null = null; // só para testes e2e (window.__player.forceCap)
+  const readCap = (): number => {
+    if (capForce != null) return capForce;
+    try {
+      const n = api.carryCapacity(ctx.state);
+      return Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 1;
+    } catch { return 1; }
   };
+  const syncTop = (): void => { svc.carrying = carried.length ? carried[carried.length - 1]! : null; };
+  const refreshCarry = (): void => {
+    syncTop();
+    const sig = `${capNow > 1 ? 'D' : ''}|${carried.map((b) => b.productId).join(',')}`;
+    if (sig === visSig) return;
+    visSig = sig;
+    if (capNow > 1 && !dolly) { dolly = new Dolly(); stack.add(dolly.root); }
+    if (dolly) dolly.root.visible = capNow > 1 && carried.length > 0;
+    avatar.setCarryLayout(capNow > 1);
+    const base = capNow > 1 ? 0.14 + boxes.boxH / 2 : 0;
+    for (const m of stackMeshes) m.visible = false;
+    carried.forEach((b, i) => {
+      const m = boxes.slot(i, b.productId, nameOf(b.productId));
+      if (!stackMeshes.includes(m)) { stackMeshes.push(m); stack.add(m); }
+      m.position.set(0, base + i * boxes.boxH, 0);
+      m.rotation.y = i % 2 ? 0.06 : -0.04;
+      m.visible = true;
+    });
+  };
+  const stackMeshes: THREE.Mesh[] = [];
 
-  const dropBox = (): void => {
-    const b = svc.carrying;
+  const dropBox = (b: Box | undefined = carried[carried.length - 1], lateral = 0): void => {
     if (!b) return;
-    const p = aheadPos(0.9);
+    const k = carried.indexOf(b);
+    if (k < 0) return;
+    const cx = svc.position.x + Math.sin(faceYaw) * 0.9 + Math.cos(faceYaw) * lateral;
+    const cz = svc.position.z + Math.cos(faceYaw) * 0.9 - Math.sin(faceYaw) * lateral;
+    const p = findFree(cx, cz);
     b.carried = false; b.x = p.x; b.z = p.z;
-    setCarrying(null);
+    carried.splice(k, 1);
+    refreshCarry();
     placing = null;
     ctx.bus.emit('sfx', { name: 'box' });
     changed('sidewalk');
   };
+  const dropAll = (): void => {
+    const n = carried.length;
+    for (let i = n - 1, j = 0; i >= 0; i--, j++) dropBox(carried[i], (j - (n - 1) / 2) * 0.45);
+  };
+  const removeCarried = (b: Box): void => {
+    const k = carried.indexOf(b);
+    if (k >= 0) carried.splice(k, 1);
+    refreshCarry();
+  };
   const pickBox = (b: Box): void => {
-    if (svc.carrying) dropBox();
+    if (carried.length >= capNow) {
+      if (capNow <= 1 && carried.length) dropBox();
+      else { ctx.bus.emit('toast', { text: `Mãos cheias (${carried.length}/${capNow})`, kind: 'info' }); return; }
+    }
     b.carried = true;
-    setCarrying(b);
+    carried.push(b);
+    refreshCarry();
     ctx.bus.emit('sfx', { name: 'box' });
     haptic(15);
     changed('sidewalk');
@@ -192,74 +240,124 @@ export default function create(): GameModule {
     return best;
   };
 
+  const tag = (l: string): string => (capNow > 1 && carried.length ? `${l} · ${carried.length}/${capNow}` : l);
+  const nearestBox = (hy: number): Box | null => {
+    const p = svc.position;
+    let best: Box | null = null, bs = Infinity;
+    for (const b of ctx.state.sidewalk) {
+      if (b.carried) continue;
+      const bp = boxPos(b), d = Math.hypot(bp.x - p.x, bp.z - p.z);
+      if (d > PICK_RANGE + (b === lastPick ? hy : 0)) continue;
+      const sc = d - (b === lastPick ? 0.25 : 0);
+      if (sc < bs) { bs = sc; best = b; }
+    }
+    return best;
+  };
+  const takeCand = (): Cand | null => {
+    const st = ctx.state;
+    let pid: string | null = null, ratio = Infinity;
+    for (const k of Object.keys(st.storage)) {
+      if ((st.storage[k] ?? 0) <= 0) continue;
+      const r = (st.shelf[k] ?? 0) / Math.max(1, capacityOf(k));
+      if (r < ratio) { ratio = r; pid = k; }
+    }
+    if (!pid) return null;
+    const id = pid;
+    return {
+      key: 'take',
+      label: tag(`Retirar ${nameOf(id)}`),
+      run: () => {
+        try {
+          const idx = api.takeFromStorage(st, id, true);
+          const b = st.sidewalk[idx];
+          if (b) { b.carried = true; carried.push(b); refreshCarry(); ctx.bus.emit('sfx', { name: 'box' }); changed('storage'); }
+        } catch (e) { toastErr(e); }
+      },
+    };
+  };
+
   const evaluate = (): void => {
+    const prevKey = cur?.key ?? '';
+    const hy = (k: string): number => (prevKey === k ? 0.35 : 0);
     cur = null; curEdit = null;
     const st = ctx.state;
     const p = svc.position;
-    const carry = svc.carrying;
     const w = ctx.services.world;
+    const sec: Cand[] = [];
+    const room = carried.length < capNow;
+    const top = carried[carried.length - 1];
 
-    if (carry) {
-      // 1) Pôr itens na prateleira
-      if (carry.units > 0) {
-        const f = nearestFurniture((q) => isStockFurniture(q) && q.productId === carry.productId, PLACE_RANGE);
-        if (f && (st.shelf[carry.productId] ?? 0) < capacityOf(carry.productId)) {
-          cur = { label: `Repor ${nameOf(carry.productId)} (${carry.units})`, run: () => startPlacing(carry) };
+    if (top) {
+      // 1) Repor: a caixa mais ao topo cujo produto casa com um móvel próximo (e que ainda tem espaço)
+      for (let i = carried.length - 1; i >= 0 && !cur; i--) {
+        const b = carried[i]!;
+        if (b.units <= 0) continue;
+        const f = nearestFurniture((q) => isStockFurniture(q) && q.productId === b.productId, PLACE_RANGE + hy('place'));
+        if (f && (st.shelf[b.productId] ?? 0) < capacityOf(b.productId)) {
+          cur = { key: 'place', label: tag(`Repor ${nameOf(b.productId)} (${b.units})`), run: () => startPlacing(b), place: b };
         }
       }
-      // 2) Lixeira externa com caixa vazia
+      // 2) Lixeira externa com caixa vazia (a mais ao topo)
       const bin = w ? w.trashBin() : trashBinPos(storeBounds(st.expansion));
-      if (!cur && carry.units === 0 && Math.hypot(bin.x - p.x, bin.z - p.z) <= BIN_RANGE) {
-        cur = {
-          label: 'Jogar caixa fora',
-          run: () => {
-            try {
-              api.discardBox(st, idxOf(carry));
-              setCarrying(null);
-              ctx.bus.emit('sfx', { name: 'trash' });
-              changed('sidewalk');
-              haptic(12);
-            } catch (e) { toastErr(e); }
-          },
-        };
+      if (!cur && Math.hypot(bin.x - p.x, bin.z - p.z) <= BIN_RANGE + hy('bin')) {
+        for (let i = carried.length - 1; i >= 0; i--) {
+          const b = carried[i]!;
+          if (b.units !== 0) continue;
+          cur = {
+            key: 'bin',
+            label: tag('Jogar caixa fora'),
+            run: () => {
+              try {
+                api.discardBox(st, idxOf(b));
+                removeCarried(b);
+                ctx.bus.emit('sfx', { name: 'trash' });
+                changed('sidewalk');
+                haptic(12);
+              } catch (e) { toastErr(e); }
+            },
+          };
+          break;
+        }
       }
-      // 3) Guardar no depósito
-      if (!cur && st.storageUnlocked && p.z < 0.2) {
-        cur = {
-          label: 'Guardar no depósito',
+      // 3) Depósito: guardar (e, com carrinho, também retirar mais)
+      if (!cur && st.storageUnlocked && p.z < 0.2 + (prevKey === 'store' || prevKey === 'take' ? 0.2 : 0)) {
+        const store: Cand = {
+          key: 'store',
+          label: tag('Guardar no depósito'),
           run: () => {
             try {
-              api.storeBox(st, idxOf(carry));
-              setCarrying(null);
+              api.storeBox(st, idxOf(top));
+              removeCarried(top);
               ctx.bus.emit('sfx', { name: 'box' });
               changed('storage');
             } catch (e) { toastErr(e); }
           },
         };
+        const take = room && capNow > 1 ? takeCand() : null;
+        if (take) { cur = take; sec.push(store); } else cur = store;
       }
-      // 4) Trocar por outra caixa próxima
+      // 4) Pegar mais (com espaço) ou trocar (mãos cheias, 1 caixa)
       if (!cur) {
-        let nb: Box | null = null, nd = PICK_RANGE;
-        for (const b of st.sidewalk) {
-          if (b === carry || b.carried) continue;
-          const bp = boxPos(b), d = Math.hypot(bp.x - p.x, bp.z - p.z);
-          if (d <= nd) { nd = d; nb = b; }
+        const nb = nearestBox(0.3);
+        if (nb) {
+          lastPick = nb;
+          if (room) cur = { key: 'pick', label: tag(`Pegar ${nameOf(nb.productId)} (${nb.units})`), run: () => pickBox(nb) };
+          else if (capNow <= 1) cur = { key: 'pick', label: `Trocar: ${nameOf(nb.productId)}`, run: () => pickBox(nb) };
         }
-        if (nb) { const t = nb; cur = { label: `Trocar: ${nameOf(t.productId)}`, run: () => pickBox(t) }; }
       }
       // 5) Largar
-      if (!cur) cur = { label: 'Largar caixa', run: dropBox };
+      if (!cur) cur = { key: 'drop', label: tag('Largar caixa'), run: () => dropBox() };
+      if (carried.length > 1) sec.push({ key: 'dropall', label: `Largar tudo (${carried.length})`, run: dropAll });
     } else {
       let bestD = Infinity;
-      for (const b of st.sidewalk) {
-        if (b.carried) continue;
-        const bp = boxPos(b), d = Math.hypot(bp.x - p.x, bp.z - p.z);
-        if (d <= PICK_RANGE && d < bestD) {
-          bestD = d;
-          cur = { label: `Pegar ${nameOf(b.productId)} (${b.units})`, run: () => pickBox(b) };
-        }
+      const nb = nearestBox(0.3);
+      if (nb) {
+        lastPick = nb;
+        const bp = boxPos(nb);
+        bestD = Math.hypot(bp.x - p.x, bp.z - p.z);
+        cur = { key: 'pick', label: `Pegar ${nameOf(nb.productId)} (${nb.units})`, run: () => pickBox(nb) };
       }
-      let di = -1, dd = DIRT_RANGE;
+      let di = -1, dd = DIRT_RANGE + hy('clean');
       for (let i = 0; i < st.dirt.length; i++) {
         const dt0 = st.dirt[i]!;
         const d = Math.hypot(dt0.x - p.x, dt0.z - p.z);
@@ -268,6 +366,7 @@ export default function create(): GameModule {
       if (di >= 0) {
         const i = di;
         cur = {
+          key: 'clean',
           label: 'Limpar',
           run: () => {
             try {
@@ -278,44 +377,30 @@ export default function create(): GameModule {
             } catch (e) { toastErr(e); }
           },
         };
-        bestD = dd;
       }
-      if (!cur && st.storageUnlocked && p.z < 0.2) {
-        let pid: string | null = null, ratio = Infinity;
-        for (const k of Object.keys(st.storage)) {
-          if ((st.storage[k] ?? 0) <= 0) continue;
-          const r = (st.shelf[k] ?? 0) / Math.max(1, capacityOf(k));
-          if (r < ratio) { ratio = r; pid = k; }
-        }
-        if (pid) {
-          const id = pid;
-          cur = {
-            label: `Retirar ${nameOf(id)}`,
-            run: () => {
-              try {
-                const idx = api.takeFromStorage(st, id, true);
-                const b = st.sidewalk[idx];
-                if (b) { b.carried = true; setCarrying(b); ctx.bus.emit('sfx', { name: 'box' }); changed('storage'); }
-              } catch (e) { toastErr(e); }
-            },
-          };
-        }
-      }
+      if (!cur && st.storageUnlocked && p.z < 0.2 + (prevKey === 'take' ? 0.2 : 0)) cur = takeCand();
     }
 
     // Mover móvel
-    const ef = nearestFurniture(() => true, EDIT_RANGE);
+    const ef = nearestFurniture(() => true, EDIT_RANGE + hy('edit'));
     if (ef) {
       const id = ef.id;
-      curEdit = { label: 'Mover', run: () => ctx.bus.emit('build:edit', { furnitureId: id }) };
-      if (!cur) { cur = curEdit; curEdit = null; }
+      sec.push({ key: 'edit', label: 'Mover', run: () => ctx.bus.emit('build:edit', { furnitureId: id }) });
     }
+    if (!cur && sec.length) cur = sec.shift()!;
+    if (cur && cur.key === 'edit') cur = { ...cur }; // primário assume 'Mover' sem outra ação
+    curEdit = sec[0] ?? null;
   };
 
-  const publish = (): void => {
+  const publish = (force = false): void => {
     const off = svc.inputLocked || override;
     const l = off ? null : cur?.label ?? null;
-    if (l !== lastLabel) {
+    if (!force && !off && l !== lastLabel) {
+      // histerese temporal: o rótulo novo precisa se repetir em 2 leituras seguidas
+      if (l !== pendLabel) { pendLabel = l; pendN = 0; }
+      pendN++;
+    } else { pendLabel = l; pendN = 2; }
+    if (l !== lastLabel && pendN >= 2) {
       lastLabel = l;
       ctx.bus.emit('interact:prompt', l ? { label: l, action: doPrimary } : { label: null });
     }
@@ -325,16 +410,21 @@ export default function create(): GameModule {
       ctx.bus.emit('interact:secondary', e ? { label: e, action: doSecondary } : { label: null });
     }
   };
+  const refreshNow = (): void => { evaluate(); publish(true); };
   const doPrimary = (): void => {
     if (svc.inputLocked || override) return;
     if (placing) return;
+    capNow = readCap();
     evaluate();
     cur?.run();
+    refreshNow();
   };
   const doSecondary = (): void => {
     if (svc.inputLocked || override) return;
+    capNow = readCap();
     evaluate();
     curEdit?.run();
+    refreshNow();
   };
 
   /* ---------------- reposição contínua ---------------- */
@@ -343,7 +433,7 @@ export default function create(): GameModule {
     const pl = placing;
     const b = pl.box;
     const f = nearestFurniture((q) => isStockFurniture(q) && q.productId === b.productId, PLACE_RANGE + 0.8);
-    if (svc.inputLocked || override || svc.carrying !== b || !f) { placing = null; return; }
+    if (svc.inputLocked || override || !carried.includes(b) || !f) { placing = null; return; }
     pl.t += dt;
     while (pl.t >= PLACE_INTERVAL && placing) {
       pl.t -= PLACE_INTERVAL;
@@ -360,7 +450,12 @@ export default function create(): GameModule {
       haptic(5);
       const cap = capacityOf(b.productId);
       showBadge(`+${pl.placed}  ·  ${nameOf(b.productId)} ${ctx.state.shelf[b.productId] ?? 0}${cap === Infinity ? '' : '/' + cap}  ·  caixa: ${b.units}`);
-      if (b.units <= 0) { placing = null; evaluate(); }
+      if (b.units <= 0) {
+        placing = null;
+        evaluate();
+        const nx = cur as Cand | null;
+        if (nx?.place) nx.run(); // continua com a próxima caixa da pilha que casar
+      }
     }
   };
 
@@ -417,6 +512,8 @@ export default function create(): GameModule {
       avatar = new Avatar();
       boxes = new CarryBoxFactory();
       ctx.scene.add(avatar.root);
+      avatar.attachCarry(stack);
+      capNow = readCap();
       input = new Input(ctx.uiRoot, ctx.renderer.domElement);
       input.onAction = () => doPrimary();
       input.onSecondary = () => doSecondary();
@@ -431,11 +528,16 @@ export default function create(): GameModule {
       svc = {
         position: new THREE.Vector3(),
         carrying: null,
+        carryingAll: carried,
         inputLocked: false,
         atCounter: null,
         setAppearance: (col) => avatar.setColors(col),
       };
       ctx.services.player = svc;
+      (window as unknown as { __player?: unknown }).__player = {
+        svc, input, cam: () => ({ yaw, pitch, dist, yawT, pitchT, distT }),
+        capacity: () => capNow, forceCap: (n: number | null) => { capForce = n; capNow = readCap(); }, pickNearest: () => doPrimary(), dropAll,
+      };
 
       // posição inicial: perto do balcão
       const b = storeBounds(ctx.state.expansion);
@@ -452,9 +554,11 @@ export default function create(): GameModule {
       yaw = yawT = 0.35;
 
       // caixas "carregadas" salvas: soltar perto do jogador
+      let dropped = 0;
       for (const bx of ctx.state.sidewalk) {
         if (!bx.carried) continue;
-        const p = findFree(s.x + 0.8, s.z + 0.5);
+        const p = findFree(s.x + 0.8 + (dropped % 3) * 0.45, s.z + 0.5 + Math.floor(dropped / 3) * 0.45);
+        dropped++;
         bx.carried = false; bx.x = p.x; bx.z = p.z;
       }
 
@@ -467,6 +571,7 @@ export default function create(): GameModule {
         input.setLocked(svc.inputLocked);
         if (svc.inputLocked) placing = null;
         vel.set(0, 0);
+        forcePub = true;
       }));
       offs.push(ctx.bus.on('camera:override', (e?: { active: boolean }) => {
         const a = !!e?.active;
@@ -487,8 +592,14 @@ export default function create(): GameModule {
       dt = Math.max(0, dt); // o primeiro frame pode vir com dt negativo
       const p = svc.position;
       // validade da caixa carregada
-      if (svc.carrying && idxOf(svc.carrying) < 0) { svc.carrying = null; placing = null; }
-      if (svc.carrying !== carriedMeshFor) setCarrying(svc.carrying);
+      let lost = false;
+      for (let i = carried.length - 1; i >= 0; i--) {
+        const cb = carried[i]!;
+        if (idxOf(cb) < 0 || !cb.carried) { carried.splice(i, 1); lost = true; }
+      }
+      if (lost) placing = null;
+      refreshCarry();
+      const nCar = carried.length;
 
       input.poll();
       const active = !svc.inputLocked && !override;
@@ -499,7 +610,7 @@ export default function create(): GameModule {
         // frente da câmera no plano = (-sin, -cos); direita = (cos, -sin)
         const wx = cy * mx - sy * my;
         const wz = -sy * mx - cy * my;
-        const sp = (svc.carrying ? CARRY_SPEED : WALK_SPEED) * mag;
+        const sp = (nCar ? Math.max(2.2, CARRY_SPEED - 0.3 * (nCar - 1)) : WALK_SPEED) * mag;
         const l = Math.hypot(wx, wz) || 1;
         const tx = (wx / l) * sp, tz = (wz / l) * sp;
         const a = (mag > 0 ? ACCEL : DECEL) * dt;
@@ -523,7 +634,8 @@ export default function create(): GameModule {
 
       avatar.root.position.copy(p);
       avatar.root.rotation.y = faceYaw;
-      avatar.animate(dt, speedNow, !!svc.carrying);
+      avatar.animate(dt, speedNow, nCar > 0, nCar ? Math.min(1, 0.3 + 0.35 * (nCar - 1)) : 0);
+      if (dolly && dolly.root.visible) dolly.roll(speedNow * dt);
 
       // presença no balcão
       let at: number | null = null;
@@ -540,7 +652,9 @@ export default function create(): GameModule {
 
       // interação
       pollT -= dt;
-      if (pollT <= 0) { pollT = 0.1; evaluate(); publish(); }
+      if (placing) wasPlacing = true; // durante a reposição o rótulo fica fixo (sem piscar)
+      else if (wasPlacing || forcePub) { wasPlacing = false; forcePub = false; pollT = 0; refreshNow(); }
+      if (pollT <= 0 && !placing) { pollT = 0.1; capNow = readCap(); evaluate(); publish(); }
       tickPlacing(dt);
       if (badgeT > 0) { badgeT -= dt; if (badgeT <= 0) badge.style.opacity = '0'; }
 
@@ -552,6 +666,8 @@ export default function create(): GameModule {
       input.dispose();
       badge.remove();
       ctx.scene.remove(avatar.root);
+      dolly?.dispose();
+      delete (window as unknown as { __player?: unknown }).__player;
       avatar.dispose();
       boxes.dispose();
       if (ctx.services.player === svc) delete ctx.services.player;

@@ -1,6 +1,7 @@
 import type { Cents } from './money';
 import { PRODUCTS } from './catalog';
 import type { FurnitureType } from '../core/layout';
+import type { DayReport } from './economy';
 
 export const OPEN_MIN = 8 * 60;
 export const CLOSE_MIN = 21 * 60;
@@ -48,6 +49,12 @@ export interface Decor {
   signColor: string;
 }
 
+/** Regra de pedido automático por produto (ver api.setAutoOrder). */
+export interface AutoOrderRule { minUnits: number; boxes: number }
+
+/** Vendas de um dia por produto: `[unidades, receita, lucro]` (só produtos vendidos; mantém o save pequeno). */
+export interface DayStatsEntry { day: number; p: Record<string, [number, number, number]> }
+
 export interface StoreState {
   version: 1;
   seed: number;
@@ -81,6 +88,18 @@ export interface StoreState {
   decor: Decor;
   /** Maior nível já "consumido" pela UI (ver consumeLevelUps em api.ts). */
   levelAck: number;
+  /** Fase 2: saldo devedor do empréstimo (centavos). */
+  loan: Cents;
+  /** Fase 2: pedidos automáticos por produto. */
+  autoOrders: Record<string, AutoOrderRule>;
+  /** Fase 2: melhorias compradas (ver api.UpgradeId). */
+  upgrades: string[];
+  /** Fase 2: últimos 30 relatórios de dia (closeDay acrescenta). */
+  history: DayReport[];
+  /** Fase 2: vendas por produto dos últimos 30 dias (base de api.topProducts). */
+  stats: DayStatsEntry[];
+  /** Fase 2: quantas vezes o jogador recomeçou após falência. */
+  bankruptcies: number;
 }
 
 /** Layout inicial: 1 caixa registradora e 4 prateleiras de mercearia já atribuídas (salão 12x10). */
@@ -130,5 +149,11 @@ export function newGame(seed = 1): StoreState {
     dirt: [],
     decor: { wallColor: '#f2e8d5', floorColor: '#c9c4b8', signColor: '#d93a3a' },
     levelAck: 1,
+    loan: 0,
+    autoOrders: {},
+    upgrades: [],
+    history: [],
+    stats: [],
+    bankruptcies: 0,
   };
 }

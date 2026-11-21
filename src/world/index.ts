@@ -9,8 +9,10 @@ import { doorPos, deliveryZone, storeBounds, trashBinPos, FURNITURE_FOOTPRINT, S
 import type { Box, Furniture, StoreState } from '../sim/state';
 import { PRODUCTS, productById } from '../sim/catalog';
 import { Shop, Env } from './shop';
-import { buildFurniture, rackSlot, RACK_SLOTS, type FurnitureView } from './furniture';
-import { BoxLayer, BOX_H, type BoxInst } from './products';
+import { buildFurniture, furnitureGeos, furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, type FurnitureView } from './furniture';
+import { BoxLayer, ItemLayer, BOX_H, type BoxInst } from './products';
+import { combine, meshesOf } from './batch';
+import { TIERS, ORDER, initialTier, isTier, isMobileDevice, persistTier, storedTier, type Tier } from './quality';
 import { NavGrid, footprintOf } from './nav';
 import { BuildMode } from './build';
 import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup } from './kit';
@@ -54,15 +56,19 @@ export default function create(): GameModule {
   const root = new THREE.Group(); root.name = 'world';
   let shop!: Shop; let env!: Env;
   const furniGroup = new THREE.Group(); furniGroup.name = 'furniture';
-  const boxLayer = new BoxLayer(160); boxLayer.group.name = 'boxes';
-  const rackLayer = new BoxLayer(160); rackLayer.group.name = 'rackBoxes';
+  const itemLayer = new ItemLayer(); itemLayer.group.name = 'items';
+  const boxLayer = new BoxLayer(itemLayer); boxLayer.group.name = 'boxes';
+  const furniStatic = new THREE.Group(); furniStatic.name = 'furnitureStatic';
   const nav = new NavGrid();
   let build!: BuildMode;
   let demo = false;
   let demoCache: { key: string; v: View } | null = null;
 
-  interface Entry { sig: string; geoSig: string; view: FurnitureView; group: THREE.Group; drawerT: number }
+  /** Cada móvel tem um grupo (só a gaveta do balcão é malha própria); a casca estática de TODOS é fundida em poucas malhas. */
+  interface Entry { geoSig: string; view: FurnitureView; group: THREE.Group; drawerT: number }
   const entries = new Map<number, Entry>();
+  let furniKey = '', itemsKey = '';
+  const staticGeos: THREE.BufferGeometry[] = [];
   let hiddenId: number | null = null;
   let bounds: Bounds = storeBounds(0);
   let shellKey = '', decorKey = '', navKey = '', rackKey = '', boxKey = '', dirtKey = '';
@@ -148,34 +154,64 @@ export default function create(): GameModule {
     let geoChanged = false;
     for (const f of v.furniture) {
       seen.add(f.id);
-      const frac = fillFraction(v, f);
-      const bucket = Math.round(frac * 48);
       const geoSig = `${f.type}|${f.x}|${f.z}|${f.rot}`;
-      const sig = `${geoSig}|${f.productId ?? ''}|${f.variant ?? ''}|${bucket}`;
       let e = entries.get(f.id);
-      if (e && e.sig === sig) continue;
-      if (!e || e.geoSig !== geoSig) geoChanged = true;
-      if (e) { disposeEntry(e); }
-      const view = makeView(f, frac);
-      const group = view.group;
+      if (e && e.geoSig === geoSig) continue;
+      if (e) disposeEntry(e);
+      geoChanged = true;
+      const group = new THREE.Group();
       const { cx, cz } = centerOf(f);
       group.position.set(cx, 0.01, cz);
       group.rotation.y = (f.rot * Math.PI) / 180;
-      group.visible = f.id !== hiddenId;
       group.userData.furnitureId = f.id;
+      let view: FurnitureView = { group };
+      if (f.type === 'counter') { const d = makeDrawer(group); view = { group, drawer: d.drawer, drawerBaseZ: d.baseZ }; }
+      group.visible = f.id !== hiddenId;
       furniGroup.add(group);
-      e = { sig, geoSig, view, group, drawerT: 0 };
+      e = { geoSig, view, group, drawerT: 0 };
       entries.set(f.id, e);
     }
     for (const [id, e] of entries) {
       if (seen.has(id)) continue;
       disposeEntry(e); entries.delete(id); geoChanged = true;
     }
+    // casca estática: refunde só quando algo estrutural muda (tipo/posição/rotação/produto/variante/oculto)
+    const fk = `${hiddenId ?? ''}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${f.productId ?? ''}:${f.variant ?? ''}`).join(',');
+    if (fk !== furniKey) { furniKey = fk; rebuildStatic(v); }
+    // itens expostos: depende também do preenchimento (balde de 1/48)
+    const ik = fk + '|' + v.furniture.map((f) => Math.round(fillFraction(v, f) * 48)).join(',');
+    if (ik !== itemsKey) { itemsKey = ik; rebuildItems(v); }
     const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
   }
+  function rebuildStatic(v: View): void {
+    for (const m of [...furniStatic.children]) furniStatic.remove(m);
+    staticGeos.forEach((g) => g.dispose()); staticGeos.length = 0;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    const parts: { geos: ReturnType<typeof furnitureGeos>; matrix: THREE.Matrix4 }[] = [];
+    for (const f of v.furniture) {
+      if (f.id === hiddenId) continue;
+      const { cx, cz } = centerOf(f);
+      m.compose(p.set(cx, 0.01, cz), q.setFromAxisAngle(up, (f.rot * Math.PI) / 180), one);
+      parts.push({ geos: furnitureGeos(f), matrix: m.clone() });
+    }
+    const merged = combine(parts);
+    for (const mesh of meshesOf(merged, furniStatic)) staticGeos.push(mesh.geometry);
+  }
+  function rebuildItems(v: View): void {
+    const by = new Map<string, number[]>();
+    for (const f of v.furniture) {
+      if (f.id === hiddenId || !f.productId) continue;
+      const { cx, cz } = centerOf(f);
+      const mats = furnitureItems(f, fillFraction(v, f), cx, cz);
+      if (!mats.length) continue;
+      let arr = by.get(f.productId);
+      if (!arr) by.set(f.productId, (arr = []));
+      for (let i = 0; i < mats.length; i++) arr.push(mats[i]!);
+    }
+    itemLayer.setSource('furniture', by);
+  }
   function disposeEntry(e: Entry): void {
-    e.group.traverse((o) => { if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose(); });
     furniGroup.remove(e.group);
   }
   function rebuildNav(v: View): void {
@@ -216,7 +252,7 @@ export default function create(): GameModule {
         open: b.units < size, fill: Math.min(1, b.units / size),
       });
     }
-    boxLayer.update(list);
+    boxLayer.setSource('floor', list);
   }
   const boxSigOf = (v: View): string => v.sidewalk.map((b) => `${b.productId}:${b.units}:${b.x ?? '-'}:${b.z ?? '-'}:${b.carried ? 1 : 0}`).join(',');
 
@@ -241,7 +277,7 @@ export default function create(): GameModule {
         list.push({ pid: q.pid, x: w.x, y: sl.y, z: w.z, ry: (r.rot * Math.PI) / 180 + (hash01(k, 3) - 0.5) * 0.08, open: q.open, fill: q.fill });
       }
     }
-    rackLayer.update(list);
+    boxLayer.setSource('rack', list);
   }
 
   /* ---------------- sincronização geral ---------------- */
@@ -318,7 +354,7 @@ export default function create(): GameModule {
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
       stats: () => ({ calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, geometries: ctx.renderer.info.memory.geometries, textures: ctx.renderer.info.memory.textures }),
       furnitureViews: () => entries.size,
-      boxCounts: () => ({ floor: boxLayer.count, rack: rackLayer.count }),
+      boxCounts: () => ({ floor: boxLayer.countOf('floor'), rack: boxLayer.countOf('rack') }),
       walls: () => shop.faces.map((f) => ({ n: [f.nx, f.nz], fade: +f.fade.toFixed(2) })),
       setCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); },
       startBuild: (type: Furniture['type'], productId?: string) => ctx.bus.emit('build:start', { type, productId }),

@@ -5,9 +5,11 @@ import { icon } from './icons';
 
 export const CATEGORY_COLOR: Record<Category, string> = {
   mercearia: '#d9a441', bebidas: '#3b7fd4', laticinios: '#5fb4d6', congelados: '#7b8ff0', padaria: '#c9803f', limpeza: '#35a891',
+  hortifruti: '#5aa33a', higiene: '#d86fa1', frios: '#c8543f', eletronicos: '#6b6f80',
 };
 export const CATEGORY_NAME: Record<Category, string> = {
   mercearia: 'Mercearia', bebidas: 'Bebidas', laticinios: 'Laticínios', congelados: 'Congelados', padaria: 'Padaria', limpeza: 'Limpeza',
+  hortifruti: 'Hortifrúti', higiene: 'Higiene e Beleza', frios: 'Açougue e Frios', eletronicos: 'Eletrônicos',
 };
 
 export function productTile(name: string, cat: Category): HTMLElement {
@@ -49,4 +51,19 @@ export const emptyState = (t: string): HTMLElement => h('div', { class: 'empty' 
 export function pips(n: number, max: number): HTMLElement {
   return h('span', { class: 'pips', 'aria-label': `Nível ${n} de ${max}` },
     Array.from({ length: max }, (_, i) => h('i', { class: i < n ? 'on' : '' })));
+}
+
+/** Texto colorido por sinal com seta (↑/↓) que só aparece no modo daltônico (`.mx-cb`). */
+export function signed(value: number, text: string, goodWhenPositive = true): HTMLElement {
+  const flat = value === 0;
+  const good = goodWhenPositive ? value >= 0 : value <= 0;
+  return h('span', { class: flat ? 'mute' : good ? 'good' : 'bad' },
+    flat ? null : h('span', { class: 'cbi', 'aria-hidden': 'true' }, value > 0 ? '↑' : '↓'), text);
+}
+
+/** Interruptor acessível (role=switch). */
+export function toggle(on: boolean, label: string, onChange: (v: boolean) => void): HTMLElement {
+  const b = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': label });
+  b.addEventListener('click', () => onChange(b.getAttribute('aria-checked') !== 'true'));
+  return b;
 }

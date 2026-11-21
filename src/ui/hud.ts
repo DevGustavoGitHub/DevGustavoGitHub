@@ -1,5 +1,5 @@
 /** HUD: dinheiro, nível/XP, hora/dia, reputação, clientes, botões de ação, toasts e level-up. */
-import { xpForLevel } from '../sim/economy';
+import { dailyWages, xpForLevel } from '../sim/economy';
 import { h, money } from './dom';
 import { icon } from './icons';
 import type { UiKit, ToastKind } from './kit';
@@ -47,6 +47,7 @@ export class Hud {
   private lastComplaint = 0;
   private flashTimer = 0;
   private building = false;
+  private lowCash = false;
 
   constructor(private kit: UiKit, root: HTMLElement, private hooks: HudHooks) {
     const { ctx } = kit;
@@ -188,6 +189,13 @@ export class Hud {
   private render(force: boolean): void {
     const { state, clock } = this.kit.ctx;
     const shown = Math.round(this.shownMoney);
+    const lowCash = state.money < (state.rent + dailyWages(state)) * 2;
+    if (force || lowCash !== this.lowCash) {
+      this.lowCash = lowCash;
+      this.moneyPill.classList.toggle('low', lowCash);
+      this.moneyPill.title = lowCash ? 'Caixa baixo: confira o Banco na aba Finanças' : '';
+      this.tabletBtn.classList.toggle('alert', lowCash);
+    }
     if (force || shown !== this.lastMoneyVal) { this.lastMoneyVal = shown; this.moneyEl.textContent = money(shown); }
     const c = this.cache;
     if (force || c.level !== state.level || c.xp !== state.xp) {

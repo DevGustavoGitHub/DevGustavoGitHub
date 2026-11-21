@@ -4,12 +4,14 @@
  */
 import type { Cents } from './money';
 
-/** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 4 níveis. */
+/** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 6 níveis (layout.MAX_EXPANSION). */
 export const EXPANSIONS: { cost: Cents; minLevel: number }[] = [
   { cost: 450000, minLevel: 4 },
   { cost: 1600000, minLevel: 8 },
   { cost: 3500000, minLevel: 13 },
   { cost: 7000000, minLevel: 19 },
+  { cost: 14000000, minLevel: 24 },
+  { cost: 26000000, minLevel: 29 },
 ];
 
 /** Aluguel diário extra por nível de expansão. */
@@ -61,3 +63,30 @@ export const SIDEWALK_MAX_BOXES = 48;
 
 export const DECOR_CHANGE_COST: Cents = 1000; // por campo de cor alterado
 export const STORE_NAME_MAX = 24;
+
+/** Empréstimo: limite = base + porNível × nível; juros diários (% do saldo devedor) cobrados em closeDay. */
+export const LOAN = { base: 100000 as Cents, perLevel: 120000 as Cents, dailyRate: 0.004 };
+
+/** Falência: caixa abaixo do piso, sem crédito e sem estoque (liquidado a `stockRecovery` do custo) que cubra o rombo. */
+export const BANKRUPTCY = { floor: 0 as Cents, stockRecovery: 0.5, restartMoney: 300000 as Cents };
+
+/** Melhorias permanentes. Dolly: carrega até 3 caixas (1 sem ela). */
+export const UPGRADES = {
+  dolly: { name: 'Carrinho de carga', description: 'Carregue até 3 caixas de uma vez em vez de 1.', cost: 600000 as Cents, minLevel: 6, carry: 3 },
+};
+export const BASE_CARRY = 1;
+
+/** Dias guardados em history/stats (persistidos no save). */
+export const HISTORY_DAYS = 30;
+
+/** Decoração: variantes visuais (id = Furniture.variant) e preço. O world desenha as que reconhece (fallback: planta). */
+export const DECOR_ITEMS: { id: string; name: string; cost: Cents; minLevel: number }[] = [
+  { id: 'plant', name: 'Planta', cost: 8000, minLevel: 1 },
+  { id: 'banner', name: 'Faixa promocional', cost: 8000, minLevel: 1 },
+  { id: 'lamp', name: 'Luminária de pé', cost: 12000, minLevel: 4 },
+  { id: 'tree', name: 'Árvore ornamental', cost: 20000, minLevel: 8 },
+  { id: 'rug', name: 'Tapete', cost: 15000, minLevel: 6 },
+  { id: 'poster', name: 'Cartaz de ofertas', cost: 10000, minLevel: 5 },
+  { id: 'fountain', name: 'Fonte decorativa', cost: 60000, minLevel: 18 },
+  { id: 'statue', name: 'Estátua do fundador', cost: 120000, minLevel: 26 },
+];
