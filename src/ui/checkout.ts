@@ -35,6 +35,8 @@ export class Checkout {
   private bagCount!: HTMLElement;
   private bag!: HTMLElement;
   private doneTimer = 0;
+  private hudT = 0;
+  private onResize = (): void => this.syncHud();
 
   constructor(private kit: UiKit, private layer: HTMLElement) {}
 
@@ -62,6 +64,8 @@ export class Checkout {
       this.stageBody);
     this.wrap = h('div', { class: 'ck-wrap' }, this.panel);
     this.layer.appendChild(this.wrap);
+    this.syncHud();
+    window.addEventListener('resize', this.onResize);
     this.kit.modalOpen('checkout');
     this.kit.sfx('pop');
     this.renderScan();
@@ -259,17 +263,32 @@ export class Checkout {
 
   close(): void {
     window.clearTimeout(this.doneTimer);
+    window.removeEventListener('resize', this.onResize);
     this.wrap?.remove();
     this.wrap = null;
     this.req = null;
     this.kit.modalClose('checkout');
   }
 
+  /** Mede a base do HUD (barra superior) para o painel nunca sobrepô-lo, em retrato ou paisagem baixa. */
+  private syncHud(): void {
+    const wrap = this.wrap;
+    const hud = this.layer.querySelector<HTMLElement>('.hud');
+    if (!wrap || !hud) return;
+    const lr = this.layer.getBoundingClientRect();
+    const scale = this.layer.offsetHeight > 0 ? lr.height / this.layer.offsetHeight : 1;
+    const bottom = (hud.getBoundingClientRect().bottom - lr.top) / (scale || 1);
+    if (Number.isFinite(bottom) && bottom > 0) wrap.style.setProperty('--hud-b', `${Math.ceil(bottom)}px`);
+  }
+
   update(dt: number): void {
     if (!this.wrap || this.stage === 'done') return;
+    this.hudT += dt;
+    if (this.hudT > 0.5) { this.hudT = 0; this.syncHud(); }
     this.elapsed += dt;
     const sp = this.speed();
     this.meter.style.width = `${(sp * 100).toFixed(0)}%`;
-    this.meter.style.background = sp > 0.66 ? '#3ddc8e' : sp > 0.33 ? '#ffc94d' : '#ff6368';
+    const cb = this.kit.settings.value.colorblind;
+    this.meter.style.background = sp > 0.66 ? (cb ? '#4a9bff' : '#3ddc8e') : sp > 0.33 ? '#ffc94d' : (cb ? '#ff8a1f' : '#ff6368');
   }
 }

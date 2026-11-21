@@ -281,6 +281,15 @@ export class BuildMode {
     if (rot !== undefined && rot !== this.rot) { this.rot = rot; this.rebuildGhost(); }
     this.x = x; this.z = z; this.refresh();
   }
+  /** Distância da câmera ao alvo (zoom do modo construção) — testes. */
+  get camDist(): number { return this.dist; }
+  /** Posição do fantasma na tela (px) — testes de toque. */
+  ghostScreen(): { x: number; y: number } {
+    const fp = this.footprint();
+    const v = new THREE.Vector3(this.x + fp.w / 2, 0.4, this.z + fp.d / 2).project(this.d.ctx.camera);
+    const r = this.d.ctx.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+  }
   get pose(): { x: number; z: number; rot: Rot; valid: boolean; type: FurnitureType; mode: string } {
     return { x: this.x, z: this.z, rot: this.rot, valid: this.valid, type: this.type, mode: this.mode };
   }
@@ -363,7 +372,7 @@ export class BuildMode {
         while (da > Math.PI) da -= Math.PI * 2;
         while (da < -Math.PI) da += Math.PI * 2;
         this.pinch.a = ang; this.pinch.acc += da;
-        if (Math.abs(this.pinch.acc) > 0.6) { this.pinch.acc = 0; this.rotate(); }
+        if (Math.abs(this.pinch.acc) > 0.9) { this.pinch.acc = 0; this.rotate(); }
         return;
       }
       if (p.mode === 'ghost') {

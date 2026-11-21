@@ -9,6 +9,7 @@ import createPlayer from './player';
 import createNpc from './npc';
 import createUi from './ui';
 import createAudio from './audio';
+import { TIERS, initialTier } from './world/quality';
 
 const kv: KV = {
   getItem: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -16,8 +17,10 @@ const kv: KV = {
 };
 
 const app = document.getElementById('app')!;
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Qualidade inicial (opção salva ou padrão por dispositivo); o world ajusta o resto em tempo real. Antialias só vale no carregamento.
+const tier0 = TIERS[initialTier()];
+const renderer = new THREE.WebGLRenderer({ antialias: tier0.antialias, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, tier0.pixelRatio));
 renderer.shadowMap.enabled = true;
 app.appendChild(renderer.domElement);
 

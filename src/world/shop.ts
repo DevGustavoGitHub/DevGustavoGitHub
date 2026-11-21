@@ -275,7 +275,7 @@ export class Shop {
     };
     this.doorBaseL = W / 2 - 0.49; this.doorBaseR = W / 2 + 0.49;
     this.doorL = mkDoor(this.doorBaseL); this.doorR = mkDoor(this.doorBaseR);
-    sb.box(DOOR_WIDTH, 0.1, 0.1, frame, W / 2, 2.4, D + t + 0.03 - 0.05 + 0.05);
+    sb.box(DOOR_WIDTH, 0.1, 0.1, frame, W / 2, 2.4, D + t + 0.03);
     // letreiro: caixa escura (lote estático) + placa com a textura do nome
     const sw = Math.min(W - 1.6, 8.5), sh = 0.95;
     this.signCanvas = document.createElement('canvas'); this.signCanvas.width = 1024; this.signCanvas.height = Math.round(1024 * sh / sw);

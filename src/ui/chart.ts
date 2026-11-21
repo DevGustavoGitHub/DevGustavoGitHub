@@ -71,7 +71,7 @@ export function profitChart(rows: DayReport[], hold: (v: boolean) => void): HTML
   if (n >= 5) xl(Math.floor((n - 1) / 2), 'middle');
   if (n >= 2) xl(n - 1, 'end');
 
-  const tip = h('div', { class: 'tip', hidden: true });
+  const tip = h('div', { class: 'ctip', hidden: true });
   let cur = -1;
   let hideT = 0;
   const show = (i: number): void => {

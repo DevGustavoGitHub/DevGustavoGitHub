@@ -82,9 +82,9 @@ for (const vp of [{ width: 844, height: 390, name: 'paisagem' }, { width: 390, h
   await frames(page, 6);
   const p1 = await snap(page);
   check(`${tag} pinça (afastar dedos) aproxima a câmera`, p1.distT < p0.distT - 0.5, `${p0.distT.toFixed(1)} -> ${p1.distT.toFixed(1)}`);
-  await touch('touchStart', [{ id: 5, x: W * 0.45, y: H * 0.5 }, { id: 6, x: W * 0.95, y: H * 0.5 }]);
-  const C = { id: 5, x: W * 0.45, y: H * 0.5 }, D = { id: 6, x: W * 0.95, y: H * 0.5 };
-  for (let i = 1; i <= 10; i++) { C.x += 14; D.x -= 14; await touch('touchMove', [C, D]); await page.waitForTimeout(30); }
+  const C = { id: 5, x: W * 0.56, y: H * 0.5 }, D = { id: 6, x: W * 0.96, y: H * 0.5 };
+  await touch('touchStart', [C, D]);
+  for (let i = 1; i <= 10; i++) { C.x += W * 0.012; D.x -= W * 0.012; await touch('touchMove', [C, D]); await page.waitForTimeout(30); }
   await touch('touchEnd', [C, D]);
   await frames(page, 6);
   const p2 = await snap(page);

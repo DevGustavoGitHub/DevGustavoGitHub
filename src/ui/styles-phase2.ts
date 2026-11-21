@@ -45,8 +45,8 @@ export const phase2Css = `
 .chart .bar-pos{fill:#2a6fdb}.chart .bar-neg{fill:url(#mx-hatch)}
 .chart .bar-neg-out{fill:#e8710a}
 .chart .sel{fill:rgba(37,34,46,.12)}
-.chart .tip{position:absolute;pointer-events:none;background:var(--c-glass-2);color:#fff;border-radius:10px;padding:6px 10px;font-size:13px;line-height:1.3;white-space:nowrap;box-shadow:var(--sh-1);z-index:3;transform:translateX(-50%)}
-.chart .tip b{display:block;font-size:14px}
+.chart .ctip{position:absolute;pointer-events:none;background:var(--c-glass-2);color:#fff;border-radius:10px;padding:6px 10px;font-size:13px;line-height:1.3;white-space:nowrap;box-shadow:var(--sh-1);z-index:3;transform:translateX(-50%)}
+.chart .ctip b{display:block;font-size:14px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--c-ink-2);font-weight:600}
 .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .tbl{width:100%;border-collapse:collapse;font-size:14px}

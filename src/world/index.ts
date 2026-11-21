@@ -10,12 +10,35 @@ import type { Box, Furniture, StoreState } from '../sim/state';
 import { PRODUCTS, productById } from '../sim/catalog';
 import { Shop, Env } from './shop';
 import { buildFurniture, furnitureGeos, furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, type FurnitureView } from './furniture';
-import { BoxLayer, ItemLayer, BOX_H, type BoxInst } from './products';
+import { BoxLayer, ItemLayer, BOX_H, genericVisual, productVisual, type BoxInst } from './products';
+import { SHAPES } from './look';
 import { combine, meshesOf } from './batch';
 import { TIERS, ORDER, initialTier, isTier, isMobileDevice, persistTier, storedTier, type Tier } from './quality';
 import { NavGrid, footprintOf } from './nav';
 import { BuildMode } from './build';
 import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup } from './kit';
+
+/** Autoteste dos visuais genéricos (qualquer shape/cor/categoria, inclusive desconhecidos, gera geometria válida). */
+function genericProductsSelfTest(): { ok: boolean; combos: number; bad: string[]; catalog: number } {
+  const bad: string[] = [];
+  let combos = 0;
+  const shapes: (string | undefined)[] = [...SHAPES, undefined, 'forma-inexistente'];
+  const cats = ['mercearia', 'hortifruti', 'higiene', 'frios', 'acougue', 'eletronicos', 'categoria-nova'];
+  const colors: (string | undefined)[] = ['#d62828', '#3fb64f', undefined, 'nao-e-cor'];
+  for (const shape of shapes) for (const category of cats) for (const color of colors) {
+    combos++;
+    const v = genericVisual({ shape, category, color } as unknown as Parameters<typeof genericVisual>[0]);
+    const pos = v.geo.getAttribute('position');
+    v.geo.computeBoundingBox();
+    const bb = v.geo.boundingBox!;
+    const fine = pos.count > 0 && Number.isFinite(bb.max.x + bb.min.y) && v.w > 0.05 && v.w < 0.4 && v.h > 0.05 && v.h < 0.4 && !!v.geo.getAttribute('color');
+    if (!fine) bad.push(`${shape}/${category}/${color}`);
+    v.geo.dispose();
+  }
+  for (const p of PRODUCTS) { const v = productVisual(p.id); if (!v.geo.getAttribute('position').count) bad.push(p.id); }
+  if (productVisual('id-que-nao-existe').geo.getAttribute('position').count === 0) bad.push('unknown');
+  return { ok: bad.length === 0, combos, bad, catalog: PRODUCTS.length };
+}
 
 /** Visão do estado usada para desenhar. No modo demo (?demo) e com estado vazio, usa dados locais que NUNCA são persistidos. */
 interface View {
@@ -337,11 +360,47 @@ export default function create(): GameModule {
       }
       return { furnitureId: f.id, operator: tileC(op.x, op.z), queue, scanner: localToWorld(cx, cz, f.rot, 0.52, 0.62) };
     }),
-    spawnPoint: () => ({ x: -7.5, z: bounds.depth + SIDEWALK_DEPTH + 0.5 }),
+    // perto da porta (≈7 m de caminhada até ela) em vez de nascer no fim do quarteirão
+    spawnPoint: () => ({ x: Math.floor(doorPos(bounds).x - 5) + 0.5, z: bounds.depth + SIDEWALK_DEPTH + 0.5 }),
     trashBin: () => trashBinPos(bounds),
     door: () => doorPos(bounds),
     group: root,
   };
+
+  /* ---------------- qualidade (tiers) + adaptação automática ---------------- */
+  let tier: Tier = 'medium';
+  let firstSettings = true;
+  let autoOn = true;
+  const fpsWin = { frames: 0, ms: 0, last: 0, since: 0 };
+  function applyTier(t: Tier): void {
+    tier = t;
+    const cfg = TIERS[t];
+    const r = ctx.renderer;
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, cfg.pixelRatio));
+    r.setSize(window.innerWidth, window.innerHeight, false);
+    env.setShadow(cfg.shadow);
+    if (ctx.scene.fog) { const fg = ctx.scene.fog as THREE.Fog; fg.near = cfg.fog[0]; fg.far = cfg.fog[1]; }
+    fpsWin.frames = 0; fpsWin.ms = 0; fpsWin.since = performance.now();
+  }
+  function watchFps(): void {
+    const now = performance.now();
+    const gap = fpsWin.last ? now - fpsWin.last : 0;
+    fpsWin.last = now;
+    if (!autoOn || tier === 'low' || document.visibilityState !== 'visible') { fpsWin.frames = 0; fpsWin.ms = 0; return; }
+    if (gap > 1000 || now - fpsWin.since < 4000) { if (gap > 1000) fpsWin.since = now; fpsWin.frames = 0; fpsWin.ms = 0; return; } // aba em segundo plano / aquecimento
+    fpsWin.frames++; fpsWin.ms += gap;
+    if (fpsWin.ms < 3000) return;
+    const fps = (fpsWin.frames / fpsWin.ms) * 1000;
+    fpsWin.frames = 0; fpsWin.ms = 0;
+    if (fps >= 30) return;
+    const lower = ORDER[Math.max(0, ORDER.indexOf(tier) - 1)]!;
+    applyTier(lower); persistTier(lower);
+    ctx.bus.emit('quality:auto', { quality: lower, fps: Math.round(fps) });
+    ctx.bus.emit('toast', { text: `Desempenho baixo (${Math.round(fps)} fps): qualidade gráfica reduzida para ${lower === 'low' ? 'baixa' : 'média'}.`, kind: 'info' });
+  }
+  const qualityInfo = (): { tier: Tier; pixelRatio: number; shadows: number; antialias: boolean; auto: boolean; mobile: boolean } => ({
+    tier, pixelRatio: ctx.renderer.getPixelRatio(), shadows: TIERS[tier].shadow, antialias: !!ctx.renderer.getContextAttributes()?.antialias, auto: autoOn, mobile: isMobileDevice(),
+  });
 
   /* ---------------- ciclo do módulo ---------------- */
   function exposeDebug(): void {
@@ -352,6 +411,10 @@ export default function create(): GameModule {
       sync: () => sync(false),
       demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; entries.forEach(disposeEntry); entries.clear(); sync(false); },
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
+      quality: qualityInfo,
+      setTier: (t: Tier) => applyTier(t),
+      autoQuality: (on: boolean) => { autoOn = on; },
+      testGenericProducts: () => genericProductsSelfTest(),
       stats: () => ({ calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, geometries: ctx.renderer.info.memory.geometries, textures: ctx.renderer.info.memory.textures }),
       furnitureViews: () => entries.size,
       boxCounts: () => ({ floor: boxLayer.countOf('floor'), rack: boxLayer.countOf('rack') }),
@@ -372,15 +435,18 @@ export default function create(): GameModule {
       ctx.scene.add(root);
       shop = new Shop(); env = new Env(ctx.scene);
       ctx.scene.fog = new THREE.Fog(0xd5ecff, 95, 230);
-      root.add(env.group, shop.group, furniGroup, boxLayer.group, rackLayer.group);
+      root.add(env.group, shop.group, furniStatic, furniGroup, itemLayer.group, boxLayer.group);
       initDirt();
       build = new BuildMode({
         ctx, root,
         bounds: () => bounds, storageUnlocked: () => ctx.state.storageUnlocked,
         furniture: () => view().furniture,
         buildModel: (f, fr) => makeView(f, fr),
-        hide: (id) => { hiddenId = id; for (const [fid, e] of entries) e.group.visible = fid !== id; },
+        hide: (id) => { hiddenId = id; for (const [fid, e] of entries) e.group.visible = fid !== id; sync(false); },
       });
+      const t0 = initialTier();
+      autoOn = !navigator.webdriver || /[?&]autoq=1/.test(location.search); // testes automatizados (WebDriver) não são rebaixados
+      applyTier(t0);
       sync(true);
       ctx.services.world = service;
       // câmera inicial: visão da fachada, caso o módulo player ainda não controle
@@ -388,6 +454,13 @@ export default function create(): GameModule {
       ctx.camera.lookAt(bounds.width / 2, 0, bounds.depth / 2 - 1);
       const on = ctx.bus.on.bind(ctx.bus);
       offs.push(
+        on('settings:changed', (p: { quality?: unknown }) => {
+          // o primeiro evento é a emissão inicial da UI: só vale se o jogador já escolheu algo antes (senão vence o padrão por dispositivo)
+          const first = firstSettings; firstSettings = false;
+          if (!isTier(p?.quality)) return;
+          if (first && storedTier() === null) return;
+          applyTier(p.quality);
+        }),
         on('stateChanged', () => sync(false)),
         on('dayStarted', () => sync(false)),
         on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string }) => { sync(false); build.start(p.type, p.productId, p.variant); }),
@@ -400,6 +473,7 @@ export default function create(): GameModule {
       exposeDebug();
     },
     update(dt) {
+      watchFps();
       acc += dt;
       if (acc >= 0.25) { acc = 0; sync(false); }
       const min = ctx.clock.minute;
@@ -427,7 +501,8 @@ export default function create(): GameModule {
       build.dispose();
       for (const e of entries.values()) disposeEntry(e);
       entries.clear();
-      boxLayer.dispose(); rackLayer.dispose();
+      boxLayer.dispose(); itemLayer.dispose();
+      staticGeos.forEach((g) => g.dispose()); staticGeos.length = 0;
       dirtMesh?.dispose(); dirtGeo?.dispose(); dirtMat?.dispose(); dirtTex?.dispose();
       shop.dispose(); env.dispose();
       clearGroup(root);

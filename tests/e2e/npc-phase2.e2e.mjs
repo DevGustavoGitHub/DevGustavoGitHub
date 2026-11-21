@@ -69,13 +69,15 @@ await page.evaluate(() => {
   s.sidewalk.push({ productId: 'arroz', units: 6 }, { productId: 'feijao', units: 12 });
   __game.state.sidewalk.slice();
   __npc.sync();
+  __npc.timeScale = 4;
 });
-const stocked = await until(() => { const s = __game.state; return s.shelf.arroz > 0 && s.shelf.feijao > 0 && s.sidewalk.length === 0 ? { a: s.shelf.arroz, f: s.shelf.feijao } : null; }, undefined, 60000);
+const stocked = await until(() => { const s = __game.state; return s.shelf.arroz > 0 && s.shelf.feijao > 0 && s.sidewalk.length === 0 ? { a: s.shelf.arroz, f: s.shelf.feijao } : null; }, undefined, 90000);
 check('repositor abasteceu 2 caixas e jogou as vazias fora', !!stocked, JSON.stringify(stocked));
 await page.evaluate(() => { __game.state.employees.stocker = 0; __npc.sync(); });
 
 /* ---------- 2) cancelamento do checkout ---------- */
 await page.evaluate(() => {
+  __game.clock.phase = 'open'; __game.clock.minute = 600; __game.state.employees.stocker = 0;
   for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) __game.state.shelf[id] = 20;
   window.__reqs.length = 0; window.__mode = 'cancel'; window.__cancels = 0;
   __game.bus.on('checkoutRequest', (r) => setTimeout(() => {

@@ -105,6 +105,7 @@ try {
 
   check('sem erros de console', errors.length === 0, errors.slice(0, 3).join(' | '));
 
+  await ctx.close(); // libera a CPU (software GL) antes do teste de toque
   // gestos de dois dedos no build mode (CDP touch)
   const mctx = await browser.newContext({ viewport: { width: 800, height: 500 }, hasTouch: true, isMobile: true });
   const mp = await mctx.newPage();
@@ -120,13 +121,14 @@ try {
   await mp.waitForTimeout(1500);
   const cdp = await mctx.newCDPSession(mp);
   const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1 })) });
+  const settle = async () => { await mp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); await mp.waitForTimeout(150); };
   const pose0 = await mp.evaluate(() => ({ ...window.__world.build.pose, dist: window.__world.build.camDist }));
   // pinca: afastar dois dedos horizontalmente (zoom in) mantendo o angulo
   const cx = 400, cy = 250;
   await touch('touchStart', [[cx - 40, cy], [cx + 40, cy]]);
   for (let i = 1; i <= 10; i++) await touch('touchMove', [[cx - 40 - i * 12, cy], [cx + 40 + i * 12, cy]]);
   await touch('touchEnd', []);
-  await mp.waitForTimeout(200);
+  await settle();
   const pose1 = await mp.evaluate(() => ({ ...window.__world.build.pose, dist: window.__world.build.camDist }));
   check('pinca altera o zoom', pose1.dist < pose0.dist - 1, `(${pose0.dist.toFixed(1)} -> ${pose1.dist.toFixed(1)})`);
   check('pinca nao gira o movel', pose1.rot === pose0.rot, `(${pose0.rot} -> ${pose1.rot})`);
@@ -137,7 +139,7 @@ try {
     await touch('touchMove', [[cx - 60 * Math.cos(a), cy - 60 * Math.sin(a)], [cx + 60 * Math.cos(a), cy + 60 * Math.sin(a)]]);
   }
   await touch('touchEnd', []);
-  await mp.waitForTimeout(200);
+  await settle();
   const pose2 = await mp.evaluate(() => ({ ...window.__world.build.pose, dist: window.__world.build.camDist }));
   check('giro de dois dedos gira o movel', pose2.rot !== pose1.rot, `(${pose1.rot} -> ${pose2.rot})`);
   check('giro nao altera o zoom', Math.abs(pose2.dist - pose1.dist) < 1.5, `(${pose1.dist.toFixed(1)} -> ${pose2.dist.toFixed(1)})`);
@@ -147,7 +149,7 @@ try {
   await touch('touchStart', [[scr.x, scr.y]]);
   for (let i = 1; i <= 8; i++) await touch('touchMove', [[scr.x - i * 14, scr.y]]);
   await touch('touchEnd', []);
-  await mp.waitForTimeout(200);
+  await settle();
   const p4 = await mp.evaluate(() => ({ ...window.__world.build.pose }));
   check('arrastar com um dedo move o fantasma', p4.x !== p3.x || p4.z !== p3.z, `(${p3.x},${p3.z} -> ${p4.x},${p4.z})`);
   check('sem erros de pagina (celular)', merr.length === 0, merr.slice(0, 3).join(' | '));
