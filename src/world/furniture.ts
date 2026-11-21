@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import type { Furniture } from '../sim/state';
-import { stdMat, bx, put, boxGeo, cylGeo, sphGeo, icoGeo, coneGeo, planeGeo, makeCanvas, canvasTex, hex, hash01 } from './kit';
+import { stdMat, bx, put, boxGeo, cylGeo, sphGeo, icoGeo, coneGeo, planeGeo, makeCanvas, canvasTex, hash01 } from './kit';
 import { productVisual, productMat, shelfSignMat, categoryColor } from './products';
 
 export interface FurnitureView {
@@ -170,7 +170,6 @@ function counter(): FurnitureView {
   bx(g, 0.24, 0.15, 0.005, stdMat(0x7be0a3, { emissive: 0x39d98a, ei: 1.1 }), 0.62, 1.01, -0.405, { cast: false }).rotation.x = -0.35;
   for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) bx(g, 0.05, 0.012, 0.04, stdMat(0xdce1e6), 0.5 + c * 0.075, 1.02, -0.22 + r * 0.05 - 0.04, { cast: false });
   const drawer = bx(g, 0.36, 0.06, 0.3, stdMat(0x6b7480, { rough: 0.5 }), 0.62, 0.9, -0.3, { cast: false });
-  bx(g, 0.34, 0.012, 0.28, stdMat(0x2e7d32), 0.62, 0.95, -0.3, { cast: false }).visible = false;
   // maquininha de cartão no suporte
   bx(g, 0.05, 0.1, 0.05, steel, 0.3, 0.94, 0.12);
   const cm = bx(g, 0.1, 0.03, 0.16, dark, 0.3, 1.03, 0.12);
@@ -265,4 +264,3 @@ export function buildFurniture(f: Furniture, fraction: number): FurnitureView {
     default: return decor(f);
   }
 }
-void hex;

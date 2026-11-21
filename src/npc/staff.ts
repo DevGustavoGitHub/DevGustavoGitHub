@@ -27,7 +27,7 @@ export abstract class Staff extends Agent {
 export class Cashier extends Staff {
   lane: Lane | null = null;
   private posted = false;
-  constructor(env: Env) { super(env, 'cashier'); }
+  constructor(env: Env) { super(env, 'cashier'); this.sepWeight = 0; }
   atPost(lane: Lane): boolean { return this.lane === lane && this.posted; }
   update(dt: number, _working: boolean): void {
     const lane = this.lane;

@@ -112,7 +112,7 @@ export class Shop {
   readonly group = new THREE.Group();
   readonly faces: WallFace[] = [];
   private tr = new Tracker();
-  private soft: { mat: THREE.MeshStandardMaterial; fade: number }[] = [];
+  private soft: { mat: THREE.MeshStandardMaterial }[] = [];
   private floorMat: THREE.MeshStandardMaterial | null = null;
   private signMat: THREE.MeshStandardMaterial | null = null;
   private signCanvas: HTMLCanvasElement | null = null;
@@ -192,10 +192,6 @@ export class Shop {
     const mat = stdMat(0x7a2e2e, { rough: 1 });
     bx(g, 1.8, 0.02, 0.9, mat, W / 2, 0.01, D - 0.6, { cast: false });
     bx(g, 1.8, 0.02, 0.9, stdMat(0x3b3f47, { rough: 1 }), W / 2, 0.02, D + 0.7, { cast: false });
-    // luminárias penduradas (apenas visual)
-    const lampM = stdMat(0xfff4d6, { emissive: 0xffe9b0, ei: 0.8 });
-    nightMats.push(lampM);
-    for (let x = 2; x < W - 1; x += 4) for (let z = 2; z < D - 1; z += 4) bx(g, 0.9, 0.04, 0.25, lampM, x, WALL_HEIGHT - 0.02, z, { cast: false, recv: false }).visible = false;
     this.setDecor(decor, name);
   }
 
@@ -251,29 +247,30 @@ export class Shop {
     const dark = tr.mat(new THREE.MeshStandardMaterial({ color: 0x2b2e35, roughness: 0.6 }));
     const board = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(sw, sh, 0.12)), [dark, dark, dark, dark, this.signMat, dark]);
     board.position.set(W / 2, WALL_HEIGHT + 0.58, D + t + 0.06); g.add(board);
-    this.soft.push({ mat: this.signMat, fade: 1 });
+    this.soft.push({ mat: this.signMat });
     // toldo listrado sobre a porta
     const aw = tr.mat(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
     const awc = makeCanvas(128, 16);
     for (let i = 0; i < 8; i++) { awc.g.fillStyle = i % 2 ? '#ffffff' : '#d93a3a'; awc.g.fillRect(i * 16, 0, 16, 16); }
     const awt = tr.tex(canvasTex(awc.c, true));
     aw.map = awt; aw.needsUpdate = true;
-    this.awningMat = aw;
+    this.awningMat = aw; this.awningCanvas = awc.c;
     const ag = tr.geo(new THREE.BoxGeometry(3.2, 0.05, 1.1)); scaleUV(ag, 1, 1);
     const awning = new THREE.Mesh(ag, aw); awning.position.set(W / 2, 2.75, D + t + 0.55); awning.rotation.x = 0.28; awning.castShadow = true; g.add(awning);
-    this.soft.push({ mat: aw, fade: 1 });
+    this.soft.push({ mat: aw });
     void decor; void name;
   }
   private awningMat: THREE.MeshStandardMaterial | null = null;
+  private awningCanvas: HTMLCanvasElement | null = null;
 
   /** Cores/nome que reagem ao estado sem reconstruir. */
   setDecor(decor: Decor, name: string): void {
     for (const m of this.innerMats) m.color.set(hex(decor.wallColor));
     this.floorMat?.color.set(hex(decor.floorColor));
-    if (this.awningMat) {
-      const c = new THREE.Color(hex(decor.signColor));
-      this.awningMat.color.set(0xffffff);
-      void c;
+    if (this.awningCanvas && this.awningMat?.map) {
+      const ag = this.awningCanvas.getContext('2d')!;
+      for (let i = 0; i < 8; i++) { ag.fillStyle = i % 2 ? '#ffffff' : decor.signColor; ag.fillRect(i * 16, 0, 16, 16); }
+      this.awningMat.map.needsUpdate = true;
     }
     if (this.signCanvas && this.signMat?.map) {
       const cv = this.signCanvas, g = cv.getContext('2d')!;
@@ -315,11 +312,8 @@ export class Shop {
     }
     const front = this.faces.find((f) => f.nz === 1 && f.nx === 0);
     const ft = front ? front.fade : 1;
-    for (const s of this.soft) {
-      s.fade = 0.42 + 0.58 * (ft < 0.5 ? Math.max(0, (ft - 0.1) / 0.4) : 1) * (ft >= 0.5 ? 1 : 1);
-      s.mat.opacity = ft >= 0.995 ? 1 : 0.4 + 0.6 * Math.min(1, (ft - 0.1) / 0.9);
-      s.mat.transparent = s.mat.opacity < 0.995;
-    }
+    const softOp = ft >= 0.995 ? 1 : 0.4 + 0.6 * Math.min(1, (ft - 0.1) / 0.9);
+    for (const s of this.soft) { s.mat.opacity = softOp; s.mat.transparent = softOp < 0.995; }
     if (this.signMat) this.signMat.emissiveIntensity = 0.12 + night * 0.9;
   }
 
@@ -328,8 +322,7 @@ export class Shop {
     while (this.group.children.length) this.group.remove(this.group.children[0]!);
     this.tr.disposeAll();
     this.faces.length = 0; this.innerMats.length = 0; this.soft.length = 0;
-    this.floorMat = null; this.signMat = null; this.signCanvas = null; this.doorL = null; this.doorR = null; this.awningMat = null;
-    nightMats.length = nightMats.filter((m) => bldMats.has(m.color.getHex()) || true).length; // mantém lista (materiais de prédio)
+    this.floorMat = null; this.signMat = null; this.signCanvas = null; this.doorL = null; this.doorR = null; this.awningMat = null; this.awningCanvas = null;
   }
   dispose(): void { this.clear(); }
 }
@@ -359,7 +352,7 @@ export class Env {
       side: THREE.BackSide, depthWrite: false, fog: false,
       uniforms: { top: { value: new THREE.Color(0x3f9bea) }, hor: { value: new THREE.Color(0xd5ecff) } },
       vertexShader: 'varying float vY; void main(){ vY = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 top; uniform vec3 hor; varying float vY; void main(){ float k = smoothstep(-0.05, 0.6, vY); gl_FragColor = vec4(mix(hor, top, k), 1.0); #include <colorspace_fragment>\n }',
+      fragmentShader: 'uniform vec3 top; uniform vec3 hor; varying float vY; void main(){ float k = smoothstep(-0.05, 0.6, vY); gl_FragColor = vec4(mix(hor, top, k), 1.0);\n#include <colorspace_fragment>\n}',
     });
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);

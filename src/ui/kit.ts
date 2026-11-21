@@ -13,7 +13,7 @@ export interface ConfirmOpts { title: string; text: string; ok?: string; cancel?
 export class UiKit {
   readonly settings: SettingsStore;
   /** Dica do tutorial mostrada no topo do tablet (null = nenhuma). */
-  tutorialHint: string | null = null;
+  tutorialHint: { tab: string; text: string } | null = null;
   private modals = new Set<string>();
   private pausedBy = new Set<string>();
   private layer!: HTMLElement;

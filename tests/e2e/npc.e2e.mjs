@@ -47,15 +47,19 @@ await page.evaluate(() => {
   window.__shelfBefore = Object.values(s.shelf).reduce((a, b) => a + b, 0);
   // simula o jogador atendendo: responde ao pedido de checkout como o minigame faria
   __game.bus.on('checkoutRequest', (r) => setTimeout(() => __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.7, mistakes: 0 }), 700));
-  __game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false, atCounter: null };
-  __game.clock.openStore();
-  __npc.timeScale = 2;
+  // jogador "sempre no balcão" (o módulo player real não está encostado no counter durante o teste)
+  const pl = (__game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false });
+  try { Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, configurable: true }); } catch (e) { console.error('atCounter', e); }
+  __game.uiRoot.style.display = 'none';
+  __game.clock.paused = false; __game.clock.openStore();
+  __npc.timeScale = 8;
+  setInterval(() => { __game.clock.paused = false; }, 100); // modais da UI pausam o relógio; o teste responde ao checkout sozinho
 });
 await page.waitForTimeout(8000);
 await page.screenshot({ path: `${OUT}/01-customers.png` });
 const mid = await page.evaluate(() => ({ stats: { ...__npc.stats }, c: __npc.customers(), in: __game.services.npc.customersInStore(), lanes: __npc.lanes(), min: __game.clock.hhmm }));
 console.log('mid', JSON.stringify(mid));
-await page.waitForTimeout(25000);
+await page.waitForTimeout(30000);
 await page.screenshot({ path: `${OUT}/02-later.png` });
 const end = await page.evaluate(() => ({ stats: { ...__npc.stats }, money: __game.state.money, before: __moneyBefore, shelf: Object.values(__game.state.shelf).reduce((a, b) => a + b, 0), shelfBefore: __shelfBefore, ledger: { ...__game.state.ledger }, min: __game.clock.hhmm, phase: __game.clock.phase, dirt: __game.state.dirt.length }));
 console.log('end', JSON.stringify(end));
@@ -69,7 +73,7 @@ check('estoque de prateleira diminuiu', end.shelf < end.shelfBefore);
 const empty = await page.evaluate(() => new Promise((res) => {
   let got = false;
   __game.bus.on('storeEmpty', () => { got = true; });
-  __game.clock.closeStore();
+  __game.clock.paused = false; __game.clock.closeStore();
   __npc.timeScale = 10;
   const t0 = performance.now();
   const iv = setInterval(() => { if (got || performance.now() - t0 > 90000) { clearInterval(iv); res({ got, left: __game.services.npc.customersInStore() }); } }, 200);

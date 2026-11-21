@@ -59,6 +59,7 @@ export class Agent implements AgentLike {
   /** Inicia deslocamento até (x,z). Retorna false se o caminho for inválido (cai em linha reta). */
   moveTo(x: number, z: number, direct = false): boolean {
     this.tx = x; this.tz = z;
+    this.faceYaw = NaN;
     this.moving = true;
     this.stuckT = 0;
     this.repathed = false;
@@ -122,7 +123,7 @@ export class Agent implements AgentLike {
         const dd = ox * ox + oz * oz;
         if (dd < SEP_R * SEP_R && dd > 1e-6) {
           const m = Math.sqrt(dd);
-          const f = ((SEP_R - m) / SEP_R) * 1.4 * this.sepWeight * (o.sepWeight > 0 ? 1 : 0);
+          const f = ((SEP_R - m) / SEP_R) * 1.4 * this.sepWeight;
           sx += (ox / m) * f; sz += (oz / m) * f;
         }
       }
