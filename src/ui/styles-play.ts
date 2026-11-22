@@ -140,4 +140,16 @@ button.den:active{transform:translateY(2px) scale(.97)}
 .switch::after{content:"";position:absolute;top:4px;left:4px;width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:var(--sh-1);transition:transform .2s}
 .switch[aria-checked=true]{background:var(--c-brand)}.switch[aria-checked=true]::after{transform:translateX(24px)}
 .menu-sub{display:flex;gap:6px;flex-direction:column}
+
+/* Teclado da maquininha: a altura das teclas acompanha a altura útil da tela (celular em paisagem ou retrato,
+   dentro de iframe ou com barras do navegador) para a última linha (C, 0, apagar) nunca ficar cortada.
+   Constantes calibradas por medição (tests/e2e/ui-phone-fit.e2e.mjs): retrato ≈ 366px de outros blocos, paisagem ≈ 124px. */
+.key{--kh:clamp(30px,calc((100vh - var(--hud-b,56px) - 366px) / 4),56px);min-height:var(--kh);height:var(--kh);font-size:clamp(16px,calc(var(--kh) * .42),24px)}
+.keypad{gap:clamp(4px,1.2vh,8px)}
+@media (orientation:portrait) and (max-height:780px){
+  .ck-hint{display:none}.ck-ok{min-height:46px}.screen{font-size:28px;padding:6px 10px}.reader{padding:8px 12px}.ck-body.pay{gap:8px}
+}
+@media (orientation:landscape){
+  .key{--kh:clamp(30px,calc((100vh - var(--hud-b,56px) - var(--sa-b,0px) - 124px) / 4),56px)}
+}
 `;

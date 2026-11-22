@@ -41,7 +41,7 @@ export default function create(): GameModule {
   let yaw = 0.35, pitch = 0.9, dist = 10;
   let yawT = yaw, pitchT = pitch, distT = dist;
   const lookAt = new THREE.Vector3();
-  const tmpObj = new THREE.Object3D();
+  const tmpObj = new THREE.PerspectiveCamera(); // Camera.lookAt usa a convenção -z (Object3D.lookAt aponta +z e invertia a interpolação)
   const startPos = new THREE.Vector3();
   const startQuat = new THREE.Quaternion();
   const wantPos = new THREE.Vector3();
