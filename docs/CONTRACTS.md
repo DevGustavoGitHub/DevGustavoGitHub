@@ -207,3 +207,20 @@ campos opcionais de WorldService/PlayerService), `src/core/outline.ts` (contorno
 | `checkoutRequest` (estendido) | `+ {counterId, stage:'pay'}` | npc → ui |
 | `build:start` (estendido) | `+ {stockIndex?:number}` | ui → world |
 | `sfx` (novos nomes) | `'throw'\|'mop'\|'sit'\|'stand'\|'place'\|'sign'\|'night'\|'celebrate'` | qualquer → audio |
+
+## Fase 3 — ADENDO (pedido do usuário durante a fase): caixas abrem/fecham; móveis por categoria
+- `Box` ganha `open?: boolean` (caixa chega FECHADA da entrega; o sim adiciona o campo com migração) e a API nova
+  `setBoxOpen(state, boxIndex, open)` (o sim implementa). Estado de aberta/fechada persiste no save.
+- **player** (carregando caixa): botão **Abrir/Fechar caixa** (alterna, animação das abas ~0,35 s, sfx `boxOpen`/`boxClose`).
+  **Repor exige caixa aberta**: mirando o móvel do produto com a caixa fechada, a ação vira "Abrir caixa".
+  Fluxo do usuário: abrir → repor → fechar de novo → colocar onde quiser (Largar com prévia) ou guardar no depósito.
+- **world** desenha caixas no chão e na pilha ABERTAS (abas abertas, produtos visíveis por cima; vazia mostra o fundo)
+  ou FECHADAS (abas fechadas com fita). Mesmo visual no npc repositor.
+- **Abastecer móvel novo/vazio**: se o móvel não tem produto, ou o produto dele está esgotado (state.shelf[produto] = 0),
+  e a categoria do produto da caixa é aceita pelo móvel (`FurnitureSpec.categories`): o player chama
+  `api.assignProduct(furnitureId, productId)` e depois `placeUnits` (rótulo "Repor"). Móvel com outro produto em estoque:
+  ação desabilitada "Outro produto". Assim: comprar prateleira/geladeira/freezer → montar → abastecer com o produto respectivo.
+- **ui**: aba Móveis do Mercado vende prateleiras, geladeiras e freezers (e demais tipos); cada produto mostra o ícone do
+  móvel exigido (`api.furnitureForProduct`).
+- **npc** repositor: abre a caixa (visual) antes de repor e fecha/descarta depois.
+- `sfx` novos: `'boxOpen'`, `'boxClose'`.

@@ -41,6 +41,8 @@ Pasta: `/root/.claude/uploads/2ed9bbe2-646e-5ae5-8953-b3786c4c1f1e/`
 | Móveis | **Posicionar em 1ª pessoa** (prévia verde/vermelha onde se olha, girar, colocar) |
 | Gestão | **Computador no balcão + botão pequeno** (atalho de carrinho ao lado do joystick, como no original) |
 | Escopo | Manter nossas funções; mudar principalmente gráfico e jogabilidade |
+| Caixas | **Abrir a caixa (animação), repor, fechar de novo e colocar onde quiser** |
+| Móveis | **Comprar prateleiras, geladeiras e freezers** e abastecer com os produtos respectivos |
 
 ## Decisões (minhas, justificadas)
 - Só 1ª pessoa (sem alternância). Mira central + contorno verde no alvo; botão de ação mostra o rótulo da ação.
