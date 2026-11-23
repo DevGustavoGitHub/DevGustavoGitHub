@@ -21,8 +21,16 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 await page.goto(URL);
 await page.waitForFunction(() => window.__game && window.__npc, null, { timeout: 30000 });
 await page.waitForTimeout(1000);
-await page.getByText('Jogar', { exact: true }).first().click({ timeout: 3000 }).catch(() => {});
+const dismissTitle = async () => {
+  for (let i = 0; i < 4; i++) {
+    const t = page.getByText('Jogar', { exact: true }).first();
+    if (!(await t.isVisible().catch(() => false))) return;
+    await t.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+};
 await page.waitForTimeout(600);
+await dismissTitle();
 
 const fails = [];
 const check = (name, ok, extra = '') => { console.log(ok ? 'PASS' : 'FAIL', name, extra); if (!ok) fails.push(name); };
@@ -71,6 +79,7 @@ const reg1 = await until(() => {
 }, undefined, 70000);
 check('itens na esteira registrados no PickService', !!reg1, JSON.stringify(reg1));
 await page.evaluate(() => { __npc.timeScale = 1; });
+await dismissTitle();
 await page.waitForTimeout(900);
 const outl = await page.evaluate(() => [...window.__reg.keys()].filter((o) => !o.userData.npcPay).map((o) => { let n = 0; o.traverse((c) => { if (c.userData.isOutline) n++; }); return n; }));
 check('itens tocáveis com contorno verde', outl.length > 0 && outl.every((n) => n > 0), JSON.stringify(outl));

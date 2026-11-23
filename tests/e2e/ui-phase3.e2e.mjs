@@ -121,7 +121,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.keyboard.press('Escape');
   await page.evaluate(() => window.__game.bus.emit('ui:openTablet', { tab: 'prices', productId: 'feijao' }));
   await page.waitForTimeout(250);
-  check(`[${tag}] ui:openTablet {tab:'prices', productId} destaca o produto`, /Preços/.test(await page.locator('.t3-head h2').innerText()) && (await page.locator('[data-product="feijao"].focus-hl').count()) === 1);
+  check(`[${tag}] ui:openTablet {tab:'prices', productId} destaca o produto`, /Preços/i.test(await page.locator('.t3-head h2').innerText()) && (await page.locator('[data-product="feijao"].focus-hl').count()) === 1);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
 

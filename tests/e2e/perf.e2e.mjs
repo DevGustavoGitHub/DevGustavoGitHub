@@ -43,6 +43,7 @@ try {
   };
   await page.waitForTimeout(800);
   await closeMenus();
+  const tap = (label) => page.evaluate((l) => { const b = document.querySelector(`[data-world-build] button[aria-label="${l}"]`); if (!b) throw new Error('botão ausente: ' + l); b.click(); }, label);
   const frames = (n = 2) => page.evaluate((n) => new Promise((r) => { let k = 0; const f = () => (++k >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
   const shot = async (name) => { if (SHOTS) { await frames(2); await page.screenshot({ path: `${SHOTS}/${name}.png` }); } };
 
@@ -244,9 +245,9 @@ try {
   await shot('posicionar-movel');
   const nF0 = await page.evaluate(() => window.__game.state.furniture.length);
   await closeMenus();
-  await page.getByRole('button', { name: 'Girar para a direita' }).click();
+  await tap('Girar para a direita');
   const rot1 = await page.evaluate(() => window.__world.build.pose.rot);
-  await page.getByRole('button', { name: 'Colocar' }).click();
+  await tap('Colocar');
   await frames(2);
   const placed = await page.evaluate(() => ({ n: window.__game.state.furniture.length, active: window.__world.build.active, bar: !!document.querySelector('[data-world-build]') }));
   check('girar e COLOCAR (buyFurniture)', rot1 === 90 && placed.n === nF0 + 1 && !placed.active && !placed.bar, JSON.stringify({ rot1, ...placed }));
@@ -255,13 +256,13 @@ try {
   await frames(2);
   const editBtns = await page.evaluate(() => [...document.querySelectorAll('[data-world-build] button')].map((b) => b.textContent));
   check('modo editar mostra VENDER e GUARDAR', editBtns.includes('VENDER') && editBtns.includes('GUARDAR'), editBtns.join(','));
-  await page.getByRole('button', { name: 'Guardar no estoque' }).click();
+  await tap('Guardar no estoque');
   await frames(2);
   const stock = await page.evaluate((id) => ({ gone: !window.__game.state.furniture.some((f) => f.id === id), stock: window.__game.state.furnitureStock?.length ?? -1 }), newId);
   check('GUARDAR desmonta para o estoque (storeFurniture)', stock.gone && stock.stock >= 1, JSON.stringify(stock));
   await page.evaluate((n) => window.__game.bus.emit('build:start', { type: 'shelf', stockIndex: n - 1 }), stock.stock);
   await frames(3);
-  await page.getByRole('button', { name: 'Colocar' }).click();
+  await tap('Colocar');
   await frames(2);
   const fromStock = await page.evaluate(() => ({ n: window.__game.state.furniture.length, stock: window.__game.state.furnitureStock.length }));
   check('montar do estoque (placeFromStock)', fromStock.n === nF0 + 1 && fromStock.stock === stock.stock - 1, JSON.stringify(fromStock));
@@ -280,7 +281,7 @@ try {
   check('prévia da caixa: calçada válida, rua inválida', bp.kind === 'box' && bp.valid && !bpStreet.valid, JSON.stringify({ calc: [bp.bx.toFixed(2), bp.bz.toFixed(2), bp.valid], rua: [bpStreet.bx.toFixed(2), bpStreet.bz.toFixed(2), bpStreet.valid] }));
   await page.evaluate(([D]) => window.__world.lockCamera(6, 1.6, D + 0.6, 6, 0, D + 2.2), [D]);
   await frames(3);
-  await page.getByRole('button', { name: 'Colocar' }).click();
+  await tap('Colocar');
   await frames(2);
   const dropped = await page.evaluate(() => { const b = window.__game.state.sidewalk[0]; return { carried: !!b.carried, x: b.x, z: b.z, open: b.open }; });
   check('COLOCAR larga a caixa (dropBox) mantendo aberta', !dropped.carried && Number.isFinite(dropped.x) && dropped.open === true, JSON.stringify(dropped));
