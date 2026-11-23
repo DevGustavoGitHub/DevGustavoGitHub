@@ -67,8 +67,7 @@ export class Celebrate {
     confetti(this.el);
     this.layer.appendChild(this.el);
     this.kit.modalOpen('celebrate', { pauseClock: true, onEsc: () => this.next() });
-    // o evento levelUp já toca 'levelup'; a fanfarra só entra se a tela abriu bem depois
-    if (performance.now() - this.queuedAt > 1200) this.kit.sfx('celebrate');
+    // o som da comemoração vem do próprio evento `levelUp` (audio toca 'celebrate'): nada por cima aqui
     this.queuedAt = 0;
     this.kit.settings.buzz([30, 40, 60]);
     window.setTimeout(() => go.focus({ preventScroll: true }), 50);

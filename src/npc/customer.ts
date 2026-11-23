@@ -118,7 +118,7 @@ export class Customer extends Agent {
     switch (this.state) {
       case 'enter1':
         if (this.arrived) {
-          this.env.sfx('door', this.x);
+          this.env.sfx('door', this.x, this.z);
           const d = w.door();
           this.moveTo(d.x + (this.env.ctx.rand() - 0.5) * 0.8, d.z - 1.4);
           this.state = 'enter2';
@@ -165,7 +165,7 @@ export class Customer extends Agent {
         break;
       case 'leave2':
         if (this.arrived) {
-          this.env.sfx('door', this.x);
+          this.env.sfx('door', this.x, this.z);
           const sp = w.spawnPoint();
           this.moveTo(sp.x, sp.z, true);
           this.state = 'leave3';
@@ -262,7 +262,7 @@ export class Customer extends Agent {
     if (ex) ex.qty += got; else this.items.push({ productId: e.productId, qty: got });
     this.units += got;
     this.refreshBasket();
-    this.env.sfx('pop', this.x);
+    this.env.sfx('pop', this.x, this.z);
     this.env.changed('shelf');
     maybeDirt(this.env, this.x, this.z, this.kind === 'kid' ? 0.3 : 0.05);
     this.setPose('basket');

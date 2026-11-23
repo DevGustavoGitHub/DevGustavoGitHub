@@ -421,6 +421,7 @@ export class HeldView {
   private readonly mopHead = new THREE.Group();
   readonly kit = new CartonKit(true);
   private raise = 1;
+  private pose = 0; // 0 = caixa nas mãos, 1 = pilha no carrinho
   private topRef: object | null = null;
   private lower = 0;
   private bob = 0;
@@ -435,7 +436,7 @@ export class HeldView {
   constructor(scene: THREE.Scene, private readonly tpls: ProductTemplates) {
     this.rig.name = 'player-hands';
     this.rig.renderOrder = 1000;
-    this.hold.position.set(0, -0.47, -0.64);
+    this.hold.position.set(0, -0.45, -0.64);
     this.stack.rotation.x = 0.62;
     this.stack.scale.setScalar(1.08);
     this.hold.add(this.stack);
@@ -515,10 +516,15 @@ export class HeldView {
     this.sx += (tx - this.sx) * k; this.sy += (ty - this.sy) * k;
     const breathe = s.reduce ? 0 : Math.sin(this.t * 1.7) * 0.003;
     const r = ease(this.raise);
+    // pose: caixa nas mãos (perto, inclinada para ver o interior) × pilha no carrinho (mais longe, mostra 2 caixas e os trilhos)
+    this.pose += ((s.dolly && n > 0 ? 1 : 0) - this.pose) * (1 - Math.exp(-dt * 8));
+    const q = this.pose;
+    this.stack.rotation.x = 0.62 + (0.35 - 0.62) * q;
+    this.stack.scale.setScalar(1.08 + (1 - 1.08) * q);
     this.hold.position.set(
       Math.sin(this.bob) * 0.008 * walk + this.sx,
-      -0.47 + Math.abs(Math.cos(this.bob)) * -0.008 * walk + breathe + this.sy - (1 - r) * 0.32 - this.lower * 0.5,
-      -0.64,
+      -0.45 + 0.08 * q + Math.abs(Math.cos(this.bob)) * -0.008 * walk + breathe + this.sy - (1 - r) * 0.32 - this.lower * 0.5,
+      -0.64 - 0.31 * q,
     );
     this.rig.position.copy(cam.position);
     this.rig.quaternion.copy(cam.quaternion);
@@ -529,9 +535,9 @@ export class HeldView {
     const inn = ease(p / 0.12), out = ease((1 - p) / 0.12);
     const drop = (1 - Math.min(inn, out)) * 0.55;
     const ph = p * Math.PI * 2 * 3.2;
-    const amp = reduce ? 0.05 : 0.11;
-    this.a.set(0.3, -0.25 - drop, -0.36);
-    this.h.set(Math.sin(ph) * amp, -0.62 - drop, -0.92 + Math.cos(ph * 2) * 0.025);
+    const amp = reduce ? 0.06 : 0.15;
+    this.a.set(0.34, -0.36 - drop, -0.3); // mão (fora da tela, canto inferior direito)
+    this.h.set(Math.sin(ph) * amp, -0.4 - drop, -0.95 + Math.cos(ph * 2) * 0.03); // cabeça no terço de baixo
     this.mopHead.position.copy(this.h);
     this.mopHead.rotation.set(0.25, Math.sin(ph) * 0.22, 0);
     this.dir.subVectors(this.a, this.h);

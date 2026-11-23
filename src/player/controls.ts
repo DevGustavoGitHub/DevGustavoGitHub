@@ -94,6 +94,7 @@ export class Controls {
     document.head.appendChild(this.style);
     this.root = el('div', 'pl-ctrl');
     this.root.setAttribute('data-player-controls', '');
+    this.root.style.pointerEvents = 'none'; // inline: `#ui-root > *` (index.html) não pode reativar o toque no contêiner
     this.cross = el('div', 'pl-cross');
     this.acts = el('div', 'pl-acts');
     this.main = el('div', 'pl-main');

@@ -147,10 +147,11 @@ export function marketTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
     const card = (key: string, name: string, cost: number, minLevel: number, art: string, info: string, line: () => api.CartLine, extraLock?: string): HTMLElement => {
       const locked = s.level < minLevel;
       return h('div', { class: `pcard${locked ? ' locked' : ''}`, role: 'listitem', 'data-furniture': key },
-        h('div', { class: 'pc-l' }, h('b', { class: 'pc-name' }, name), h('span', { class: 'pc-sub' }, info), h('div', { class: 'pc-art' }, h('span', { html: art }))),
+        h('div', { class: 'pc-l' }, h('b', { class: 'pc-name' }, name), h('div', { class: 'pc-art' }, h('span', { html: art }))),
         h('div', { class: 'pc-r' }, h('div', { class: 'pc-price' }, money(cost)),
           locked ? actionBtn({ kind: 'lock', level: minLevel }) : extraLock ? actionBtn({ kind: 'off', label: extraLock }) : stepperEl(`f:${key}`, () => {}),
-          locked || extraLock ? null : addBtn(line)));
+          locked || extraLock ? null : addBtn(line)),
+        info ? h('span', { class: 'pc-info' }, info) : null);
     };
     const display = specs.filter((sp) => sp.categories.length > 0);
     const others = specs.filter((sp) => sp.categories.length === 0 && sp.type !== 'decor');

@@ -188,7 +188,7 @@ export class Stocker extends Staff {
           b.carried = true;
           this.stack.push(b);
           this.person.setCarryBox(true); this.person.setCarryOpen(!!b.open && b.units > 0, b.productId); this.setPose('carry');
-          this.env.sfx('box', this.x); this.env.changed('sidewalk');
+          this.env.sfx('box', this.x, this.z); this.env.changed('sidewalk');
           if (this.plan.length > 0) { this.job = 'toBox'; this.walkToBox(this.plan[0]!); } else this.nextShelf();
         }
         break;
@@ -220,7 +220,7 @@ export class Stocker extends Staff {
             const idx = state.sidewalk.indexOf(b);
             if (idx >= 0) safe('discardBox', () => api.discardBox(state, idx), undefined);
           }
-          if (this.junk.length > 0) { this.env.sfx('trash', this.x); this.env.changed('sidewalk'); }
+          if (this.junk.length > 0) { this.env.sfx('trash', this.x, this.z); this.env.changed('sidewalk'); }
           this.junk.length = 0;
           this.person.setCarryBox(false); this.setPose('normal');
           this.job = 'idle'; this.cooldown = 0.4;
@@ -242,7 +242,7 @@ export class Stocker extends Staff {
           this.storePids.length = 0;
           if (this.stack.length > 0) {
             this.person.setCarryBox(true); this.person.setCarryOpen(false); this.setPose('carry');
-            this.env.sfx('box', this.x); this.env.changed('sidewalk');
+            this.env.sfx('box', this.x, this.z); this.env.changed('sidewalk');
             this.nextShelf();
           } else { this.job = 'idle'; this.cooldown = 3; this.storeCool = 10; this.setPose('normal'); }
         }
@@ -291,7 +291,7 @@ export class Stocker extends Staff {
     const n = Math.min(b.units, Math.max(0, room));
     if (n > 0) {
       safe('placeUnits', () => api.placeUnits(state, idx, n), 0);
-      this.env.sfx('box', this.x); this.env.changed('shelf');
+      this.env.sfx('box', this.x, this.z); this.env.changed('shelf');
     }
     this.stack.shift();
     if (b.units <= 0) this.junk.push(b);
@@ -309,7 +309,7 @@ export class Stocker extends Staff {
     const { state } = this.env.ctx;
     const idx = state.sidewalk.indexOf(b);
     if (idx >= 0) safe('setBoxOpen', () => api.setBoxOpen(state, idx, open), undefined);
-    this.env.sfx(open ? 'boxOpen' : 'boxClose', this.x);
+    this.env.sfx(open ? 'boxOpen' : 'boxClose', this.x, this.z);
     this.person.setCarryOpen(open, b.productId);
     this.env.changed('sidewalk');
   }

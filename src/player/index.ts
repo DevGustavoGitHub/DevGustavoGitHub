@@ -80,6 +80,8 @@ export default function create(): GameModule {
   let catalog: api.FurnitureSpec[] | null = null;
   const heldList: HeldBox[] = [];
   let stickShown = true;
+  let probe: THREE.Mesh | null = null; // só testes (window.__player.tapProbe)
+  let probeHits = 0;
 
   // temporários (sem alocação por quadro)
   const ray = new THREE.Raycaster();
@@ -900,6 +902,31 @@ export default function create(): GameModule {
         picks: () => tapTargets.size,
         usingFallback: () => ({ picks: !(world()?.pickGroup?.children.length), highlight: !world()?.highlight, seat: !world()?.seatPose, product: !world()?.makeProductMesh }),
         dropAll: () => { for (const bx of [...carried]) dropFront(bx); },
+        /** Cubo tocável registrado no PickService a `dist` m à frente da câmera; devolve a posição na tela. */
+        tapProbe: (dist = 0.9) => {
+          const cam = ctx.camera;
+          if (!probe) {
+            probe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshLambertMaterial({ color: '#ff8a00' }));
+            probe.name = 'player-tap-probe';
+          }
+          probe.position.copy(cam.position).addScaledVector(cam.getWorldDirection(tv), dist);
+          ctx.scene.add(probe);
+          probe.updateMatrixWorld(true);
+          probeHits = 0;
+          pick.add(probe, () => { probeHits++; });
+          const v = tv2.copy(probe.position).project(cam);
+          const r = ctx.renderer.domElement.getBoundingClientRect();
+          return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+        },
+        tapProbeHits: () => probeHits,
+        removeTapProbe: () => {
+          if (!probe) return;
+          pick.remove(probe);
+          probe.removeFromParent();
+          probe.geometry.dispose();
+          (probe.material as THREE.Material).dispose();
+          probe = null;
+        },
       };
     },
 
@@ -969,6 +996,7 @@ export default function create(): GameModule {
       for (const o of offs) o();
       setTarget(null);
       for (const f of flying) f.view.dispose();
+      if (probe) { probe.removeFromParent(); probe.geometry.dispose(); (probe.material as THREE.Material).dispose(); probe = null; }
       flying.length = 0;
       input.dispose();
       controls.dispose();

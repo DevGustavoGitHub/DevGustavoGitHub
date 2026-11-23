@@ -39,9 +39,16 @@ await page.evaluate(() => {
   const pl = (__game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false });
   Object.defineProperty(pl, 'inputLocked', { get: () => false, set: () => {}, configurable: true });
   Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, set: () => {}, configurable: true });
+  // Fase 3: jogador sentado no caixa + toques automáticos (itens da esteira e, se __autoPay !== false, o pagamento)
+  const cid = __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null;
+  try { Object.defineProperty(pl, 'seatedAt', { get: () => cid, set: () => {}, configurable: true }); } catch (e) { console.error('seatedAt', e); }
+  const realPick = __game.services.pick;
+  window.__taps = new Map();
+  __game.services.pick = { add(o, fn) { window.__taps.set(o, fn); realPick?.add(o, fn); }, remove(o) { window.__taps.delete(o); realPick?.remove(o); } };
+  setInterval(() => { for (const [o, fn] of [...window.__taps]) if (!o.userData.npcPay || window.__autoPay !== false) fn(); }, 150);
   window.__mode = 'ok';
   __game.bus.on('checkoutRequest', (r) => setTimeout(() => {
-    if (window.__mode === 'cancel') { window.__cancels++; __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: false, speed: 0, mistakes: 0 }); }
+    if (window.__mode === 'cancel') { window.__cancels++; if (window.__stopAfterCancel) window.__autoPay = false; __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: false, speed: 0, mistakes: 0 }); }
     else if (window.__mode === 'ok') __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.8, mistakes: 0 });
   }, 300));
   window.__cancels = 0;
@@ -69,15 +76,15 @@ check('pedido automático novamente a cada hora', !!t2, String(t2));
 // repositor abastece as caixas novas (várias por viagem quando houver)
 await page.evaluate(() => {
   const s = __game.state;
-  s.employees.stocker = 4; s.shelf.arroz = 0; s.shelf.feijao = 0;
+  s.employees.stocker = 4; s.shelf.macarrao = 0; s.shelf.feijao = 0;
   s.autoOrders = {};
   s.sidewalk.length = 0;
-  s.sidewalk.push({ productId: 'arroz', units: 6 }, { productId: 'feijao', units: 12 });
+  s.sidewalk.push({ productId: 'macarrao', units: 20 }, { productId: 'feijao', units: 12 });
   __game.state.sidewalk.slice();
   __npc.sync();
   __npc.timeScale = 4;
 });
-const stocked = await until(() => { const s = __game.state; return s.shelf.arroz > 0 && s.shelf.feijao > 0 && s.sidewalk.length === 0 ? { a: s.shelf.arroz, f: s.shelf.feijao } : null; }, undefined, 90000);
+const stocked = await until(() => { const s = __game.state; return s.shelf.macarrao > 0 && s.shelf.feijao > 0 && s.sidewalk.length === 0 ? { m: s.shelf.macarrao, f: s.shelf.feijao } : null; }, undefined, 90000);
 check('repositor abasteceu 2 caixas e jogou as vazias fora', !!stocked, JSON.stringify(stocked));
 await page.evaluate(() => { __game.state.employees.stocker = 0; __npc.sync(); });
 
@@ -85,7 +92,7 @@ await page.evaluate(() => { __game.state.employees.stocker = 0; __npc.sync(); })
 await page.evaluate(() => {
   __game.clock.phase = 'open'; __game.clock.minute = 600; __game.state.employees.stocker = 0;
   for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) __game.state.shelf[id] = 20;
-  window.__reqs.length = 0; window.__mode = 'cancel'; window.__cancels = 0;
+  window.__reqs.length = 0; window.__mode = 'cancel'; window.__cancels = 0; window.__stopAfterCancel = true; window.__autoPay = true;
   __game.state.prices = {};
   __npc.timeScale = 10;
 });
@@ -98,12 +105,12 @@ check('primeiro checkoutRequest emitido', first !== null, String(first));
 if (first === null) { console.log(JSON.stringify(await page.evaluate(() => ({ c: __npc.customers(), l: __npc.lanes(), m: __game.clock.hhmm, ph: __game.clock.phase, ts: __npc.timeScale, st: __npc.stats, pl: [__game.services.player.inputLocked, __game.services.player.atCounter] })))); await browser.close(); process.exit(1); }
 await page.waitForTimeout(1500);
 const afterCancel = await page.evaluate((id) => ({ info: __npc.customerInfo(id), reqs: window.__reqs.length }), first);
-check('cliente continua esperando após cancelar (não preso nem removido)', !!afterCancel.info && (afterCancel.info.state === 'front' || afterCancel.info.state === 'queue') && afterCancel.info.cancels === 1, JSON.stringify(afterCancel.info));
+check('cliente continua esperando após cancelar (não preso nem removido)', !!afterCancel.info && ['front', 'queue', 'serving'].includes(afterCancel.info.state) && afterCancel.info.cancels === 1, JSON.stringify(afterCancel.info));
 check('cancelar não reabre sozinho (sem loop)', afterCancel.reqs === 1, String(afterCancel.reqs));
 check('paciência reduzida', afterCancel.info.waited >= 4 || afterCancel.info.patience < 60);
-await page.evaluate(() => { window.__mode = 'ok'; __npc.retryCheckout(); });
+await page.evaluate(() => { window.__mode = 'ok'; window.__stopAfterCancel = false; window.__autoPay = true; __npc.retryCheckout(); });
 const req2 = await until(() => window.__reqs.length >= 2 ? window.__reqs[1].customerId : null, undefined, 15000);
-check('novo toque em Atender emite novo checkoutRequest imediato', req2 === first, String(req2));
+check('novo toque no pagamento estendido emite novo checkoutRequest', req2 === first, String(req2));
 const sold = await until(() => __npc.stats.sold >= 1, undefined, 30000);
 check('venda concluída após nova tentativa', !!sold);
 // 3 cancelamentos seguidos: cliente desiste, sem travar a fila

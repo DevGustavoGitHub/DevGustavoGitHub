@@ -36,7 +36,7 @@ const until = async (fn, arg, ms = 40000) => {
 const setup = await page.evaluate(() => {
   const g = __game, s = g.state;
   s.money = Math.max(s.money, 200000);
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) s.shelf[id] = 30;
+  for (const f of s.furniture) if (f.productId) s.shelf[f.productId] = 30;
   s.employees.cashier = 0; s.employees.stocker = 0; s.employees.janitor = 0;
   __npc.sync();
   window.__ev = { display: [], req: [], done: [], sfx: [], avail: [] };
@@ -47,8 +47,9 @@ const setup = await page.evaluate(() => {
   // espião do PickService (encaminha ao do player, se existir)
   const real = g.services.pick;
   window.__reg = new Map();
+  window.__ever = new Set();
   g.services.pick = {
-    add(o, fn) { window.__reg.set(o, fn); real?.add(o, fn); },
+    add(o, fn) { window.__reg.set(o, fn); window.__ever.add(o); real?.add(o, fn); },
     remove(o) { window.__reg.delete(o); real?.remove(o); },
   };
   const cid = s.furniture.find((f) => f.type === 'counter')?.id ?? null;
@@ -116,7 +117,7 @@ check('checkout:done emitido', !!done && done.customerId === req.customerId && d
 check('dinheiro subiu com a venda', money1 >= money0 + req.total, `${money0} -> ${money1} (total ${req.total})`);
 const idle = await page.evaluate(() => window.__ev.display[window.__ev.display.length - 1]);
 check('checkout:display idle no fim', idle?.mode === 'idle' && idle.counterId === setup.cid, JSON.stringify(idle));
-const clean = await page.evaluate(() => { let hulls = 0; __game.scene.traverse((o) => { if (o.userData.isOutline) hulls++; }); return { reg: window.__reg.size, hulls, lane: __npc.lanes()[0], ledger: { happy: __game.state.ledger.happy, angry: __game.state.ledger.angry } }; });
+const clean = await page.evaluate(() => { let hulls = 0; for (const o of window.__ever) { if (o.parent && !o.userData.npcPay) hulls += 100; o.traverse((c) => { if (c.userData.isOutline) hulls++; }); } return { reg: window.__reg.size, hulls, lane: __npc.lanes()[0], ledger: { happy: __game.state.ledger.happy, angry: __game.state.ledger.angry } }; });
 check('tocáveis e contornos limpos', clean.reg === 0 && clean.hulls === 0 && clean.lane.phase === null, JSON.stringify(clean));
 check('cliente feliz contado na sim', (clean.ledger.happy ?? 0) >= 1, JSON.stringify(clean.ledger));
 const leaving = await until((id) => { const i = __npc.customerInfo(id); return !i || i.state.startsWith('leave') || i.state === 'gone'; }, req.customerId, 5000);
@@ -149,12 +150,13 @@ check('funcionário caixa atende sozinho (checkout:done staff, sem checkoutReque
 /* ---------- 7) repositor abre a caixa antes de repor ---------- */
 await page.evaluate(() => {
   const s = __game.state;
-  s.shelf.arroz = 0;
-  s.sidewalk.push({ productId: 'arroz', units: 6, open: false });
+  s.shelf.feijao = 0;
+  s.sidewalk.push({ productId: 'feijao', units: 12, open: false });
   s.employees.stocker = 1; __npc.sync();
   __npc.timeScale = 4;
 });
-const opened = await until(() => (window.__ev.sfx.includes('boxOpen') && __game.state.shelf.arroz > 0) ? { shelf: __game.state.shelf.arroz } : null, undefined, 90000);
+const opened = await until(() => (window.__ev.sfx.includes('boxOpen') && __game.state.shelf.feijao > 0) ? { shelf: __game.state.shelf.feijao, closeOrTrash: window.__ev.sfx.includes('boxClose') || window.__ev.sfx.includes('trash') } : null, undefined, 90000);
+if (!opened) console.log('debug', JSON.stringify(await page.evaluate(() => ({ staff: __npc.staff(), side: __game.state.sidewalk, f: __game.state.furniture.map((f) => [f.id, f.type, f.productId]) }))));
 check('repositor abre a caixa (sfx boxOpen) e repõe', !!opened, JSON.stringify(opened));
 
 /* ---------- 8) visual: vários clientes (print) ---------- */
@@ -162,7 +164,7 @@ await page.evaluate(() => {
   __game.state.employees.cashier = 0; __npc.sync();
   const cid = __game.state.furniture.find((f) => f.type === 'counter')?.id;
   if (window.__player?.sit) window.__player.sit(cid);
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) __game.state.shelf[id] = 30;
+  for (const f of __game.state.furniture) if (f.productId) __game.state.shelf[f.productId] = 30;
   __npc.timeScale = 3; __npc.spawnNow(6);
 });
 await until(() => __npc.lanes()[0]?.line >= 3, undefined, 60000);

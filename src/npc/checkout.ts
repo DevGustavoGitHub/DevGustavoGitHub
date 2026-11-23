@@ -207,16 +207,17 @@ export class CheckoutManager {
     const ws = w.beltSlots ? safe('beltSlots', () => w.beltSlots!(id), [] as THREE.Vector3[]) : [];
     let slots: THREE.Vector3[];
     if (ws.length >= 2) slots = ws.map((v) => v.clone());
-    else if (fr) slots = [0, 1, 2, 3, 4, 5].map((i) => CheckoutManager.local(fr, -0.85 + i * 0.18, 0.57, 0.81, new THREE.Vector3()));
+    // fallback = layout local do balcão da Fase 3 (world/furniture.ts: BELT_SLOTS, BELT_Y, HANDOFF, SEAT)
+    else if (fr) slots = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => CheckoutManager.local(fr, -0.51 + (i % 2 ? 0.11 : -0.11), 0.84 - i * 0.157, 0.882, new THREE.Vector3()));
     else slots = [0, 1, 2, 3, 4, 5].map((i) => { const k = 0.6 * (1 - i / 6); return new THREE.Vector3(l.scanner.x + (q0.x - l.scanner.x) * k, 0.83, l.scanner.z + (q0.z - l.scanner.z) * k); });
     // mantém itens na esteira se o nº de slots mudar
     if (l.svc && l.svc.belt.length !== slots.length) { this.clear(l, l.svc); l.svc.next = 0; l.svc.total = 0; l.svc.phase = 'approach'; l.svc.belt.length = slots.length; l.svc.belt.fill(null); }
     l.slots = slots;
     const hp = w.handoffPoint ? safe('handoffPoint', () => w.handoffPoint!(id), null) : null;
     if (hp) l.handoff.copy(hp);
-    else if (fr) CheckoutManager.local(fr, 0.12, 0.78, 1.06, l.handoff);
+    else if (fr) CheckoutManager.local(fr, -0.3, 0.84, 1.12, l.handoff);
     else l.handoff.set((l.scanner.x + q0.x) / 2, 1.06, (l.scanner.z + q0.z) / 2);
-    const a = slots[slots.length - 1]!, b = slots[slots.length - 2]!;
+    const a = slots[slots.length - 1]!, b = slots[0]!;
     let dx = a.x - b.x, dz = a.z - b.z;
     const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
     l.scanPt.set(a.x + dx * 0.2, a.y + 0.07, a.z + dz * 0.2);
@@ -226,6 +227,11 @@ export class CheckoutManager {
       const sx = sp.look.x - sp.pos.x, sz = sp.look.z - sp.pos.z, sd = Math.hypot(sx, sz) || 1;
       l.seat.x = sp.pos.x - (sx / sd) * 0.1; l.seat.z = sp.pos.z - (sz / sd) * 0.1;
       l.seat.yaw = Math.atan2(sx, sz); l.seat.y = clamp(sp.pos.y - 0.78, 0.38, 0.62);
+    } else if (fr) {
+      CheckoutManager.local(fr, 0.5, -1.42, 0.46, tmpV);
+      l.seat.x = tmpV.x; l.seat.z = tmpV.z; l.seat.y = 0.46;
+      CheckoutManager.local(fr, -0.02, 0.55, 0, tmpV);
+      l.seat.yaw = Math.atan2(tmpV.x - l.seat.x, tmpV.z - l.seat.z);
     } else {
       l.seat.x = l.operator.x; l.seat.z = l.operator.z; l.seat.y = 0.5;
       l.seat.yaw = Math.atan2(l.handoff.x - l.operator.x, l.handoff.z - l.operator.z);
@@ -431,7 +437,7 @@ export class CheckoutManager {
     obj.scale.setScalar(1);
     this.env.ctx.scene.add(obj);
     c.refreshBasketFrom(s.taps, s.next);
-    this.env.sfx('pop', fx);
+    this.env.sfx('pop', fx, fz);
   }
 
   private scan(l: Lane, s: Service, it: BeltItem): void {
@@ -443,7 +449,7 @@ export class CheckoutManager {
     s.flying.push(it);
     s.total += it.unit * it.n;
     s.lastAt = this.clock;
-    this.env.sfx('scan', l.scanner.x);
+    this.env.sfx('scan', l.scanner.x, l.scanner.z);
     const name = safe('productById', () => productById(it.pid).name, it.pid);
     this.env.ctx.bus.emit('checkout:display', {
       counterId: l.furnitureId, mode: 'items', lastItem: { name: it.n > 1 ? `${name} ×${it.n}` : name, price: it.unit * it.n }, total: s.total,
@@ -547,7 +553,8 @@ export class CheckoutManager {
   }
 
   private staffPay(l: Lane, s: Service): void {
-    this.env.sfx(s.method === 'card' ? 'card' : 'cash', l.scanner.x);
+    // a registradora/moedas tocam no checkout:done (áudio); sem 'cash' extra
+    if (s.method === 'card') this.env.sfx('card', l.scanner.x, l.scanner.z);
     this.finish(l, s, clamp(1 - (this.staffSec(s) - 1.5) / 9, 0.15, 1), 0);
   }
 

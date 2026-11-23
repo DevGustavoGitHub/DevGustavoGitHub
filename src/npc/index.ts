@@ -104,7 +104,8 @@ export default function create(): GameModule {
     agents,
     say(a, key: BubbleKey, seconds = 2) { (a as Agent).bubble.show(key, seconds); },
     changed(what) { ctx.bus.emit('stateChanged', { what }); },
-    sfx(name, x) {
+    sfx(name, x, z) {
+      if (x !== undefined && z !== undefined) { ctx.bus.emit('sfx', { name, x, z }); return; }
       const b = ctx.state.expansion * 4 + 12;
       ctx.bus.emit('sfx', { name, pan: x === undefined ? 0 : clamp((x - b / 2) / (b / 2), -1, 1) * 0.6 });
     },

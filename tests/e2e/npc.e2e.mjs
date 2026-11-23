@@ -53,6 +53,13 @@ await page.evaluate(() => {
   const pl = (__game.services.player ??= { position: { x: 9, z: 5 }, carrying: null, inputLocked: false });
   try { Object.defineProperty(pl, 'inputLocked', { get: () => false, set: () => {}, configurable: true }); } catch (e) { console.error('inputLocked', e); }
   try { Object.defineProperty(pl, 'atCounter', { get: () => __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null, set: () => {}, configurable: true }); } catch (e) { console.error('atCounter', e); }
+  // Fase 3: jogador sentado no caixa + toques automáticos (itens da esteira e, se __autoPay !== false, o pagamento)
+  const cid = __game.state.furniture.find((f) => f.type === 'counter')?.id ?? null;
+  try { Object.defineProperty(pl, 'seatedAt', { get: () => cid, set: () => {}, configurable: true }); } catch (e) { console.error('seatedAt', e); }
+  const realPick = __game.services.pick;
+  window.__taps = new Map();
+  __game.services.pick = { add(o, fn) { window.__taps.set(o, fn); realPick?.add(o, fn); }, remove(o) { window.__taps.delete(o); realPick?.remove(o); } };
+  setInterval(() => { for (const [o, fn] of [...window.__taps]) if (!o.userData.npcPay || window.__autoPay !== false) fn(); }, 150);
   __game.uiRoot.style.display = 'none';
   __game.clock.paused = false; __game.clock.openStore();
   __npc.timeScale = 8;

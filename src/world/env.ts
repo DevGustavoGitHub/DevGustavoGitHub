@@ -89,6 +89,7 @@ export class Env {
     this.sun.shadow.mapSize.set(1024, 1024);
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.03;
+    this.sun.shadow.intensity = 0.6; // sombras suaves (interior com teto, visual da referência)
     this.group.add(this.sun, this.sun.target, this.hemi);
   }
 

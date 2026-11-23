@@ -1,22 +1,31 @@
 /**
- * Módulo WORLD: cenário 3D, móveis, caixas, sujeira, grade de navegação, modo construção.
- * Publica ctx.services.world (WorldService). Veja docs/CONTRACTS.md (seção "world") para convenções.
+ * Módulo WORLD: cenário 3D em 1ª pessoa (Fase 3), móveis, caixas (abertas/fechadas), sujeira, grade de navegação,
+ * alvos de interação (pickGroup + contorno), monitor do caixa, etiquetas de preço e posicionamento em 1ª pessoa.
+ * Publica ctx.services.world (WorldService). Convenções: docs/CONTRACTS.md (seções "world" e "Fase 3 — world").
  */
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
-import type { Vec2, WorldService } from '../core/services';
-import { doorPos, deliveryZone, storeBounds, trashBinPos, FURNITURE_FOOTPRINT, SIDEWALK_DEPTH, type Bounds } from '../core/layout';
-import type { Box, Furniture, StoreState } from '../sim/state';
+import type { PickInfo, Vec2, WorldService } from '../core/services';
+import { doorPos, deliveryZone, storeBounds, trashBinPos, doorX, FURNITURE_FOOTPRINT, SIDEWALK_DEPTH, STORAGE_DEPTH, type Bounds } from '../core/layout';
+import { DEFAULT_DECOR, type Box, type Decor, type Furniture, type StoreState } from '../sim/state';
 import { PRODUCTS, productById } from '../sim/catalog';
-import { Shop, Env } from './shop';
-import { buildFurniture, furnitureGeos, furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, type FurnitureView } from './furniture';
-import { BoxLayer, ItemLayer, BOX_H, genericVisual, productVisual, type BoxInst } from './products';
+import * as api from '../sim/api';
+import { Shop } from './shop';
+import { Env, TRASH_SILHOUETTE } from './env';
+import {
+  BELT_SLOTS, BELT_Y, DESK_SIZE, HANDOFF, SCANNER, SEAT, chairGeos, chairSilhouette, deskGeos, deskSilhouette, furnitureGeos,
+  furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, silhouetteOf, type SBox,
+} from './furniture';
+import { BoxLayer, ItemLayer, BOX_H, BOX_W, BOX_D, genericVisual, productVisual, makeProductMesh, makeBoxMesh, type BoxInst } from './products';
 import { SHAPES } from './look';
 import { combine, meshesOf } from './batch';
 import { TIERS, ORDER, initialTier, isTier, isMobileDevice, persistTier, storedTier, type Tier } from './quality';
 import { NavGrid, footprintOf } from './nav';
 import { BuildMode } from './build';
 import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup } from './kit';
+import { Picks } from './pick';
+import { CheckoutScreens, type Display } from './screens';
+import { PriceTags } from './tags';
 
 /** Autoteste dos visuais genéricos (qualquer shape/cor/categoria, inclusive desconhecidos, gera geometria válida). */
 function genericProductsSelfTest(): { ok: boolean; combos: number; bad: string[]; catalog: number } {
@@ -67,10 +76,19 @@ function demoView(b: Bounds, storage: boolean): View {
     slots: { arroz: 2, feijao: 2, macarrao: 2, cafe: 2, refri: 2, sorvete: 2, pao: 2, detergente: 2, agua: 2, leite: 2, queijo: 2 },
     storage: storage ? { arroz: 18, refri: 14, leite: 30, feijao: 5 } : {},
     sidewalk: [
-      { productId: 'arroz', units: 6 }, { productId: 'feijao', units: 12 }, { productId: 'refri', units: 3 }, { productId: 'leite', units: 12 },
-      { productId: 'cafe', units: 0 }, { productId: 'macarrao', units: 20 }, { productId: 'agua', units: 12 },
+      { productId: 'arroz', units: 6 }, { productId: 'feijao', units: 12, open: true }, { productId: 'refri', units: 3, open: true }, { productId: 'leite', units: 12 },
+      { productId: 'cafe', units: 0, open: true }, { productId: 'macarrao', units: 20 }, { productId: 'agua', units: 12 },
     ],
     dirt: [{ x: 3.4, z: 3.2 }, { x: 5.2, z: 7.1 }, { x: 9.6, z: 6.6 }, { x: 2.1, z: 8.4 }],
+  };
+}
+
+/** Cores legadas (saves antigos) → paleta da Fase 3 (parede azul-clara, piso de madeira). */
+function effectiveDecor(d: Decor): Decor {
+  return {
+    wallColor: d.wallColor === '#f2e8d5' ? DEFAULT_DECOR.wallColor : d.wallColor,
+    floorColor: d.floorColor === '#c9c4b8' ? DEFAULT_DECOR.floorColor : d.floorColor,
+    signColor: d.signColor,
   };
 }
 
@@ -82,23 +100,35 @@ export default function create(): GameModule {
   const itemLayer = new ItemLayer(); itemLayer.group.name = 'items';
   const boxLayer = new BoxLayer(itemLayer); boxLayer.group.name = 'boxes';
   const furniStatic = new THREE.Group(); furniStatic.name = 'furnitureStatic';
+  const deskGroup = new THREE.Group(); deskGroup.name = 'computerDesk';
   const nav = new NavGrid();
+  const screens = new CheckoutScreens();
+  const tags = new PriceTags();
+  let picks!: Picks;
   let build!: BuildMode;
   let demo = false;
   let demoCache: { key: string; v: View } | null = null;
 
-  /** Cada móvel tem um grupo (só a gaveta do balcão é malha própria); a casca estática de TODOS é fundida em poucas malhas. */
-  interface Entry { geoSig: string; view: FurnitureView; group: THREE.Group; drawerT: number }
+  /** Cada móvel tem um grupo (gaveta e tela do balcão); a casca estática de TODOS é fundida em poucas malhas. */
+  interface Entry { geoSig: string; group: THREE.Group; drawer?: THREE.Mesh; drawerBaseZ: number; drawerT: number }
   const entries = new Map<number, Entry>();
   let furniKey = '', itemsKey = '';
   const staticGeos: THREE.BufferGeometry[] = [];
   let hiddenId: number | null = null;
   let bounds: Bounds = storeBounds(0);
   let shellKey = '', decorKey = '', navKey = '', rackKey = '', boxKey = '', dirtKey = '';
-  let acc = 0;
+  let picksDirty = true;
+  let acc = 0, priceAcc = 0;
   let doorTimer = 0;
   let lastMinute = -1;
   const offs: (() => void)[] = [];
+  /** Cadeiras desenhadas (balcões com o tile do operador livre). */
+  const chairs = new Set<number>();
+  /** Balcão do computador: tile ocupado e pose. */
+  let desk: { tx: number; tz: number; x: number; z: number; ry: number } | null = null;
+  /** Caixas no chão desenhadas: índice em state.sidewalk + pose (pick/contorno/empilhamento). */
+  let boxLayout: { index: number; box: Box; x: number; y: number; z: number; ry: number; open: boolean }[] = [];
+  const M = new THREE.Matrix4(), M2 = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1), UP = new THREE.Vector3(0, 1, 0);
 
   /* ---------------- sujeira ---------------- */
   let dirtMesh: THREE.InstancedMesh | null = null;
@@ -125,18 +155,17 @@ export default function create(): GameModule {
     dirtMesh.count = 0; dirtMesh.frustumCulled = false; dirtMesh.renderOrder = 2;
     root.add(dirtMesh);
   }
+  const dirtObj = new THREE.Object3D(), dirtCol = new THREE.Color();
   function syncDirt(v: View): void {
     if (!dirtMesh) return;
     const n = Math.min(DIRT_CAP, v.dirt.length);
-    const o = new THREE.Object3D();
-    const col = new THREE.Color();
     for (let i = 0; i < n; i++) {
       const d = v.dirt[i]!;
       const s = 0.7 + hash01(i, 1, Math.round(d.x * 10)) * 0.8;
-      o.position.set(d.x, 0.024 + (i % 9) * 0.0012, d.z);
-      o.rotation.set(0, hash01(i, 2) * 6.28, 0); o.scale.set(s, 1, s * (0.7 + hash01(i, 3) * 0.4)); o.updateMatrix();
-      dirtMesh.setMatrixAt(i, o.matrix);
-      dirtMesh.setColorAt(i, col.setHex([0x6a4a2f, 0x55402c, 0x7a5a38, 0x3d5a3a][i % 4]!));
+      dirtObj.position.set(d.x, 0.024 + (i % 9) * 0.0012, d.z);
+      dirtObj.rotation.set(0, hash01(i, 2) * 6.28, 0); dirtObj.scale.set(s, 1, s * (0.7 + hash01(i, 3) * 0.4)); dirtObj.updateMatrix();
+      dirtMesh.setMatrixAt(i, dirtObj.matrix);
+      dirtMesh.setColorAt(i, dirtCol.setHex([0x6a4a2f, 0x55402c, 0x7a5a38, 0x3d5a3a][i % 4]!));
     }
     dirtMesh.count = n;
     dirtMesh.instanceMatrix.needsUpdate = true;
@@ -170,7 +199,17 @@ export default function create(): GameModule {
     const fp = footprintOf(f);
     return { cx: f.x + fp.w / 2, cz: f.z + fp.d / 2 };
   }
-  function makeView(f: Furniture, fraction: number): FurnitureView { return buildFurniture(f, fraction); }
+  /** Matriz de mundo do móvel (centro do footprint, rotação). */
+  function furnitureMatrix(f: Furniture, out: THREE.Matrix4): THREE.Matrix4 {
+    const { cx, cz } = centerOf(f);
+    return out.compose(P.set(cx, 0.01, cz), Q.setFromAxisAngle(UP, (f.rot * Math.PI) / 180), ONE);
+  }
+  /** Tiles ocupados por móveis (chave x,z). */
+  function occupied(v: View): Set<string> {
+    const s = new Set<string>();
+    for (const f of v.furniture) { const fp = footprintOf(f); for (let i = 0; i < fp.w; i++) for (let j = 0; j < fp.d; j++) s.add(`${f.x + i},${f.z + j}`); }
+    return s;
+  }
 
   function syncFurniture(v: View): void {
     const seen = new Set<number>();
@@ -180,46 +219,63 @@ export default function create(): GameModule {
       const geoSig = `${f.type}|${f.x}|${f.z}|${f.rot}`;
       let e = entries.get(f.id);
       if (e && e.geoSig === geoSig) continue;
-      if (e) disposeEntry(e);
+      if (e) furniGroup.remove(e.group);
       geoChanged = true;
       const group = new THREE.Group();
       const { cx, cz } = centerOf(f);
       group.position.set(cx, 0.01, cz);
       group.rotation.y = (f.rot * Math.PI) / 180;
       group.userData.furnitureId = f.id;
-      let view: FurnitureView = { group };
-      if (f.type === 'counter') { const d = makeDrawer(group); view = { group, drawer: d.drawer, drawerBaseZ: d.baseZ }; }
+      e = { geoSig, group, drawerBaseZ: 0, drawerT: 0 };
+      if (f.type === 'counter') {
+        const d = makeDrawer(group); d.drawer.renderOrder = 2;
+        e.drawer = d.drawer; e.drawerBaseZ = d.baseZ;
+        screens.attach(f.id, group);
+      }
       group.visible = f.id !== hiddenId;
       furniGroup.add(group);
-      e = { geoSig, view, group, drawerT: 0 };
       entries.set(f.id, e);
     }
     for (const [id, e] of entries) {
       if (seen.has(id)) continue;
-      disposeEntry(e); entries.delete(id); geoChanged = true;
+      furniGroup.remove(e.group); entries.delete(id); geoChanged = true;
     }
-    // casca estática: refunde só quando algo estrutural muda (tipo/posição/rotação/produto/variante/oculto)
-    const fk = `${hiddenId ?? ''}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${f.productId ?? ''}:${f.variant ?? ''}`).join(',');
-    if (fk !== furniKey) { furniKey = fk; rebuildStatic(v); }
-    // itens expostos: depende também do preenchimento (balde de 1/48)
+    screens.prune(new Set(v.furniture.filter((f) => f.type === 'counter').map((f) => f.id)));
+    const fk = `${hiddenId ?? ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${f.productId ?? ''}:${f.variant ?? ''}`).join(',');
+    if (fk !== furniKey) {
+      furniKey = fk;
+      placeDesk(v);
+      rebuildStatic(v);
+      tags.rebuild(v.furniture, hiddenId);
+      picksDirty = true;
+    }
     const ik = fk + '|' + v.furniture.map((f) => Math.round(fillFraction(v, f) * 48)).join(',');
     if (ik !== itemsKey) { itemsKey = ik; rebuildItems(v); }
-    const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
+    const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|${desk ? `${desk.tx},${desk.tz}` : '-'}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
   }
   function rebuildStatic(v: View): void {
     for (const m of [...furniStatic.children]) furniStatic.remove(m);
     staticGeos.forEach((g) => g.dispose()); staticGeos.length = 0;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    const occ = occupied(v);
+    chairs.clear();
     const parts: { geos: ReturnType<typeof furnitureGeos>; matrix: THREE.Matrix4 }[] = [];
     for (const f of v.furniture) {
       if (f.id === hiddenId) continue;
-      const { cx, cz } = centerOf(f);
-      m.compose(p.set(cx, 0.01, cz), q.setFromAxisAngle(up, (f.rot * Math.PI) / 180), one);
-      parts.push({ geos: furnitureGeos(f), matrix: m.clone() });
+      furnitureMatrix(f, M);
+      parts.push({ geos: furnitureGeos(f), matrix: M.clone() });
+      if (f.type === 'counter') {
+        const { cx, cz } = centerOf(f);
+        const op = localToWorld(cx, cz, f.rot, SEAT.x, SEAT.z);
+        const tx = Math.floor(op.x), tz = Math.floor(op.z);
+        if (!occ.has(`${tx},${tz}`) && tx >= 0 && tx < bounds.width && tz >= (ctx.state.storageUnlocked ? -STORAGE_DEPTH : 0) && tz < bounds.depth) {
+          chairs.add(f.id);
+          parts.push({ geos: chairGeos(), matrix: M.clone().multiply(M2.makeTranslation(SEAT.x, 0, SEAT.z)) });
+        }
+      }
     }
     const merged = combine(parts);
-    for (const mesh of meshesOf(merged, furniStatic)) staticGeos.push(mesh.geometry);
+    for (const mesh of meshesOf(merged, furniStatic, { order: 2 })) staticGeos.push(mesh.geometry);
   }
   function rebuildItems(v: View): void {
     const by = new Map<string, number[]>();
@@ -234,11 +290,44 @@ export default function create(): GameModule {
     }
     itemLayer.setSource('furniture', by);
   }
-  function disposeEntry(e: Entry): void {
-    furniGroup.remove(e.group);
-  }
   function rebuildNav(v: View): void {
-    nav.build(bounds, ctx.state.storageUnlocked, v.furniture, env.blocked);
+    nav.build(bounds, ctx.state.storageUnlocked, v.furniture, desk ? [...env.blocked, { x: desk.tx, z: desk.tz }] : env.blocked);
+    picksDirty = true;
+  }
+
+  /** Balcão do computador: 1º tile livre junto à parede (frente: ao lado da antessala da porta; depois laterais). */
+  function placeDesk(v: View): void {
+    const W = bounds.width, D = bounds.depth, dx = doorX(bounds);
+    const occ = occupied(v);
+    const reserved = new Set<string>();
+    for (const zz of [D - 1, D - 2]) for (const xx of [dx - 1, dx]) reserved.add(`${xx},${zz}`);
+    for (const f of v.furniture) {
+      const { cx, cz } = centerOf(f);
+      const fp = FURNITURE_FOOTPRINT[f.type];
+      const fy = fp.d / 2 + 0.5;
+      const near: [number, number][] = f.type === 'counter'
+        ? [[SEAT.x, SEAT.z], [SEAT.x - 1, SEAT.z], [-0.5, fy], [0.5, fy], [-0.5, fy + 1]]
+        : [[-0.5, fy], [0.5, fy]];
+      for (const [lx, lz] of near) { const w = localToWorld(cx, cz, f.rot, lx, lz); reserved.add(`${Math.floor(w.x)},${Math.floor(w.z)}`); }
+    }
+    const free = (x: number, z: number): boolean => x >= 0 && x < W && z >= 0 && z < D && !occ.has(`${x},${z}`) && !reserved.has(`${x},${z}`);
+    const cands: { tx: number; tz: number; wall: 'front' | 'left' | 'right' }[] = [];
+    for (let k = 0; k < W; k++) {
+      const left = dx - 2 - k, right = dx + 1 + k;
+      if (left >= 0) cands.push({ tx: left, tz: D - 1, wall: 'front' });
+      if (right < W) cands.push({ tx: right, tz: D - 1, wall: 'front' });
+    }
+    for (let z = D - 2; z >= 1; z--) { cands.push({ tx: 0, tz: z, wall: 'left' }); cands.push({ tx: W - 1, tz: z, wall: 'right' }); }
+    const c = cands.find((q) => free(q.tx, q.tz));
+    if (!c) { desk = null; deskGroup.visible = false; return; }
+    const h = DESK_SIZE.d / 2 + 0.01;
+    desk = c.wall === 'front' ? { tx: c.tx, tz: c.tz, x: c.tx + 0.5, z: D - h, ry: Math.PI }
+      : c.wall === 'left' ? { tx: c.tx, tz: c.tz, x: h, z: c.tz + 0.5, ry: Math.PI / 2 }
+      : { tx: c.tx, tz: c.tz, x: W - h, z: c.tz + 0.5, ry: -Math.PI / 2 };
+    if (!deskGroup.children.length) meshesOf(deskGeos(), deskGroup, { order: 2 });
+    deskGroup.position.set(desk.x, 0.01, desk.z);
+    deskGroup.rotation.y = desk.ry;
+    deskGroup.visible = true;
   }
 
   /* ---------------- caixas no chão e em racks ---------------- */
@@ -256,28 +345,28 @@ export default function create(): GameModule {
   }
 
   function syncBoxes(v: View): void {
-    // caixas sem posição ganham um ponto livre na zona de entrega (o mundo escolhe, ver CONTRACTS)
     for (const b of v.sidewalk) {
       if (b.carried) continue;
       if (b.x === undefined || b.z === undefined) { const p = pickFreeSpot(v.sidewalk, b); b.x = p.x; b.z = p.z; }
     }
     const list: BoxInst[] = [];
-    const placed = v.sidewalk.filter((b) => !b.carried && b.x !== undefined && b.z !== undefined);
-    for (let i = 0; i < placed.length; i++) {
-      const b = placed[i]!;
+    boxLayout = [];
+    for (let i = 0; i < v.sidewalk.length; i++) {
+      const b = v.sidewalk[i]!;
+      if (b.carried || b.x === undefined || b.z === undefined) continue;
       let lvl = 0;
-      for (let j = 0; j < i; j++) { const o = placed[j]!; if (Math.abs(o.x! - b.x!) < 0.3 && Math.abs(o.z! - b.z!) < 0.3) lvl++; }
+      for (const o of boxLayout) if (Math.abs(o.x - b.x) < 0.3 && Math.abs(o.z - b.z) < 0.3) lvl++;
       let size = 12;
       try { size = productById(b.productId).boxSize; } catch { /* */ }
-      list.push({
-        pid: b.productId, x: b.x!, y: lvl * BOX_H, z: b.z!,
-        ry: (hash01(Math.round(b.x! * 10), Math.round(b.z! * 10), lvl) - 0.5) * 0.5,
-        open: b.units < size, fill: Math.min(1, b.units / size),
-      });
+      const ry = Number.isFinite(b.rot) ? (b.rot as number) : (hash01(Math.round(b.x * 10), Math.round(b.z * 10), lvl) - 0.5) * 0.5;
+      const open = b.open === true;
+      list.push({ pid: b.productId, x: b.x, y: lvl * BOX_H, z: b.z, ry, open, fill: Math.max(0, Math.min(1, b.units / size)) });
+      boxLayout.push({ index: i, box: b, x: b.x, y: lvl * BOX_H, z: b.z, ry, open });
     }
     boxLayer.setSource('floor', list);
+    picksDirty = true;
   }
-  const boxSigOf = (v: View): string => v.sidewalk.map((b) => `${b.productId}:${b.units}:${b.x ?? '-'}:${b.z ?? '-'}:${b.carried ? 1 : 0}`).join(',');
+  const boxSigOf = (v: View): string => v.sidewalk.map((b) => `${b.productId}:${b.units}:${b.x ?? '-'}:${b.z ?? '-'}:${b.carried ? 1 : 0}:${b.open ? 1 : 0}:${b.rot ?? ''}`).join(',');
 
   function syncRackBoxes(v: View): void {
     const racks = v.furniture.filter((f) => f.type === 'rack').sort((a, b) => a.id - b.id);
@@ -303,29 +392,82 @@ export default function create(): GameModule {
     boxLayer.setSource('rack', list);
   }
 
+  /** Altura da pilha onde uma caixa seria largada (empilha a < 0,3 m de outra), ignorando `self`. */
+  function stackHeight(x: number, z: number, self: Box | null): number {
+    let lvl = 0;
+    for (const o of boxLayout) if (o.box !== self && Math.abs(o.x - x) < 0.3 && Math.abs(o.z - z) < 0.3) lvl++;
+    return lvl * BOX_H;
+  }
+
+  /* ---------------- alvos de interação ---------------- */
+  const T = (x: number, y: number, z: number, ry = 0): THREE.Matrix4 => M.compose(P.set(x, y, z), Q.setFromAxisAngle(UP, ry), ONE);
+  const BOX_CLOSED: SBox[] = [[0, BOX_H / 2, 0, BOX_W, BOX_H, BOX_D]];
+  const BOX_OPEN: SBox[] = [[0, BOX_H / 2, 0, BOX_W, BOX_H, BOX_D], [0, BOX_H + 0.07, 0, BOX_W + 0.16, 0.14, BOX_D + 0.16]];
+  const DIRT_SIL: SBox[] = [[0, 0.04, 0, 0.62, 0.08, 0.62]];
+  function rebuildPicks(v: View): void {
+    picksDirty = false;
+    picks.begin();
+    for (const f of v.furniture) {
+      if (f.id === hiddenId) continue;
+      furnitureMatrix(f, M2);
+      picks.add({ kind: 'furniture', id: f.id }, silhouetteOf(f), M2);
+      if (f.type === 'counter' && chairs.has(f.id)) picks.add({ kind: 'seat', id: f.id }, chairSilhouette(), M2.multiply(M.makeTranslation(SEAT.x, 0, SEAT.z)));
+    }
+    for (const b of boxLayout) picks.add({ kind: 'box', id: b.index }, b.open ? BOX_OPEN : BOX_CLOSED, T(b.x, b.y, b.z, b.ry));
+    v.dirt.forEach((d, i) => picks.add({ kind: 'dirt', id: i }, DIRT_SIL, T(d.x, 0, d.z)));
+    const tb = trashBinPos(bounds);
+    picks.add({ kind: 'trash' }, TRASH_SILHOUETTE, T(tb.x, 0, tb.z));
+    const sg = shop.signBox;
+    picks.add({ kind: 'sign' }, [[0, 0, 0, sg.w, sg.h, sg.d]], T(sg.x, sg.y, sg.z));
+    if (desk) picks.add({ kind: 'computer' }, deskSilhouette(), T(desk.x, 0.01, desk.z, desk.ry));
+    const sd = shop.storageDoorBox;
+    if (sd) picks.add({ kind: 'storageDoor' }, [[0, 0, 0, sd.w, sd.h, sd.d]], T(sd.x, sd.y, sd.z));
+    picks.end();
+  }
+
+  /* ---------------- etiquetas de preço ---------------- */
+  const priceCache = new Map<string, number>();
+  function refreshPrices(): void {
+    for (const p of PRODUCTS) { try { priceCache.set(p.id, api.priceInfo(ctx.state, p.id).sell); } catch { /* sim antigo */ } }
+  }
+  const displayPids = new Set<string>();
+  function refreshTags(v: View): void {
+    displayPids.clear();
+    for (const f of v.furniture) if (f.productId && (f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer')) displayPids.add(f.productId);
+    tags.refresh(displayPids, (pid) => priceCache.get(pid) ?? 0, (pid) => v.shelf[pid] ?? 0);
+  }
+
   /* ---------------- sincronização geral ---------------- */
   function sync(force = false): void {
     const s: StoreState = ctx.state;
     const nb = storeBounds(s.expansion);
+    const dec = effectiveDecor(s.decor);
     const sk = `${s.expansion}|${s.storageUnlocked}`;
+    const dk = `${dec.wallColor}|${dec.floorColor}|${dec.signColor}|${s.storeName}`;
     if (force || sk !== shellKey) {
       shellKey = sk; bounds = nb;
       env.rebuild(bounds);
-      shop.rebuild(bounds, s.storageUnlocked, s.decor, s.storeName);
-      decorKey = `${s.decor.wallColor}|${s.decor.floorColor}|${s.decor.signColor}|${s.storeName}`;
+      shop.rebuild(bounds, s.storageUnlocked, dec, s.storeName);
+      decorKey = dk;
       env.setTime(ctx.clock.minute, true);
-      navKey = ''; rackKey = ''; boxKey = ''; demoCache = null;
+      navKey = ''; rackKey = ''; boxKey = ''; furniKey = ''; demoCache = null; picksDirty = true;
     }
-    const dk = `${s.decor.wallColor}|${s.decor.floorColor}|${s.decor.signColor}|${s.storeName}`;
-    if (dk !== decorKey) { decorKey = dk; shop.setDecor(s.decor, s.storeName); }
+    if (dk !== decorKey) {
+      const nameChanged = !decorKey.endsWith(`|${s.storeName}`);
+      decorKey = dk;
+      if (shop.setDecor(dec) || nameChanged) { shop.rebuild(bounds, s.storageUnlocked, dec, s.storeName); picksDirty = true; }
+    }
     const v = view();
     syncFurniture(v);
     const rk = v.furniture.filter((f) => f.type === 'rack').map((f) => `${f.id}:${f.x}:${f.z}:${f.rot}`).join(',') + '|' + PRODUCTS.map((p) => v.storage[p.id] ?? 0).join(',');
     if (rk !== rackKey) { rackKey = rk; syncRackBoxes(v); }
     const bk = boxSigOf(v);
     if (bk !== boxKey) { boxKey = bk; syncBoxes(v); boxKey = boxSigOf(v); }
-    const dsk = v.dirt.map((d) => `${d.x.toFixed(1)},${d.z.toFixed(1)}`).join(';');
-    if (dsk !== dirtKey) { dirtKey = dsk; syncDirt(v); }
+    const dsk = v.dirt.map((d) => `${d.x.toFixed(2)},${d.z.toFixed(2)}`).join(';');
+    if (dsk !== dirtKey) { dirtKey = dsk; syncDirt(v); picksDirty = true; }
+    if (force || !priceCache.size) refreshPrices();
+    refreshTags(v);
+    if (picksDirty) rebuildPicks(v);
   }
 
   /* ---------------- WorldService ---------------- */
@@ -344,6 +486,9 @@ export default function create(): GameModule {
     }
     return null;
   }
+  const counterById = (id: number): Furniture | undefined => view().furniture.find((f) => f.id === id && f.type === 'counter');
+  /** Ponto local do balcão → mundo (Vector3 novo). */
+  const counterPoint = (f: Furniture, lx: number, ly: number, lz: number): THREE.Vector3 => new THREE.Vector3(lx, ly, lz).applyMatrix4(furnitureMatrix(f, M2));
   const service: WorldService = {
     findPath: (from, to) => nav.findPath(from, to),
     isWalkable: (x, z) => nav.isWalkable(x, z),
@@ -358,13 +503,42 @@ export default function create(): GameModule {
         if (!nav.isWalkable(t.x, t.z) || t.z >= bounds.depth) break; // fila só dentro do salão
         queue.push(t);
       }
-      return { furnitureId: f.id, operator: tileC(op.x, op.z), queue, scanner: localToWorld(cx, cz, f.rot, 0.52, 0.62) };
+      return { furnitureId: f.id, operator: tileC(op.x, op.z), queue, scanner: localToWorld(cx, cz, f.rot, SCANNER[0], SCANNER[1]) };
     }),
-    // perto da porta (≈7 m de caminhada até ela) em vez de nascer no fim do quarteirão
     spawnPoint: () => ({ x: Math.floor(doorPos(bounds).x - 5) + 0.5, z: bounds.depth + SIDEWALK_DEPTH + 0.5 }),
     trashBin: () => trashBinPos(bounds),
     door: () => doorPos(bounds),
     group: root,
+    /* ---- Fase 3 ---- */
+    get pickGroup() { return picks.group; },
+    highlight: (p) => picks.highlight(p),
+    seatPose: (id) => {
+      const f = counterById(id);
+      if (!f) return null;
+      return { pos: counterPoint(f, SEAT.eye[0], SEAT.eye[1], SEAT.eye[2]), look: counterPoint(f, SEAT.look[0], SEAT.look[1], SEAT.look[2]) };
+    },
+    beltSlots: (id) => {
+      const f = counterById(id);
+      return f ? BELT_SLOTS.map(([x, z]) => counterPoint(f, x, BELT_Y + 0.005, z)) : [];
+    },
+    handoffPoint: (id) => { const f = counterById(id); return f ? counterPoint(f, HANDOFF[0], HANDOFF[1], HANDOFF[2]) : null; },
+    makeProductMesh: (pid) => makeProductMesh(pid),
+    makeBoxMesh: (pid, open, units) => makeBoxMesh(pid, open, units),
+    poi: (kind, id) => {
+      const v = new THREE.Vector3();
+      switch (kind) {
+        case 'computer': return desk ? v.set(desk.x, 1.25, desk.z) : null;
+        case 'sign': return v.set(shop.signBox.x, shop.signBox.y + 0.3, shop.signBox.z);
+        case 'delivery': { const dz = deliveryZone(bounds); return v.set(dz.x + dz.w / 2, 0.2, dz.z + dz.d / 2); }
+        case 'trash': { const tb = trashBinPos(bounds); return v.set(tb.x, 1.3, tb.z); }
+        case 'storageDoor': return v.set(doorX(bounds), 2.4, 0.1);
+        case 'counter': {
+          const f = id !== undefined ? counterById(id) : view().furniture.find((q) => q.type === 'counter');
+          return f ? picks.centerOf({ kind: 'furniture', id: f.id }, v) : null;
+        }
+        default: return id !== undefined ? picks.centerOf({ kind: 'furniture', id }, v) : null;
+      }
+    },
   };
 
   /* ---------------- qualidade (tiers) + adaptação automática ---------------- */
@@ -387,7 +561,7 @@ export default function create(): GameModule {
     const gap = fpsWin.last ? now - fpsWin.last : 0;
     fpsWin.last = now;
     if (!autoOn || tier === 'low' || document.visibilityState !== 'visible') { fpsWin.frames = 0; fpsWin.ms = 0; return; }
-    if (gap > 1000 || now - fpsWin.since < 4000) { if (gap > 1000) fpsWin.since = now; fpsWin.frames = 0; fpsWin.ms = 0; return; } // aba em segundo plano / aquecimento
+    if (gap > 1000 || now - fpsWin.since < 4000) { if (gap > 1000) fpsWin.since = now; fpsWin.frames = 0; fpsWin.ms = 0; return; }
     fpsWin.frames++; fpsWin.ms += gap;
     if (fpsWin.ms < 3000) return;
     const fps = (fpsWin.frames / fpsWin.ms) * 1000;
@@ -402,6 +576,17 @@ export default function create(): GameModule {
     tier, pixelRatio: ctx.renderer.getPixelRatio(), shadows: TIERS[tier].shadow, antialias: !!ctx.renderer.getContextAttributes()?.antialias, auto: autoOn, mobile: isMobileDevice(),
   });
 
+  /* ---------------- câmera travada (testes/prints: independe do player) ---------------- */
+  let lock: [number, number, number, number, number, number] | null = null;
+  let prevBefore: THREE.Scene['onBeforeRender'] | null = null;
+  function installLock(): void {
+    prevBefore = ctx.scene.onBeforeRender;
+    ctx.scene.onBeforeRender = (...args) => {
+      if (lock) { const c = ctx.camera; c.position.set(lock[0], lock[1], lock[2]); c.lookAt(lock[3], lock[4], lock[5]); c.updateMatrixWorld(); }
+      prevBefore?.apply(ctx.scene, args);
+    };
+  }
+
   /* ---------------- ciclo do módulo ---------------- */
   function exposeDebug(): void {
     const w = window as unknown as Record<string, unknown>;
@@ -409,7 +594,7 @@ export default function create(): GameModule {
       group: root, nav, get build() { return build; },
       rebuild: () => sync(true),
       sync: () => sync(false),
-      demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; entries.forEach(disposeEntry); entries.clear(); sync(false); },
+      demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; furniKey = ''; entries.forEach((e) => furniGroup.remove(e.group)); entries.clear(); sync(false); },
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
       quality: qualityInfo,
       setTier: (t: Tier) => applyTier(t),
@@ -417,12 +602,20 @@ export default function create(): GameModule {
       testGenericProducts: () => genericProductsSelfTest(),
       stats: () => ({ calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, geometries: ctx.renderer.info.memory.geometries, textures: ctx.renderer.info.memory.textures }),
       furnitureViews: () => entries.size,
-      boxCounts: () => ({ floor: boxLayer.countOf('floor'), rack: boxLayer.countOf('rack') }),
-      walls: () => shop.faces.map((f) => ({ n: [f.nx, f.nz], fade: +f.fade.toFixed(2) })),
-      setCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); },
+      boxCounts: () => ({ floor: boxLayer.countOf('floor'), rack: boxLayer.countOf('rack'), open: boxLayer.openCount('floor') }),
+      walls: () => [{ n: [0, 1], fade: 1 }],
+      setCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); ctx.camera.updateMatrixWorld(); },
+      lockCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { lock = [x, y, z, lx, ly, lz]; ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); ctx.camera.updateMatrixWorld(); },
+      unlockCamera: () => { lock = null; },
       startBuild: (type: Furniture['type'], productId?: string) => ctx.bus.emit('build:start', { type, productId }),
       bounds: () => ({ ...bounds }),
       walkable: () => ({ minX: nav.minX, minZ: nav.minZ, w: nav.w, h: nav.h, rows: Array.from({ length: nav.h }, (_, r) => Array.from({ length: nav.w }, (_, c) => (nav.walk[r * nav.w + c] ? '.' : '#')).join('')) }),
+      picks: () => picks.list(),
+      highlighted: () => picks.current,
+      screens: () => screens.info(),
+      tags: () => tags.info(),
+      desk: () => (desk ? { ...desk } : null),
+      chairs: () => [...chairs],
       service,
     };
   }
@@ -434,24 +627,28 @@ export default function create(): GameModule {
       demo = /[?&]demo(=1|=true|&|$)/.test(location.search);
       ctx.scene.add(root);
       shop = new Shop(); env = new Env(ctx.scene);
+      picks = new Picks(!!ctx.renderer.getContextAttributes()?.stencil);
       ctx.scene.fog = new THREE.Fog(0xd5ecff, 95, 230);
-      root.add(env.group, shop.group, furniStatic, furniGroup, itemLayer.group, boxLayer.group);
+      root.add(env.group, shop.group, furniStatic, furniGroup, deskGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx);
+      itemLayer.group.traverse((o) => { o.renderOrder = 2; });
       initDirt();
       build = new BuildMode({
         ctx, root,
         bounds: () => bounds, storageUnlocked: () => ctx.state.storageUnlocked,
         furniture: () => view().furniture,
-        buildModel: (f, fr) => makeView(f, fr),
         hide: (id) => { hiddenId = id; for (const [fid, e] of entries) e.group.visible = fid !== id; sync(false); },
+        walkable: (x, z) => nav.isWalkable(x, z),
+        stackHeight,
       });
       const t0 = initialTier();
       autoOn = !navigator.webdriver || /[?&]autoq=1/.test(location.search); // testes automatizados (WebDriver) não são rebaixados
       applyTier(t0);
       sync(true);
       ctx.services.world = service;
-      // câmera inicial: visão da fachada, caso o módulo player ainda não controle
-      ctx.camera.position.set(bounds.width / 2 + 4, 11, bounds.depth + 15);
-      ctx.camera.lookAt(bounds.width / 2, 0, bounds.depth / 2 - 1);
+      // câmera inicial em 1ª pessoa (o player assume em seguida)
+      ctx.camera.position.set(bounds.width / 2, 1.6, bounds.depth - 1.2);
+      ctx.camera.lookAt(bounds.width / 2, 1.3, 2);
+      installLock();
       const on = ctx.bus.on.bind(ctx.bus);
       offs.push(
         on('settings:changed', (p: { quality?: unknown }) => {
@@ -461,20 +658,23 @@ export default function create(): GameModule {
           if (first && storedTier() === null) return;
           applyTier(p.quality);
         }),
-        on('stateChanged', () => sync(false)),
-        on('dayStarted', () => sync(false)),
-        on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string }) => { sync(false); build.start(p.type, p.productId, p.variant); }),
-        on('build:edit', (p: { furnitureId: number }) => { sync(false); build.edit(p.furnitureId); }),
+        on('stateChanged', () => { refreshPrices(); sync(false); }),
+        on('dayStarted', () => { refreshPrices(); sync(false); }),
+        on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string; stockIndex?: number }) => { sync(false); picks.highlight(null); build.start(p); }),
+        on('build:edit', (p: { furnitureId: number }) => { sync(false); picks.highlight(null); build.edit(p.furnitureId); }),
+        on('build:box', (p: { boxIndex: number }) => { sync(false); picks.highlight(null); build.startBox(p?.boxIndex); }),
+        on('checkout:display', (p: Display) => screens.set(p, view().furniture.find((f) => f.type === 'counter')?.id)),
         on('sfx', (p?: { name?: string }) => {
           if (p?.name === 'door') doorTimer = 1.6;
-          if (p?.name === 'cash') for (const e of entries.values()) if (e.view.drawer) e.drawerT = 1;
+          if (p?.name === 'cash') for (const e of entries.values()) if (e.drawer) e.drawerT = 1;
         }),
       );
       exposeDebug();
     },
     update(dt) {
       watchFps();
-      acc += dt;
+      acc += dt; priceAcc += dt;
+      if (priceAcc >= 2) { priceAcc = 0; refreshPrices(); }
       if (acc >= 0.25) { acc = 0; sync(false); }
       const min = ctx.clock.minute;
       if (Math.abs(min - lastMinute) > 0.4) { lastMinute = min; env.setTime(min); }
@@ -485,13 +685,13 @@ export default function create(): GameModule {
         const d = doorPos(bounds);
         near = Math.hypot(pl.position.x - d.x, pl.position.z - d.z) < 3;
       }
-      shop.forceFade = build.active;
-      shop.update(dt, ctx.camera, near, env.night);
+      shop.setOpenSign(ctx.clock.phase === 'open');
+      shop.update(dt, near, env.night);
       env.update(dt);
       for (const e of entries.values()) {
-        if (e.view.drawer && e.drawerT > 0) {
+        if (e.drawer && e.drawerT > 0) {
           e.drawerT = Math.max(0, e.drawerT - dt * 1.6);
-          e.view.drawer.position.z = (e.view.drawerBaseZ ?? 0) + Math.sin(Math.min(1, e.drawerT * 1.3) * Math.PI) * 0.26;
+          e.drawer.position.z = e.drawerBaseZ - Math.sin(Math.min(1, e.drawerT * 1.3) * Math.PI) * 0.26;
         }
       }
       build.update(dt);
@@ -499,15 +699,16 @@ export default function create(): GameModule {
     dispose() {
       offs.forEach((f) => f());
       build.dispose();
-      for (const e of entries.values()) disposeEntry(e);
+      entries.forEach((e) => furniGroup.remove(e.group));
       entries.clear();
-      boxLayer.dispose(); itemLayer.dispose();
+      boxLayer.dispose(); itemLayer.dispose(); screens.dispose(); tags.dispose(); picks.dispose();
       staticGeos.forEach((g) => g.dispose()); staticGeos.length = 0;
       dirtMesh?.dispose(); dirtGeo?.dispose(); dirtMat?.dispose(); dirtTex?.dispose();
       shop.dispose(); env.dispose();
       clearGroup(root);
       ctx.scene.remove(root);
       ctx.scene.fog = null;
+      if (prevBefore !== null) ctx.scene.onBeforeRender = prevBefore;
       delete ctx.services.world;
       delete (window as unknown as Record<string, unknown>).__world;
     },

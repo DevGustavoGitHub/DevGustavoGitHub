@@ -123,7 +123,7 @@ export const phase3Css = `
 .pay-info{display:grid;grid-template-columns:1fr 1fr;gap:4px}
 .pay-info div{background:#1b2738;border-radius:8px;padding:3px 8px;display:flex;justify-content:space-between;align-items:center;gap:6px;color:#b9cde2;font-size:11.5px;font-weight:800;text-transform:uppercase}
 .pay-info b{color:#fff;font-size:14px;text-transform:none;white-space:nowrap}.pay-info .chg b{color:#ffd23f}.pay-info .giv b{color:#4be36b}
-.pay-row{flex:1 1 0;min-height:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;background:#1b2738;border-radius:12px;padding:6px}
+.pay-row{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;background:#1b2738;border-radius:12px;padding:6px}
 .pay-den{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:0;background:transparent;color:#fff;padding:0;min-height:48px;min-width:0;height:100%}
 .pay-den small{font-weight:900;font-size:14px;white-space:nowrap}
 .pay-den:active .bill3,.pay-den:active .coin3{transform:translateY(2px) scale(.96)}
@@ -231,7 +231,7 @@ export const phase3Css = `
 .subtab.on{background:#fff;color:#5f6b78;box-shadow:inset 0 3px 0 #bfe2fb,inset 3px 0 0 #bfe2fb,inset -3px 0 0 #bfe2fb}
 .mk-top .sel{margin-left:auto;margin-bottom:4px;height:44px;min-height:44px;border-radius:10px;border:2px solid #bfe2fb;background:#fff;color:#1d2a3c;font-weight:800;max-width:46%}
 .mk-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;border:3px solid #bfe2fb;border-radius:0 12px 12px 12px;background:#fff;padding:6px;display:grid;gap:6px;
-  grid-template-columns:repeat(auto-fill,minmax(232px,1fr));align-content:start}
+  grid-template-columns:repeat(auto-fill,minmax(232px,1fr));grid-auto-rows:max-content;align-content:start}
 .mk-note{grid-column:1/-1;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#eaf4fc;border-radius:10px;padding:4px 6px 4px 10px;font-size:13px;font-weight:700;color:#35506b}
 .mk-note .btn{min-height:44px}
 .pcard{display:grid;grid-template-columns:minmax(0,1fr) 136px;gap:6px;background:var(--p3-navy);border-radius:10px;padding:8px;color:#fff;min-height:140px;position:relative}
@@ -239,11 +239,12 @@ export const phase3Css = `
 .pc-l{display:flex;flex-direction:column;gap:2px;min-width:0}
 .pc-name{font-size:14px;font-weight:900;line-height:1.15}
 .pc-sub{font-size:11px;color:#9fb3c8;font-weight:700;line-height:1.2}
-.pc-art{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:66px}
+.pc-art{position:relative;flex:1 0 auto;display:flex;align-items:center;justify-content:center;min-height:66px}
 .pc-art>.pic,.pc-art>.fic{width:66px;height:66px}
 .pc-furn{position:absolute;left:-2px;bottom:-2px;width:30px;height:30px;display:flex}.pc-furn svg{width:30px;height:30px}
 .pc-units{position:absolute;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;font-size:13px;font-weight:900;line-height:1;gap:1px}
 .pc-units svg{width:18px;height:18px;color:#e2a85c}
+.pc-info{grid-column:1/-1;font-size:11px;color:#9fb3c8;font-weight:700;line-height:1.25}
 .pc-warn{font-size:11px;font-weight:800;color:#ffd08a;background:rgba(255,160,40,.16);border-radius:6px;padding:2px 6px;align-self:flex-start;line-height:1.2}
 .pc-r{display:flex;flex-direction:column;gap:6px;justify-content:center}
 .pc-price{text-align:center;font-size:19px;font-weight:900;line-height:1.1;display:flex;flex-direction:column;align-items:center}

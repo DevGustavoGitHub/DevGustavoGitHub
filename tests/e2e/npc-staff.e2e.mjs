@@ -20,11 +20,11 @@ const check = (n, ok, x = '') => { console.log(ok ? 'PASS' : 'FAIL', n, x); if (
 
 await page.evaluate(() => {
   const s = __game.state;
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) s.shelf[id] = 3;
-  s.sidewalk.push({ productId: 'arroz', units: 6 }, { productId: 'feijao', units: 12 });
+  for (const id of ['feijao', 'macarrao']) s.shelf[id] = 3;
+  s.sidewalk.push({ productId: 'macarrao', units: 20 }, { productId: 'feijao', units: 12 });
   s.dirt.push({ x: 3.5, z: 6.5 }, { x: 9.5, z: 8.5 });
   s.employees.cashier = 1; s.employees.stocker = 1; s.employees.janitor = 1;
-  window.__before = { shelf: s.shelf.arroz + s.shelf.feijao, boxes: s.sidewalk.length, dirt: s.dirt.length, money: s.money };
+  window.__before = { shelf: s.shelf.macarrao + s.shelf.feijao, boxes: s.sidewalk.length, dirt: s.dirt.length, money: s.money };
   __game.uiRoot.style.display = 'none';
   __npc.sync();
   __game.clock.paused = false; __game.clock.openStore(); __npc.timeScale = 4;
@@ -35,14 +35,14 @@ await page.waitForTimeout(1500);
 console.log('staff', JSON.stringify(await page.evaluate(() => __npc.staff())));
 let maxShelf = 0;
 for (let i = 0; i < 90; i++) {
-  const st = await page.evaluate(() => { if (__game.clock.minute < 1100) __game.clock.minute += 6; const s = __game.state; return { boxes: s.sidewalk.length, dirt: s.dirt.length, shelf: s.shelf.arroz + s.shelf.feijao, sold: __npc.stats.sold, staff: __npc.staff().map((x) => x.role + ':' + x.job).join(','), money: s.money }; });
+  const st = await page.evaluate(() => { if (__game.clock.minute < 1100) __game.clock.minute += 6; const s = __game.state; return { boxes: s.sidewalk.length, dirt: s.dirt.length, shelf: s.shelf.macarrao + s.shelf.feijao, sold: __npc.stats.sold, staff: __npc.staff().map((x) => x.role + ':' + x.job).join(','), money: s.money }; });
   maxShelf = Math.max(maxShelf, st.shelf);
   if (i % 5 === 0) console.log('t', i, JSON.stringify(st));
   if (i === 8) await page.screenshot({ path: `${OUT}/04-staff.png` });
   if (st.boxes === 0 && st.dirt === 0 && st.sold >= 3) break;
   await page.waitForTimeout(1000);
 }
-const r = await page.evaluate(() => ({ b: __before, s: { boxes: __game.state.sidewalk.length, dirt: __game.state.dirt.length, shelf: __game.state.shelf.arroz + __game.state.shelf.feijao }, sold: __npc.stats.sold, staff: __npc.staff() }));
+const r = await page.evaluate(() => ({ b: __before, s: { boxes: __game.state.sidewalk.length, dirt: __game.state.dirt.length, shelf: __game.state.shelf.macarrao + __game.state.shelf.feijao }, sold: __npc.stats.sold, staff: __npc.staff() }));
 console.log(JSON.stringify(r));
 check('repositor esvaziou as caixas', r.s.boxes === 0, `${r.b.boxes} -> ${r.s.boxes}`);
 check('prateleira reabastecida (pico observado)', maxShelf > r.b.shelf, `${r.b.shelf} -> pico ${maxShelf}`);
