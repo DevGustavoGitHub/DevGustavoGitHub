@@ -1,5 +1,8 @@
+import { FURNITURE_FOOTPRINT, type FurnitureType } from '../core/layout';
+import type { StockedFurniture } from './api';
 import { recomputeSlots } from './furniture';
-import { initialFurniture, newGame, type StoreState } from './state';
+import { rentFor } from './rent';
+import { INITIAL_NEXT_FURNITURE_ID, initialFurniture, newGame, type StoreState } from './state';
 
 export const SAVE_KEY = 'mercadinho-sim:save:v1';
 
@@ -11,12 +14,18 @@ export interface KV {
 
 export const serialize = (s: StoreState): string => JSON.stringify(s);
 
+const isFurnitureType = (t: unknown): t is FurnitureType => typeof t === 'string' && Object.hasOwn(FURNITURE_FOOTPRINT, t);
+const count = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0);
+
 /**
  * Mescla sobre um jogo novo (saves antigos ganham campos novos) e migra:
  * - sem móveis (save anterior ao sistema de móveis) => layout inicial;
  * - state.slots sempre recalculado a partir dos móveis (fonte da verdade);
  * - levelAck ausente => nível atual (não dispara avisos antigos);
  * - Fase 2: loan/autoOrders/upgrades/history/stats/bankruptcies ausentes => defaults.
+ * - Fase 3: furnitureStock ausente => [] (entradas inválidas descartadas); ledger sem happy/angry => atendidos contam
+ *   como felizes e perdidos como irritados; Box.open inválido => removido (ausente = fechada); save anterior à Fase 3
+ *   => aluguel recalculado no modelo novo (rent.ts). A decoração salva é mantida (só saves sem decor ganham a paleta nova).
  */
 export function deserialize(raw: string): StoreState {
   const data = JSON.parse(raw) as Partial<StoreState>;
@@ -32,7 +41,7 @@ export function deserialize(raw: string): StoreState {
   } as StoreState;
   if (!Array.isArray(data.furniture) || (data.furniture.length === 0 && (data.nextFurnitureId ?? 1) <= 1)) {
     s.furniture = initialFurniture();
-    s.nextFurnitureId = Math.max(s.nextFurnitureId, 6);
+    s.nextFurnitureId = Math.max(s.nextFurnitureId, INITIAL_NEXT_FURNITURE_ID);
   }
   s.nextFurnitureId = Math.max(s.nextFurnitureId, ...s.furniture.map((f) => f.id + 1));
   if (data.levelAck === undefined) s.levelAck = s.level;
@@ -43,6 +52,26 @@ export function deserialize(raw: string): StoreState {
   if (!Array.isArray(s.history)) s.history = [];
   if (!Array.isArray(s.stats)) s.stats = [];
   if (!Number.isFinite(s.bankruptcies)) s.bankruptcies = 0;
+  // Fase 3
+  const phase3 = Array.isArray(data.furnitureStock);
+  s.furnitureStock = phase3
+    ? (data.furnitureStock as unknown[]).flatMap((e): StockedFurniture[] => {
+        if (typeof e !== 'object' || e === null) return [];
+        const { type, variant } = e as { type?: unknown; variant?: unknown };
+        if (!isFurnitureType(type)) return [];
+        return [typeof variant === 'string' ? { type, variant } : { type }];
+      })
+    : [];
+  const oldLedger = data.ledger as Partial<StoreState['ledger']> | undefined;
+  if (oldLedger && oldLedger.happy === undefined && oldLedger.angry === undefined) {
+    s.ledger.happy = count(oldLedger.served);
+    s.ledger.angry = count(oldLedger.lost);
+  }
+  s.ledger.happy = count(s.ledger.happy);
+  s.ledger.angry = count(s.ledger.angry);
+  if (!Array.isArray(s.sidewalk)) s.sidewalk = [];
+  for (const b of s.sidewalk) if (b.open !== undefined && typeof b.open !== 'boolean') delete b.open;
+  if (!phase3 || !Number.isFinite(s.rent) || s.rent < 0) s.rent = rentFor(s);
   recomputeSlots(s);
   return s;
 }

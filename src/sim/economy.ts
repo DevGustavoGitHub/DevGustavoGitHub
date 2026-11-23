@@ -2,18 +2,24 @@ import { LICENSES, PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay, pickProduct } from './demand';
 import { advanceMarket, marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
+import { rentFor } from './rent';
 import { makeRng } from './rng';
-import { CHECKOUT, EMPLOYEE_TABLE, HISTORY_DAYS, LOAN, MAX_EMPLOYEE_LEVEL, type EmployeeRole } from './tuning';
+import { CHECKOUT, EMPLOYEE_TABLE, HISTORY_DAYS, LOAN, MAX_EMPLOYEE_LEVEL, SALE, type EmployeeRole } from './tuning';
 import { emptyLedger, type Ledger, type StoreState } from './state';
 
 /* ---------- Progressão ---------- */
 
-/** XP acumulado necessário para ALCANÇAR o nível n (n>=2). */
+/**
+ * XP acumulado necessário para ALCANÇAR o nível n (n>=2): XP_BASE·(n−1)^XP_EXP·(1 + XP_LATE_SLOPE·max(0, n−15)).
+ * Fase 3: nível 2 custa só 100 XP (sobe no dia 1 mesmo com a loja pobre); do nível 6 em diante fica ≈ a curva antiga.
+ */
 export const xpForLevel = (n: number): number =>
-  n <= 1 ? 0 : Math.round(130 * Math.pow(n - 1, 1.8) * (1 + XP_LATE_SLOPE * Math.max(0, n - XP_LATE_FROM)));
+  n <= 1 ? 0 : Math.round(XP_BASE * Math.pow(n - 1, XP_EXP) * (1 + XP_LATE_SLOPE * Math.max(0, n - XP_LATE_FROM)));
+export const XP_BASE = 100;
+export const XP_EXP = 1.9;
 /** Depois do nível 15 a curva fica mais íngreme (fim de jogo: nível ~30 por volta do dia 90-100 com o bot). */
-const XP_LATE_FROM = 15;
-const XP_LATE_SLOPE = 0.05;
+export const XP_LATE_FROM = 15;
+export const XP_LATE_SLOPE = 0.05;
 
 /** Juros diários do empréstimo (múltiplo de R$ 0,05, arredondado para cima; 0 se não há dívida). */
 export const loanInterest = (owed: Cents): Cents => (owed <= 0 ? 0 : Math.ceil((owed * LOAN.dailyRate) / 5) * 5);
@@ -74,7 +80,7 @@ export function buyBoxes(state: StoreState, productId: string, boxes: number): C
   state.costBasis[productId] = basis;
   state.money -= cost;
   state.ledger.purchases += cost;
-  for (let i = 0; i < boxes; i++) state.sidewalk.push({ productId, units: p.boxSize });
+  for (let i = 0; i < boxes; i++) state.sidewalk.push({ productId, units: p.boxSize, open: false });
   return cost;
 }
 
@@ -154,6 +160,22 @@ export interface DayReport {
   interest?: Cents;
   /** Fase 2: saldo devedor ao fechar o dia (depois dos juros). */
   loan?: Cents;
+  /*
+   * Fase 3 (sempre presentes em relatórios novos; opcionais só porque o histórico de saves antigos não os tem).
+   * Resumo do dia no estilo do original: clientes total (= served + lost) / irritados / felizes; rendimento, despesa, lucro.
+   */
+  /** Clientes felizes: vendas com satisfação >= 3. */
+  happy?: number;
+  /** Clientes irritados: vendas com satisfação < 3 + perdidos/desistentes. happy + angry = served + lost. */
+  angry?: number;
+  /** Aluguel cobrado neste dia (parte de `fixed`; 0 no começo do jogo). */
+  rent?: Cents;
+  /** Salários cobrados neste dia (parte de `fixed`). */
+  wages?: Cents;
+  /** Rendimento = receita + gorjetas. */
+  income?: Cents;
+  /** Despesa = custo das mercadorias vendidas (COGS) + despesas fixas. income − expenses = netProfit. */
+  expenses?: Cents;
 }
 
 /**
@@ -169,6 +191,7 @@ export function simulateOpenDay(state: StoreState): void {
   for (let i = 0; i < arrivals; i++) {
     if (i >= capacity) {
       state.ledger.lost++;
+      state.ledger.angry++;
       satSum += 2;
       satN++;
       continue;
@@ -196,9 +219,12 @@ export function simulateOpenDay(state: StoreState): void {
     }
     if (bought === 0) {
       state.ledger.lost++;
+      state.ledger.angry++;
       sat = Math.min(sat, 2);
     } else {
       state.ledger.served++;
+      if (sat >= SALE.happyMin) state.ledger.happy++;
+      else state.ledger.angry++;
       if (sat >= 4) {
         const tip = roundPrice(basketTotal * 0.03);
         state.ledger.tips += tip;
@@ -213,12 +239,19 @@ export function simulateOpenDay(state: StoreState): void {
   if (satN > 0) state.reputation = Math.min(5, Math.max(1, state.reputation * 0.8 + (satSum / satN) * 0.2));
 }
 
-/** Fecha o dia: cobra despesas fixas, gera relatório, avança mercado e calendário. */
+/**
+ * Fecha o dia: cobra despesas fixas (aluguel do dia em `state.rent` + salários + juros), gera relatório, avança mercado
+ * e calendário e recalcula o aluguel do dia seguinte (rent.ts: rampa a partir do nível 3 ou do dia 4).
+ */
 export function endDay(state: StoreState): DayReport {
   const l: Ledger = state.ledger;
   const interest = loanInterest(state.loan);
-  const fixed = state.rent + dailyWages(state) + interest;
+  const rent = Math.max(0, Math.round(state.rent));
+  const wages = dailyWages(state);
+  const fixed = rent + wages + interest;
   state.money -= fixed;
+  const income = l.revenue + l.tips;
+  const expenses = l.cogs + fixed;
   const report: DayReport = {
     day: state.day,
     revenue: l.revenue,
@@ -226,18 +259,25 @@ export function endDay(state: StoreState): DayReport {
     cogs: l.cogs,
     purchases: l.purchases,
     fixed,
-    netProfit: l.revenue + l.tips - l.cogs - fixed,
-    cashDelta: l.revenue + l.tips - l.purchases - fixed,
+    netProfit: income - expenses,
+    cashDelta: income - l.purchases - fixed,
     served: l.served,
     lost: l.lost,
     reputation: state.reputation,
     interest,
     loan: state.loan,
+    happy: l.happy,
+    angry: l.angry,
+    rent,
+    wages,
+    income,
+    expenses,
   };
   state.history.push(report);
   while (state.history.length > HISTORY_DAYS) state.history.shift();
   state.day++;
   state.ledger = emptyLedger();
+  state.rent = rentFor(state);
   advanceMarket(state, makeRng(state.seed * 7919 + state.day));
   return report;
 }

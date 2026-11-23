@@ -30,17 +30,18 @@ export interface Product {
   shape?: 'box' | 'bottle' | 'can' | 'bag' | 'tray' | 'jar';
 }
 
+/** Fase 3: a 2ª licença sai no nível 2 (como no original); as demais seguem espaçadas até o nível 25. */
 export const LICENSES: License[] = [
   { id: 'mercearia', name: 'Mercearia', minLevel: 1, cost: 0 },
-  { id: 'bebidas', name: 'Bebidas', minLevel: 3, cost: 150000 },
-  { id: 'laticinios', name: 'Laticínios', minLevel: 5, cost: 400000 },
-  { id: 'padaria', name: 'Padaria', minLevel: 7, cost: 800000 },
-  { id: 'limpeza', name: 'Limpeza', minLevel: 9, cost: 1200000 },
-  { id: 'congelados', name: 'Congelados', minLevel: 11, cost: 2000000 },
-  { id: 'hortifruti', name: 'Hortifrúti', minLevel: 13, cost: 2500000 },
-  { id: 'higiene', name: 'Higiene e Beleza', minLevel: 16, cost: 3500000 },
-  { id: 'frios', name: 'Açougue e Frios', minLevel: 20, cost: 5500000 },
-  { id: 'eletronicos', name: 'Eletrônicos e Utilidades', minLevel: 25, cost: 9000000 },
+  { id: 'bebidas', name: 'Bebidas', minLevel: 2, cost: 40000 },
+  { id: 'laticinios', name: 'Laticínios', minLevel: 4, cost: 150000 },
+  { id: 'padaria', name: 'Padaria', minLevel: 6, cost: 350000 },
+  { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 700000 },
+  { id: 'congelados', name: 'Congelados', minLevel: 10, cost: 1300000 },
+  { id: 'hortifruti', name: 'Hortifrúti', minLevel: 13, cost: 2200000 },
+  { id: 'higiene', name: 'Higiene e Beleza', minLevel: 16, cost: 3400000 },
+  { id: 'frios', name: 'Açougue e Frios', minLevel: 20, cost: 5200000 },
+  { id: 'eletronicos', name: 'Eletrônicos e Utilidades', minLevel: 25, cost: 8500000 },
 ];
 
 export const PRODUCTS: Product[] = [

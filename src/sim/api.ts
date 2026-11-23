@@ -4,7 +4,7 @@
  * violação de regra (dinheiro insuficiente, nível baixo, posição inválida...). Dinheiro sempre em centavos.
  * Regras em furniture.ts / economy.ts / tuning.ts; números documentados em docs/GDD.md §4.
  */
-import { STORAGE_DEPTH, type FurnitureType } from '../core/layout';
+import { DOOR_WIDTH, MAX_EXPANSION, SIDEWALK_DEPTH, STORAGE_DEPTH, doorX, storeBounds, type FurnitureType } from '../core/layout';
 import { PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay } from './demand';
 import {
@@ -13,15 +13,17 @@ import {
 import {
   canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay, reconcile,
   specOf, storageCapacity as storageCapacityImpl, storageUsed as storageUsedImpl, productCapacity as productCapacityImpl,
+  displayTypeFor, storagePassage,
 } from './furniture';
 import { marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
+import { rentFor } from './rent';
 import { makeRng } from './rng';
-import { emptyLedger, initialFurniture, newGame, type AutoOrderRule, type Decor, type Furniture, type StoreState } from './state';
+import { INITIAL_NEXT_FURNITURE_ID, emptyLedger, initialFurniture, type AutoOrderRule, type Decor, type Furniture, type StoreState } from './state';
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
-  BANKRUPTCY, BASE_CARRY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS, MAX_EMPLOYEE_LEVEL, RENT_PER_EXPANSION, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES,
-  STORAGE, STORE_NAME_MAX,
+  BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS,
+  MAX_EMPLOYEE_LEVEL, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES, STORAGE, STORE_NAME_MAX,
 } from './tuning';
 
 export type { DayReport };
@@ -120,7 +122,7 @@ export function buyExpansion(state: StoreState): void {
   if (state.money < e.cost) throw new Error('Dinheiro insuficiente');
   state.money -= e.cost;
   state.expansion++;
-  state.rent += RENT_PER_EXPANSION;
+  state.rent = rentFor(state); // aluguel cheio sobe RENT.perExpansion (já vale para o fechamento de hoje)
   relocateBlocking(state); // a porta muda de lugar: tira móveis da nova antessala/passagem
 }
 export function storageCost(): { cost: Cents; minLevel: number } { return { cost: STORAGE.cost, minLevel: STORAGE.minLevel }; }
@@ -229,7 +231,7 @@ export function takeFromStorage(state: StoreState, productId: string, carry: boo
   if (have <= 0) throw new Error('Sem estoque no depósito');
   const n = Math.min(have, productById(productId).boxSize);
   state.storage[productId] = have - n;
-  state.sidewalk.push(carry ? { productId, units: n, carried: true } : { productId, units: n });
+  state.sidewalk.push(carry ? { productId, units: n, open: false, carried: true } : { productId, units: n, open: false });
   return n;
 }
 
@@ -321,7 +323,8 @@ function updateReputation(state: StoreState, satisfaction: number): void {
 /**
  * Fecha a venda: receita, COGS, XP, gorjeta, reputação do cliente. `speed` 0..1 (1 = muito rápido) escala a gorjeta;
  * `satisfaction` 1..5. Dinheiro entra no caixa imediatamente. Retorna {total, tip}.
- * As unidades já devem ter saído da prateleira (takeFromShelf). Gorjeta ≤ 8% do total.
+ * As unidades já devem ter saído da prateleira (takeFromShelf). Gorjeta ≤ 8% do total (≤ 12% com o pote de gorjeta).
+ * Fase 3: satisfação >= 3 conta cliente feliz (`ledger.happy`); abaixo disso, irritado (`ledger.angry`).
  */
 export function completeSale(state: StoreState, items: { productId: string; qty: number }[], speed: number, satisfaction: number): { total: Cents; tip: Cents } {
   let total = 0;
@@ -344,20 +347,24 @@ export function completeSale(state: StoreState, items: { productId: string; qty:
   const sp = clamp(Number.isFinite(speed) ? speed : 0, 0, 1);
   const sat = clamp(Number.isFinite(satisfaction) ? satisfaction : 3, 1, 5);
   const tipFactor = clamp((sat - 2) / 3, 0, 1) * sp;
-  const tip = Math.floor((total * SALE.tipMax * tipFactor) / 5) * 5;
+  const jar = state.upgrades.includes('tipjar') ? UPGRADES.tipjar.mult : 1;
+  const tip = Math.floor((total * SALE.tipMax * jar * tipFactor) / 5) * 5;
   state.money += total + tip;
   state.ledger.revenue += total;
   state.ledger.tips += tip;
   state.ledger.cogs += cogs;
   state.ledger.served++;
+  if (sat >= SALE.happyMin) state.ledger.happy++;
+  else state.ledger.angry++;
   addXp(state, units + SALE.xpPerCustomer + Math.round(units * SALE.xpSpeedBonus * sp));
   updateReputation(state, sat);
   return { total, tip };
 }
 
-/** Registra cliente que foi embora sem comprar / desistiu (afeta reputação e ledger.lost). */
+/** Registra cliente que foi embora sem comprar / desistiu (afeta reputação, ledger.lost e ledger.angry). */
 export function recordLostCustomer(state: StoreState, satisfaction: number): void {
   state.ledger.lost++;
+  state.ledger.angry++;
   updateReputation(state, Number.isFinite(satisfaction) ? satisfaction : 2);
 }
 
@@ -443,10 +450,10 @@ export function isBankrupt(state: StoreState): boolean {
 }
 /**
  * Recomeço guiado: mantém nível, XP, licenças, melhorias, decoração, nome e histórico; zera dívida, estoque,
- * funcionários, expansões, depósito e layout (volta ao inicial) e devolve capital reduzido (BANKRUPTCY.restartMoney).
+ * funcionários, expansões, depósito, móveis por montar e layout (volta ao inicial) e devolve um capital pequeno
+ * (BANKRUPTCY.restartMoney). O aluguel é recalculado para a loja sem expansões (mesma regra de nível/dia de rent.ts).
  */
 export function restartAfterBankruptcy(state: StoreState): void {
-  const base = newGame(state.seed);
   state.money = BANKRUPTCY.restartMoney;
   state.loan = 0;
   state.autoOrders = {};
@@ -457,12 +464,13 @@ export function restartAfterBankruptcy(state: StoreState): void {
   state.costBasis = {};
   state.employees = { cashier: 0, stocker: 0, janitor: 0 };
   state.expansion = 0;
-  state.rent = base.rent;
   state.storageUnlocked = false;
   state.furniture = initialFurniture();
-  state.nextFurnitureId = 6;
+  state.nextFurnitureId = INITIAL_NEXT_FURNITURE_ID;
+  state.furnitureStock = [];
   state.dirt = [];
   state.ledger = emptyLedger();
+  state.rent = rentFor(state);
   state.reputation = Math.max(state.reputation, 3);
   state.bankruptcies++;
   reconcile(state);
@@ -525,7 +533,8 @@ export function buyMissing(state: StoreState, fillRatio = 1): { cost: Cents; box
 }
 
 /* ---------- Melhorias (upgrades) ---------- */
-export type UpgradeId = 'dolly';
+/** Fase 3: + 'tipjar' (pote de gorjeta, nível 2) e 'capacity' (capacidade de clientes, nível 4). Catálogo em ordem de nível. */
+export type UpgradeId = 'dolly' | 'tipjar' | 'capacity';
 export interface UpgradeSpec { id: UpgradeId; name: string; description: string; cost: Cents; minLevel: number; owned: boolean }
 export function upgradeCatalog(state: StoreState): UpgradeSpec[] {
   return (Object.keys(UPGRADES) as UpgradeId[]).map((id) => ({
@@ -569,28 +578,166 @@ export function topProducts(state: StoreState, days = 7): { productId: string; u
 
 /* =====================================================================
  * FASE 3 — assinaturas CONGELADAS (o agente `sim` implementa; demais programam contra elas).
- * StoreState ganha (sim cria defaults + migração): furnitureStock. UpgradeId ganhará 'tipjar' | 'capacity'.
+ * StoreState ganhou (defaults em newGame + migração em deserialize): furnitureStock; Box.open; Ledger.happy/angry.
+ * UpgradeId ganhou 'tipjar' | 'capacity'. Adições: canDropBox (validação da prévia de caixa), setBoxOpen (adendo).
  * ===================================================================== */
-const p3 = (n: string): never => { throw new Error(`NOT_IMPLEMENTED: ${n}`); };
 
 /** Linha do carrinho do Mercado. produto: id do catálogo, qty = nº de CAIXAS. móvel: id = FurnitureType, qty = unidades. */
 export interface CartLine { kind: 'product' | 'furniture'; id: string; qty: number; variant?: string }
+
+const FURNITURE_TYPES: readonly FurnitureType[] = ['shelf', 'fridge', 'freezer', 'counter', 'rack', 'decor'];
+const asFurnitureType = (id: string): FurnitureType => {
+  const t = FURNITURE_TYPES.find((x) => x === id);
+  if (!t) throw new Error('Tipo de móvel desconhecido');
+  return t;
+};
+const decorItemOf = (variant: string | undefined) => (variant === undefined ? undefined : DECOR_ITEMS.find((d) => d.id === variant));
+
+/** Valida a linha (tipo, id, quantidade inteira >= 0) e devolve o custo a preço de hoje. Linhas com qty 0 custam 0. */
+function cartLineCost(state: StoreState, l: CartLine): Cents {
+  if (typeof l !== 'object' || l === null) throw new Error('Item do carrinho inválido');
+  if (!Number.isInteger(l.qty) || l.qty < 0) throw new Error('Quantidade inválida');
+  if (l.kind === 'product') {
+    const p = productById(l.id);
+    return wholesale(state, p.id) * p.boxSize * l.qty;
+  }
+  if (l.kind === 'furniture') {
+    const type = asFurnitureType(l.id);
+    return furnitureCost(type, type === 'decor' ? l.variant : undefined) * l.qty;
+  }
+  throw new Error('Item do carrinho inválido');
+}
+
 /** Total do carrinho a preço de hoje (produtos: caixas × boxSize × atacado; móveis: custo do catálogo). */
-export function cartTotal(state: StoreState, lines: CartLine[]): Cents { return p3('cartTotal'); }
+export function cartTotal(state: StoreState, lines: CartLine[]): Cents {
+  return lines.reduce((a, l) => a + cartLineCost(state, l), 0);
+}
 /**
  * Compra atômica (tudo ou nada; valida licença, nível e dinheiro). Produtos viram caixas na calçada
  * (entrega instantânea); móveis vão para o estoque de montagem (`furnitureStock`), montados depois em 1ª pessoa.
+ * Também recusa: carrinho vazio, calçada sem espaço para as caixas (SIDEWALK_MAX_BOXES) e estante sem depósito.
+ * Caixas chegam FECHADAS; `variant` só vale para decoração (preço/nível da variante, como buyFurniture).
  */
-export function checkoutCart(state: StoreState, lines: CartLine[]): { cost: Cents; boxes: number; furniture: number } { return p3('checkoutCart'); }
+export function checkoutCart(state: StoreState, lines: CartLine[]): { cost: Cents; boxes: number; furniture: number } {
+  if (!Array.isArray(lines)) throw new Error('Carrinho inválido');
+  // 1) valida tudo antes de mudar qualquer coisa
+  let cost = 0;
+  let furnitureCostSum = 0;
+  let boxes = 0;
+  let furniture = 0;
+  for (const l of lines) {
+    const c = cartLineCost(state, l);
+    cost += c;
+    if (l.qty === 0) continue;
+    if (l.kind === 'product') {
+      const p = productById(l.id);
+      if (!state.licenses.includes(p.category)) throw new Error(`${p.name}: categoria não licenciada`);
+      boxes += l.qty;
+    } else {
+      const type = asFurnitureType(l.id);
+      const spec = specOf(type);
+      const minLevel = Math.max(spec.minLevel, type === 'decor' ? decorItemOf(l.variant)?.minLevel ?? 0 : 0);
+      if (state.level < minLevel) throw new Error(`${spec.name}: requer nível ${minLevel}`);
+      if (type === 'rack' && !state.storageUnlocked) throw new Error('Desbloqueie o depósito antes de comprar estantes');
+      furniture += l.qty;
+      furnitureCostSum += c;
+    }
+  }
+  if (boxes + furniture === 0) throw new Error('Carrinho vazio');
+  if (boxes > 0 && state.sidewalk.length + boxes > SIDEWALK_MAX_BOXES) {
+    throw new Error('Calçada cheia: guarde ou reponha as caixas antes de pedir mais');
+  }
+  if (state.money < cost) throw new Error('Dinheiro insuficiente');
+  // 2) aplica (cada passo já foi validado: não lança)
+  for (const l of lines) {
+    if (l.qty === 0) continue;
+    if (l.kind === 'product') {
+      buyBoxes(state, l.id, l.qty);
+    } else {
+      const type = asFurnitureType(l.id);
+      const item: StockedFurniture = type === 'decor' && l.variant !== undefined ? { type, variant: l.variant } : { type };
+      for (let i = 0; i < l.qty; i++) state.furnitureStock.push({ ...item });
+    }
+  }
+  state.money -= furnitureCostSum;
+  return { cost, boxes, furniture };
+}
 export interface StockedFurniture { type: FurnitureType; variant?: string }
-export function furnitureStock(state: StoreState): StockedFurniture[] { return p3('furnitureStock'); }
+/** Cópia do estoque de montagem (índices = os de placeFromStock / build:start {stockIndex}). */
+export function furnitureStock(state: StoreState): StockedFurniture[] { return state.furnitureStock.map((f) => ({ ...f })); }
 /** Monta um móvel do estoque (sem cobrar de novo). Mesma validação de canPlace. Remove do estoque. */
-export function placeFromStock(state: StoreState, index: number, x: number, z: number, rot: 0 | 90 | 180 | 270, productId?: string): Furniture { return p3('placeFromStock'); }
+export function placeFromStock(state: StoreState, index: number, x: number, z: number, rot: 0 | 90 | 180 | 270, productId?: string): Furniture {
+  const item = Number.isInteger(index) ? state.furnitureStock[index] : undefined;
+  if (!item) throw new Error('Móvel inexistente no estoque');
+  if (!canPlaceImpl(state, item.type, x, z, rot)) throw new Error('Posição inválida');
+  if (productId !== undefined && isDisplay(item.type)) checkAssign(state, item.type, productId);
+  state.furnitureStock.splice(index, 1);
+  const f: Furniture = { id: state.nextFurnitureId++, type: item.type, x, z, rot };
+  if (productId !== undefined && isDisplay(item.type)) f.productId = productId;
+  if (item.variant !== undefined) f.variant = item.variant;
+  state.furniture.push(f);
+  reconcile(state);
+  return f;
+}
 /** Desmonta um móvel montado de volta para o estoque (alternativa a vender); estoque exposto vai para depósito/calçada. */
-export function storeFurniture(state: StoreState, id: number): void { p3('storeFurniture'); }
+export function storeFurniture(state: StoreState, id: number): void {
+  const f = furnitureById(state, id);
+  if (f.type === 'counter' && state.furniture.filter((x) => x.type === 'counter').length <= 1) {
+    throw new Error('A loja precisa de pelo menos um caixa registradora');
+  }
+  const idx = state.furniture.indexOf(f);
+  state.furniture.splice(idx, 1);
+  if (f.type === 'rack' && storageUsedImpl(state) > storageCapacityImpl(state)) {
+    state.furniture.splice(idx, 0, f);
+    throw new Error('Esvazie o depósito antes de desmontar a estante');
+  }
+  state.furnitureStock.push(f.variant !== undefined ? { type: f.type, variant: f.variant } : { type: f.type });
+  reconcile(state);
+}
+
+/**
+ * Ponto (metros, contínuo) onde uma caixa pode ficar no chão: salão, vão da porta, calçada (z de depth a
+ * depth + SIDEWALK_DEPTH, até DROP.sidewalkSide m para os lados da fachada) e, com depósito, a sala de estoque e a
+ * passagem. Mantém DROP.wallMargin das paredes. Não checa móveis (o world ajusta a prévia).
+ */
+export function canDropBox(state: StoreState, x: number, z: number): boolean {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+  const b = storeBounds(state.expansion);
+  const m = DROP.wallMargin;
+  const inX = x >= m && x <= b.width - m;
+  if (inX && z >= m && z <= b.depth - m) return true; // salão
+  const dx = doorX(b);
+  if (x >= dx - DOOR_WIDTH / 2 + m && x <= dx + DOOR_WIDTH / 2 - m && z >= b.depth - m && z <= b.depth + m) return true; // porta
+  if (x >= -DROP.sidewalkSide && x <= b.width + DROP.sidewalkSide && z >= b.depth + m && z <= b.depth + SIDEWALK_DEPTH - m) return true; // calçada
+  if (state.storageUnlocked) {
+    if (inX && z >= -STORAGE_DEPTH + m && z <= -m) return true; // depósito
+    const pass = storagePassage(state.expansion);
+    if (x >= pass.x0 + m && x <= pass.x1 - m && z >= -m && z <= m) return true; // passagem salão ↔ depósito
+  }
+  return false;
+}
 /** Larga a caixa no chão (metros, posição livre): carried=false, define x/z/rot. Valida ponto caminhável (loja, depósito ou calçada). */
-export function dropBox(state: StoreState, boxIndex: number, x: number, z: number, rot?: number): void { p3('dropBox'); }
+export function dropBox(state: StoreState, boxIndex: number, x: number, z: number, rot?: number): void {
+  const box = boxAt(state, boxIndex);
+  if (!canDropBox(state, x, z)) throw new Error('Não dá para largar a caixa aí');
+  box.carried = false;
+  box.x = x;
+  box.z = z;
+  if (rot !== undefined && Number.isFinite(rot)) {
+    const tau = Math.PI * 2;
+    box.rot = ((rot % tau) + tau) % tau;
+  }
+}
+/** Abre/fecha a caixa (só muda o flag `open`; repor não exige caixa aberta na sim — quem exige é o player). */
+export function setBoxOpen(state: StoreState, boxIndex: number, open: boolean): void {
+  const box = boxAt(state, boxIndex);
+  if (typeof open !== 'boolean') throw new Error('Valor inválido');
+  box.open = open;
+}
 /** Máximo de clientes simultâneos (cresce com expansão e com a melhoria 'capacity'). O npc usa como limite. */
-export function customerCapacity(state: StoreState): number { return p3('customerCapacity'); }
+export function customerCapacity(state: StoreState): number {
+  const e = clamp(Math.floor(Number.isFinite(state.expansion) ? state.expansion : 0), 0, MAX_EXPANSION);
+  return CUSTOMER_CAPACITY.base + CUSTOMER_CAPACITY.perExpansion * e + (state.upgrades.includes('capacity') ? UPGRADES.capacity.extra : 0);
+}
 /** Tipo de móvel que expõe o produto (para o ícone "móvel exigido" no Mercado). */
-export function furnitureForProduct(productId: string): FurnitureType { return p3('furnitureForProduct'); }
+export function furnitureForProduct(productId: string): FurnitureType { return displayTypeFor(productById(productId).category); }

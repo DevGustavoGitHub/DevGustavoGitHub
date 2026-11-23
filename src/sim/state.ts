@@ -2,6 +2,9 @@ import type { Cents } from './money';
 import { PRODUCTS } from './catalog';
 import type { FurnitureType } from '../core/layout';
 import type { DayReport } from './economy';
+import type { StockedFurniture } from './api';
+import { rentFor } from './rent';
+import { INITIAL_SHELVES, START_MONEY } from './tuning';
 
 export const OPEN_MIN = 8 * 60;
 export const CLOSE_MIN = 21 * 60;
@@ -13,6 +16,10 @@ export interface Ledger {
   purchases: Cents;
   served: number;
   lost: number; // clientes que saíram sem comprar nada ou desistiram de itens
+  /** Fase 3: vendas com satisfação >= 3 (SALE.happyMin). */
+  happy: number;
+  /** Fase 3: vendas com satisfação < 3 + clientes perdidos/desistentes (happy + angry = served + lost). */
+  angry: number;
 }
 
 export interface Box {
@@ -25,6 +32,8 @@ export interface Box {
   carried?: boolean;
   /** FASE 3: rotação no chão (radianos), definida ao largar/posicionar a caixa. */
   rot?: number;
+  /** FASE 3 (adendo): abas abertas. A caixa chega FECHADA (false); ausente (saves antigos) = fechada. api.setBoxOpen. */
+  open?: boolean;
 }
 
 export interface Employees {
@@ -77,10 +86,11 @@ export interface StoreState {
   /** Custo médio ponderado das unidades em posse (para COGS). */
   costBasis: Record<string, { units: number; avg: Cents }>;
   employees: Employees;
+  /** Aluguel que será cobrado no fechamento de HOJE (rent.ts: 0 no começo, rampa a partir do nível 3 ou do dia 4). */
   rent: Cents;
   ledger: Ledger;
   storeName: string;
-  /** 0..4 — ver storeBounds() em core/layout.ts. */
+  /** 0..MAX_EXPANSION (6) — ver storeBounds() em core/layout.ts. */
   expansion: number;
   storageUnlocked: boolean;
   furniture: Furniture[];
@@ -102,18 +112,27 @@ export interface StoreState {
   stats: DayStatsEntry[];
   /** Fase 2: quantas vezes o jogador recomeçou após falência. */
   bankruptcies: number;
+  /** Fase 3: móveis comprados no carrinho e ainda não montados (api.checkoutCart → api.placeFromStock). */
+  furnitureStock: StockedFurniture[];
 }
 
-/** Layout inicial: 1 caixa registradora e 4 prateleiras de mercearia já atribuídas (salão 12x10). */
+/**
+ * Layout inicial (Fase 3, como no original): o balcão e 2 prateleiras de mercearia barata já atribuídas (feijão e
+ * macarrão) no fundo do salão 12x10. Sobra lugar para mais 2 prateleiras na mesma fileira (x = 7 e 10, z = 2).
+ */
 export function initialFurniture(): Furniture[] {
-  const shelves = ['arroz', 'feijao', 'macarrao', 'cafe'];
   return [
     { id: 1, type: 'counter', x: 8, z: 6, rot: 0 },
-    ...shelves.map((productId, i): Furniture => ({ id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, productId })),
+    ...INITIAL_SHELVES.map((productId, i): Furniture => ({ id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, productId })),
   ];
 }
+/** Próximo id livre depois do layout inicial. */
+export const INITIAL_NEXT_FURNITURE_ID = 2 + INITIAL_SHELVES.length;
 
-export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0 });
+export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0, happy: 0, angry: 0 });
+
+/** Paleta padrão de jogo novo (parecida com o original): paredes azul-claro, piso de madeira quente, letreiro vermelho. */
+export const DEFAULT_DECOR: Readonly<Decor> = { wallColor: '#bfe1f2', floorColor: '#c48a55', signColor: '#d8342c' };
 
 export function newGame(seed = 1): StoreState {
   const market: Record<string, number> = {};
@@ -122,13 +141,13 @@ export function newGame(seed = 1): StoreState {
     market[p.id] = 1;
     slots[p.id] = 0;
   }
-  // Loja inicial: 4 prateleiras (2 slots cada) para os 4 produtos de mercearia (ver initialFurniture).
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) slots[id] = 2;
-  return {
+  // Loja inicial: 2 prateleiras (2 slots cada) para os produtos de INITIAL_SHELVES (ver initialFurniture).
+  for (const id of INITIAL_SHELVES) slots[id] = 2;
+  const s: StoreState = {
     version: 1,
     seed,
     day: 1,
-    money: 500000, // R$ 5.000,00
+    money: START_MONEY, // R$ 150,00
     level: 1,
     xp: 0,
     reputation: 3.5,
@@ -141,15 +160,15 @@ export function newGame(seed = 1): StoreState {
     sidewalk: [],
     costBasis: {},
     employees: { cashier: 0, stocker: 0, janitor: 0 },
-    rent: 12000, // R$ 120/dia (luz incluída); +R$ 50 por expansão (tuning.RENT_PER_EXPANSION) — ver GDD
+    rent: 0, // recalculado abaixo (rent.ts): grátis no começo, rampa a partir do nível 3 ou do dia 4
     ledger: emptyLedger(),
     storeName: 'Meu Mercadinho',
     expansion: 0,
     storageUnlocked: false,
     furniture: initialFurniture(),
-    nextFurnitureId: 6,
+    nextFurnitureId: INITIAL_NEXT_FURNITURE_ID,
     dirt: [],
-    decor: { wallColor: '#f2e8d5', floorColor: '#c9c4b8', signColor: '#d93a3a' },
+    decor: { ...DEFAULT_DECOR },
     levelAck: 1,
     loan: 0,
     autoOrders: {},
@@ -157,5 +176,8 @@ export function newGame(seed = 1): StoreState {
     history: [],
     stats: [],
     bankruptcies: 0,
+    furnitureStock: [],
   };
+  s.rent = rentFor(s);
+  return s;
 }

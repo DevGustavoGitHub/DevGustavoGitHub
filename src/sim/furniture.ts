@@ -9,16 +9,24 @@ import type { Furniture, StoreState } from './state';
 export type Rot = 0 | 90 | 180 | 270;
 
 const CATALOG: FurnitureSpec[] = [
-  { type: 'shelf', name: 'Prateleira', cost: 35000, minLevel: 1, slots: 2, categories: ['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos'] },
-  { type: 'fridge', name: 'Geladeira', cost: 90000, minLevel: 3, slots: 3, categories: ['bebidas', 'laticinios', 'hortifruti', 'frios'] },
-  { type: 'freezer', name: 'Freezer', cost: 180000, minLevel: 10, slots: 3, categories: ['congelados'] },
-  { type: 'counter', name: 'Caixa registradora', cost: 120000, minLevel: 3, slots: 0, categories: [] },
+  { type: 'shelf', name: 'Prateleira', cost: 30000, minLevel: 1, slots: 2, categories: ['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos'] },
+  { type: 'fridge', name: 'Geladeira', cost: 60000, minLevel: 2, slots: 3, categories: ['bebidas', 'laticinios', 'hortifruti', 'frios'] },
+  { type: 'freezer', name: 'Freezer', cost: 150000, minLevel: 10, slots: 3, categories: ['congelados'] },
+  { type: 'counter', name: 'Caixa registradora', cost: 100000, minLevel: 4, slots: 0, categories: [] },
   /** rack: `slots` = nº de caixas que a estante guarda no depósito. */
-  { type: 'rack', name: 'Estante do depósito', cost: 60000, minLevel: 3, slots: STORAGE.rackBoxes, categories: [] },
+  { type: 'rack', name: 'Estante do depósito', cost: 50000, minLevel: STORAGE.minLevel, slots: STORAGE.rackBoxes, categories: [] },
   { type: 'decor', name: 'Decoração', cost: 8000, minLevel: 1, slots: 0, categories: [] },
 ];
 
 export const furnitureCatalog = (): FurnitureSpec[] => CATALOG.map((s) => ({ ...s, categories: [...s.categories] }));
+
+/** Móvel expositor mais barato que aceita a categoria (prateleira < geladeira < freezer). */
+export function displayTypeFor(category: string): FurnitureType {
+  const opts = CATALOG.filter((c) => isDisplay(c.type) && c.categories.includes(category)).sort((a, b) => a.cost - b.cost);
+  const t = opts[0]?.type;
+  if (!t) throw new Error('Nenhum móvel expõe esta categoria');
+  return t;
+}
 
 /** Custo de compra/venda: decor depende da variante (DECOR_ITEMS); demais tipos usam o catálogo. */
 export function furnitureCost(type: FurnitureType, variant?: string): Cents {
@@ -97,7 +105,7 @@ export function reconcile(state: StoreState): void {
       let rest = excess;
       while (rest > 0) {
         const n = Math.min(p.boxSize, rest);
-        state.sidewalk.push({ productId: p.id, units: n });
+        state.sidewalk.push({ productId: p.id, units: n, open: false });
         rest -= n;
       }
     }
