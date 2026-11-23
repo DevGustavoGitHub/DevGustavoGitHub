@@ -45,7 +45,9 @@ const until = async (fn, arg, ms = 40000) => {
 const setup = await page.evaluate(() => {
   const g = __game, s = g.state;
   s.money = Math.max(s.money, 200000);
-  for (const f of s.furniture) if (f.productId) s.shelf[f.productId] = 30;
+  __npc.stock(30); // Fase 4: abastece os níveis (state.shelf é derivado)
+  window.__lvTotal = () => s.furniture.reduce((a, f) => a + (f.levels ?? []).reduce((b, l) => b + l.units, 0), 0);
+  window.__lv0 = window.__lvTotal();
   s.employees.cashier = 0; s.employees.stocker = 0; s.employees.janitor = 0;
   __npc.sync();
   window.__ev = { display: [], req: [], done: [], sfx: [], avail: [] };
@@ -130,8 +132,50 @@ check('checkout:display idle no fim', idle?.mode === 'idle' && idle.counterId ==
 const clean = await page.evaluate(() => { let hulls = 0; for (const o of window.__ever) { if (o.parent && !o.userData.npcPay) hulls += 100; o.traverse((c) => { if (c.userData.isOutline) hulls++; }); } return { reg: window.__reg.size, hulls, lane: __npc.lanes()[0], ledger: { happy: __game.state.ledger.happy, angry: __game.state.ledger.angry } }; });
 check('tocáveis e contornos limpos', clean.reg === 0 && clean.hulls === 0 && clean.lane.phase === null, JSON.stringify(clean));
 check('cliente feliz contado na sim', (clean.ledger.happy ?? 0) >= 1, JSON.stringify(clean.ledger));
+const lvApi = await page.evaluate(() => __npc.locate('feijao') !== null || __npc.locate('macarrao') !== null);
+if (lvApi) {
+  const lv = await page.evaluate((r) => ({ before: window.__lv0, after: window.__lvTotal(), sold: r.items.reduce((a, i) => a + i.qty, 0) }), req);
+  check('compra por nível: unidades saíram dos níveis (locateProduct → takeFromLevel)', lv.before - lv.after === lv.sold, JSON.stringify(lv));
+} else console.log('SKIP compra por nível: api.locateProduct ainda indisponível (reserva takeFromShelf)');
 const leaving = await until((id) => { const i = __npc.customerInfo(id); return !i || i.state.startsWith('leave') || i.state === 'gone'; }, req.customerId, 5000);
 check('cliente sai depois de pagar', !!leaving);
+
+/* ---------- 4b) Fase 4: esteira sem sobreposição (espaço pelo tamanho) e pagamento maior visto da cadeira ---------- */
+await page.evaluate(() => {
+  __npc.stock(30); window.__ev.req.length = 0; window.__ev.done.length = 0;
+  window.__gapMin = 9; window.__beltMax = 0; window.__waitMax = 0;
+  window.__gapIv = setInterval(() => {
+    const l = __npc.lanes()[0]; if (!l) return;
+    if (l.gap !== null) window.__gapMin = Math.min(window.__gapMin, l.gap);
+    window.__beltMax = Math.max(window.__beltMax, l.belt);
+    if (l.phase === 'unload' && l.belt > 0) window.__waitMax = Math.max(window.__waitMax, l.waiting);
+  }, 40);
+  __npc.timeScale = 4; __npc.spawnNow(1, 'bulk');
+});
+const full = await until(() => { const l = __npc.lanes()[0]; return l && l.phase === 'unload' && l.belt >= 2 ? l : null; }, undefined, 150000);
+await page.evaluate(() => { __npc.timeScale = 2; });
+await page.waitForTimeout(3500); // sem bipar: a esteira enche até não caber mais
+const st4 = await page.evaluate(() => ({ l: __npc.lanes()[0], gapMin: window.__gapMin, beltMax: window.__beltMax, waitMax: window.__waitMax }));
+console.log('esteira cheia', JSON.stringify(st4));
+await page.evaluate(() => { __npc.timeScale = 1; });
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/05-belt-full.png` });
+let payShown2 = false;
+for (let i = 0; i < 160 && !payShown2; i++) {
+  payShown2 = await page.evaluate(() => { for (const [o, fn] of [...window.__reg]) { if (o.userData.npcPay) return true; fn(); return false; } return false; });
+  await page.waitForTimeout(220);
+}
+const st5 = await page.evaluate(() => ({ l: __npc.lanes()[0], gapMin: window.__gapMin, waitMax: window.__waitMax }));
+check('esteira: itens nunca se sobrepõem (folga mínima >= 0)', !!full && st5.gapMin >= -0.002 && st5.gapMin < 9, JSON.stringify(st5));
+check('esteira: cliente espera espaço para pôr o restante', st4.waitMax > 0 || st4.beltMax <= 2, JSON.stringify({ waitMax: st4.waitMax, beltMax: st4.beltMax }));
+check('pagamento maior/mais perto do jogador sentado', payShown2 && st5.l.payScale > 1.2, JSON.stringify(st5.l));
+await page.waitForTimeout(500);
+await page.screenshot({ path: `${OUT}/06-pay-near.png` });
+await page.evaluate(() => { clearInterval(window.__gapIv); for (const [o, fn] of [...window.__reg]) if (o.userData.npcPay) fn(); });
+const req4 = await until(() => window.__ev.req[0] ?? null, undefined, 5000);
+if (req4) await page.evaluate((r) => __game.bus.emit('checkoutResult', { customerId: r.customerId, ok: true, speed: 0.9, mistakes: 0 }), req4);
+check('venda grande concluída', !!(await until(() => window.__ev.done[0] ?? null, undefined, 6000)));
+await until(() => __npc.lanes()[0]?.phase === null, undefined, 6000);
 
 /* ---------- 5) cancelamento: estende de novo; 3x = desiste ---------- */
 await page.evaluate(() => { window.__ev.req.length = 0; __npc.timeScale = 4; __npc.spawnNow(1, 'normal'); });
@@ -160,7 +204,7 @@ check('funcionário caixa atende sozinho (checkout:done staff, sem checkoutReque
 /* ---------- 7) repositor abre a caixa antes de repor ---------- */
 await page.evaluate(() => {
   const s = __game.state;
-  s.shelf.feijao = 0;
+  __npc.stock(0, 'feijao');
   s.sidewalk.push({ productId: 'feijao', units: 12, open: false });
   s.employees.stocker = 1; __npc.sync();
   __npc.timeScale = 4;
@@ -172,7 +216,7 @@ check('repositor abre a caixa (sfx boxOpen) e repõe', !!opened, JSON.stringify(
 /* ---------- 8) visual: fila de clientes vista de frente (print) ---------- */
 await page.evaluate(() => {
   __game.state.employees.cashier = 0; __game.state.employees.stocker = 0; __npc.sync();
-  for (const f of __game.state.furniture) if (f.productId) __game.state.shelf[f.productId] = 30;
+  __npc.stock(30);
   window.__player?.stand?.();
   if (window.__player?.stand === undefined) Object.defineProperty(__game.services.player, 'seatedAt', { get: () => null, set: () => {}, configurable: true });
   __npc.timeScale = 3; __npc.spawnNow(6);

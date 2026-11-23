@@ -17,7 +17,7 @@ Uso as mecânicas como loop de gameplay. Nome, arte, sons e textos do jogo de re
 ## 2. Core loop (implementado em `src/sim`)
 
 1. **Compra:** o catálogo mostra atacado do dia. O multiplicador por produto segue um random walk com reversão à média, limitado a [0,75; 1,35]. As caixas chegam à calçada na hora.
-2. **Reposição:** `putOnShelf` move unidades das caixas para a prateleira, limitado por `slots × slotCapacity`. Caixa vazia vai para a lixeira.
+2. **Reposição:** unidades vão das caixas para os **níveis** dos móveis (Fase 4: cada nível guarda um produto, até `slotCapacity` unidades; `placeUnitsInLevel` / `placeUnits` / `putOnShelf`). Caixa vazia vai para a lixeira.
 3. **Precificação:** o preço médio de mercado absorve **metade** do choque de atacado. Dia caro aperta a margem, dia barato a alarga.
 4. **Demanda:** `P(compra) = 1 / (1 + e^(8·(r − 1,2)))`, com `r = preço / média`.
    r = 0,8 → 96%, r = 1,0 → 83%, r = 1,2 → 50%, r = 1,5 → 8%.
@@ -27,7 +27,7 @@ Uso as mecânicas como loop de gameplay. Nome, arte, sons e textos do jogo de re
 
 ## 3. Progressão
 
-- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `60·(n−1)^2,08 · (1 + 0,05·max(0, n−15))` XP acumulado (Fase 3): n=2: 60 (sobe no 1º dia mesmo com a loja pobre), n=3: 254, n=5: 1.073, n=10: 5.794, n=15: 14.524, n=20: 34.266, n=25: 66.847, n=30: 115.605 — primeiros níveis rápidos, nível ~30 por volta do dia 95 com o bot.
+- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `60·(n−1)^2,08 · (1 + 0,05·max(0, n−15))` XP acumulado (Fase 3): n=2: 60 (sobe no 1º dia mesmo com a loja pobre), n=3: 254, n=5: 1.073, n=10: 5.794, n=15: 14.524, n=20: 34.266, n=25: 66.847, n=30: 115.605 — primeiros níveis rápidos, nível ~30 por volta do dia 83 com o bot (Fase 4; era ~95).
 - **Licenças** (nível mínimo / custo): Mercearia 1 / grátis · **Bebidas 2 / R$ 400** (2ª licença no nível 2, como no original) · Laticínios 4 / R$ 1.500 · Padaria 6 / R$ 3.500 · Limpeza 8 / R$ 7.000 · Congelados 10 / R$ 13.000 · Hortifrúti 13 / R$ 22.000 · Higiene e Beleza 16 / R$ 34.000 · Açougue e Frios 20 / R$ 52.000 · Eletrônicos e Utilidades 25 / R$ 85.000.
 - **Móveis, expansão, depósito, funcionários, melhorias e personalização:** implementados em `src/sim/furniture.ts`, `api.ts` e `tuning.ts` (tabelas abaixo).
 - **Marcos de desbloqueio** (alinhados ao original; nenhuma lacuna maior que 3 níveis até o 28; `tests/phase2.test.ts` e `tests/phase3.test.ts` validam): 2 bebidas/geladeira/pote de gorjeta · 3 expansão 1 · 4 laticínios/caixa contratado/capacidade de clientes/caixa registradora extra · 5 depósito/expansão 2 · 6 limpador/padaria/carrinho de carga/expansão 3 · 7 expansão 4 · 8 repositor/limpeza · 10 congelados/freezer · 13 hortifrúti · 15 expansão 5 · 16 higiene · 20 açougue e frios · 25 eletrônicos · 27 estátua · 28 expansão 6. Níveis 2–5 dos funcionários espalham-se até o 22.
@@ -36,12 +36,12 @@ Uso as mecânicas como loop de gameplay. Nome, arte, sons e textos do jogo de re
 
 Todos os números ficam em `src/sim/tuning.ts` (+ `furniture.ts`, `catalog.ts`, `demand.ts`, `rent.ts`). Dinheiro em R$.
 
-### 4.1 Móveis (footprint em tiles; `slots`: shelf/fridge/freezer = slots de produto × `slotCapacity` do produto; rack = caixas)
+### 4.1 Móveis (footprint em tiles; `slots`: shelf/fridge/freezer = nº de NÍVEIS, cada um com 1 produto e até `slotCapacity` unidades; rack = caixas)
 
-| Móvel | Custo | Nível | Slots | Categorias | Footprint |
+| Móvel | Custo | Nível | Níveis (slots) | Categorias | Footprint |
 |---|---|---|---|---|---|
-| Prateleira | 300 | 1 | 2 | mercearia, limpeza, padaria, hortifrúti, higiene, eletrônicos | 2×1 |
-| Geladeira | 500 | 2 | 3 | bebidas, laticínios, hortifrúti, açougue e frios | 2×1 |
+| Prateleira | 300 | 1 | 4 | mercearia, limpeza, padaria, hortifrúti, higiene, eletrônicos | 2×1 |
+| Geladeira | 500 | 2 | 4 | bebidas, laticínios, hortifrúti, açougue e frios | 2×1 |
 | Freezer | 1.500 | 10 | 3 | congelados | 2×1 |
 | Caixa registradora | 1.000 | 4 | – | – | 2×2 |
 | Estante do depósito | 500 | 5 | 8 caixas | – | 2×1 |
@@ -49,7 +49,7 @@ Todos os números ficam em `src/sim/tuning.ts` (+ `furniture.ts`, `catalog.ts`, 
 
 **Decoração** (`decorCatalog()`; o id vai como 5º argumento de `buyFurniture`, vira `Furniture.variant`): planta R$ 80 (nív. 1) · faixa R$ 80 (1) · cartaz R$ 100 (5) · tapete R$ 150 (6) · luminária R$ 120 (4) · árvore R$ 200 (8) · fonte R$ 600 (18) · estátua R$ 1.200 (27). O world reconhece `plant|tree|banner|lamp`; as demais caem no visual padrão até o world desenhá-las.
 
-**Compra pelo carrinho (Fase 3):** `checkoutCart` cobra tudo de uma vez (tudo ou nada); produtos viram caixas FECHADAS na calçada, móveis vão para `state.furnitureStock` e são montados em 1ª pessoa com `placeFromStock` (sem cobrar de novo); `storeFurniture` desmonta de volta para o estoque (alternativa a vender). Venda de móvel devolve 50% (do preço da variante, no caso de decoração). **Início (Fase 3):** balcão em (8,6) + 2 prateleiras em z=2 (feijão em x=1 e macarrão em x=4: 24 e 32 unidades); a fileira tem lugar para mais 2 prateleiras (x=7 e x=10). Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta (móveis que já estavam inalcançáveis antes da compra não bloqueiam compras novas). Como a porta muda de lugar a cada expansão, `buyExpansion` realoca para o ponto válido mais próximo qualquer móvel que caia na nova antessala/passagem (`relocateBlocking`).
+**Compra pelo carrinho (Fase 3):** `checkoutCart` cobra tudo de uma vez (tudo ou nada); produtos viram caixas FECHADAS na calçada, móveis vão para `state.furnitureStock` e são montados em 1ª pessoa com `placeFromStock` (sem cobrar de novo); `storeFurniture` desmonta de volta para o estoque (alternativa a vender). Venda de móvel devolve 50% (do preço da variante, no caso de decoração). **Níveis (Fase 4):** cada nível de prateleira/geladeira/freezer tem produto (etiqueta) e quantidade próprios (`Furniture.levels`, fonte da verdade; `state.shelf`/`state.slots` são derivados). Nível vazio (sem etiqueta, ou etiqueta com 0 un.) aceita qualquer produto de categoria aceita; com unidades, só o mesmo produto; caixa vazia puxa as unidades de volta (`pullUnitsFromLevel`) para reorganizar. Móvel novo nasce com níveis sem etiqueta; vender/desmontar devolve as unidades ao depósito (se couber) ou em caixas na calçada. **Início (Fase 3/4):** balcão em (8,6) + 2 prateleiras em z=2 (feijão em x=1 e macarrão em x=4, os 4 níveis etiquetados: 48 e 64 unidades); a fileira tem lugar para mais 2 prateleiras (x=7 e x=10). Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta (móveis que já estavam inalcançáveis antes da compra não bloqueiam compras novas). Como a porta muda de lugar a cada expansão, `buyExpansion` realoca para o ponto válido mais próximo qualquer móvel que caia na nova antessala/passagem (`relocateBlocking`).
 
 ### 4.2 Loja
 
@@ -82,7 +82,7 @@ Capacidade de checkout/dia = 45 (jogador) + `40·(1+0,25·(nível_caixa−1))` (
 ### 4.4 Clientes, preço e vendas
 
 - Chegadas/dia = `(22 + 4·min(nível,30)) · (1 + 0,4·(1 − razão_preço_média)) · (0,6 + 0,1·reputação) · (1 + 0,12·expansão) · (0,9..1,1)`.
-- Compra: `P = 1 / (1 + e^(8·(r − 1,25)))`, `r = preço/mercado`: r=1,0 → 88%; 1,1 → 77%; 1,15 → 69%; 1,25 → 50%; 1,5 → 12%; 1,6 → 6%.
+- Compra (Fase 4, mais tolerante): `P = 1 / (1 + e^(k·(r − 1,30)))`, `k = 10` abaixo de 1,30 e `13` acima, `r = preço/mercado`: r=0,8 → 99%; 1,0 → 95%; 1,1 → 88%; 1,15 → 82%; 1,2 → 73%; 1,3 → 50%; 1,4 → 21%; 1,5 → 7%; 1,6 → 2%. **Preço sugerido = média de mercado** (×1,00; antes +12%).
 - Cesta: 1 a min(produtos expostos, 3+⌊nível/3⌋, 7) produtos distintos (sorteio ponderado por popularidade), quantidade 1 (45%), 2 (36%) ou 3 (19%).
 - Gorjeta = até 8% do total (12% com o pote de gorjeta) × `speed` × `(satisfação−2)/3`. Reputação: média móvel com peso 0,04 por cliente (atendido ou perdido).
 - **Felizes/irritados (Fase 3):** venda com satisfação ≥ 3 conta feliz (`ledger.happy`); venda com satisfação < 3 e cliente perdido/desistente contam irritado (`ledger.angry`); felizes + irritados = atendidos + perdidos = total do resumo do dia.
@@ -90,22 +90,22 @@ Capacidade de checkout/dia = 45 (jogador) + `40·(1+0,25·(nível_caixa−1))` (
 - **Troco (Fase 3):** o cliente paga em dinheiro arredondando o total para cima até um múltiplo de R$ 10, 20, 50 ou 100 (R$ 100 só acima de R$ 25), nunca mais que um passo acima — o troco é sempre < R$ 100 e a gaveta precisa só de 10 denominações (`DRAWER_DENOMS`: R$ 50, 20, 10, 5, 2 e moedas R$ 1; 0,50; 0,25; 0,10; 0,05). O guloso é ótimo com elas (teste contra programação dinâmica).
 - COGS pelo custo médio ponderado; lucro líquido = receita + gorjeta − COGS − aluguel − salários − juros.
 
-### 4.5 Resultado do balanceamento (bot: repõe 4×/dia, investe, 3 sementes, média de 30 dias, começando com R$ 150)
+### 4.5 Resultado do balanceamento (bot: repõe 4×/dia, investe, 3 sementes, média de 30 dias, começando com R$ 150) — Fase 4 (níveis + curva nova)
 
 | Preço vs. mercado | Lucro/dia | Atendidos/dia | Perdidos/dia | Reputação | Nível no dia 30 |
 |---|---|---|---|---|---|
-| ×0,8 | R$ 333 | 50 | 7 | 4,15 | 14 |
-| ×0,9 | R$ 1.017 | 66 | 3 | 4,28 | 16 |
-| ×1,0 | R$ 1.439 | 67 | 2 | 4,09 | 16 |
-| **×1,1** | **R$ 1.550** | 61 | 3 | 4,31 | 15 |
-| ×1,15 | R$ 1.399 | 55 | 4 | 4,22 | 14 |
-| ×1,2 | R$ 1.011 | 44 | 6 | 3,54 | 12 |
-| ×1,3 | R$ 395 | 23 | 10 | 2,37 | 8 |
-| ×1,6 | −R$ 60 | 1 | 17 | 2,00 | 2 |
+| ×0,8 | R$ 221 | 44 | 9 | 3,46 | 12 |
+| ×0,9 | R$ 1.100 | 65 | 2 | 4,45 | 17 |
+| ×1,0 (sugerido) | R$ 1.653 | 68 | 2 | 4,45 | 17 |
+| **×1,1** | **R$ 1.990** | 67 | 2 | 4,42 | 16 |
+| ×1,15 | R$ 1.848 | 61 | 3 | 4,40 | 15 |
+| ×1,2 | R$ 1.492 | 51 | 4 | 3,95 | 14 |
+| ×1,3 | R$ 573 | 28 | 8 | 2,30 | 9 |
+| ×1,6 | −R$ 64 | 0 | 16 | 2,03 | 1 |
 
-Leitura: o ótimo fica entre mercado e +10%; +15% ainda rende ~90%; +30% rende ~25%; +60% quebra a loja (prejuízo assim que o aluguel começa, reputação no chão). Preço abaixo do mercado perde margem sem ganhar volume proporcional (checkout e prateleira limitam). Com o início pobre o bot nunca fica com caixa negativo nos primeiros 20 dias (×1,0 a ×1,25, reposição 2× ou 4×/dia).
+Leitura: o ótimo fica em +10%; o preço sugerido (mercado) rende ~83% do ótimo com a reputação mais alta; +15% ainda rende ~93%; +20% ~75%; +30% ~29%; +60% quebra a loja (quase ninguém compra, prejuízo assim que o aluguel começa). Preço abaixo do mercado perde margem sem ganhar volume proporcional (checkout e prateleira limitam). Com o início pobre o bot nunca fica com caixa negativo nos primeiros 20 dias (×1,0 a ×1,25, reposição 2× ou 4×/dia). O bot padrão cobra ×1,1 (`defaultBotOptions`).
 
-Linha do tempo do bot (sementes 3/11/29, ±3 dias entre elas): dia 1 compra 1 caixa de feijão + 1 de macarrão (sobram R$ 8), vende ~21 clientes, lucra ~R$ 190 e sobe para o **nível 2**; 3ª e 4ª prateleiras (arroz, café) nos dias 3–6; pote de gorjeta dia ~4; nível 3 no dia 2–3 (aluguel começa em 1/3); bebidas + geladeira no dia 7–8; laticínios dia ~11; caixa contratado dia 11–16; expansão 1 dia 10–14; expansão 2 dia ~19; expansão 3 dia ~28; depósito, capacidade de clientes, repositor e carrinho de carga dias 29–34; expansão 4 dia ~53; hortifrúti dia ~45; higiene dia ~63; açougue e frios dia ~75; expansão 5 dia ~88; **nível 30 nos dias 95–98**; eletrônicos dia ~101; a expansão 6 (R$ 180 mil, nív. 28) fica como meta depois do dia 120.
+Linha do tempo do bot (×1,1; sementes 3/11/29, ±2 dias entre elas): dia 1 compra 1 caixa de feijão + 1 de macarrão (sobram R$ 8), vende ~23 clientes, lucra ~R$ 190 e sobe para o **nível 2**; nível 3 no dia 2 (aluguel começa em 1/3); prateleiras de arroz e café nos dias 5 e 7; pote de gorjeta dia 6–7; bebidas + geladeira no dia 8; laticínios dia 10–11; caixa contratado dia 10–14; expansão 1 dia 13; padaria dia 16; expansão 2 dia 17–19; limpeza dia 21–22; expansão 3 dia 25–26; depósito e capacidade de clientes dias 25–27; congelados dia 30–31; repositor dias 27–47; hortifrúti dia 36–37; expansão 4 dia 44–45; carrinho de carga dia 45–46; higiene dia 52–53; açougue e frios dia 62–64; expansão 5 dia 75–76; **nível 30 nos dias 82–84** (antes da Fase 4: 95–98; prateleiras com 4 níveis e clientes mais tolerantes aceleram); eletrônicos dia 87–89; expansão 6 dia 108–111.
 
 | Dia | Nível | Chegadas | Atendidos | Felizes/irritados | Receita | Despesas fixas | Lucro/dia | Caixa |
 |---|---|---|---|---|---|---|---|---|

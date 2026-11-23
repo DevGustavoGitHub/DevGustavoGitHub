@@ -11,7 +11,8 @@ import { addXp, checkoutCapacity, xpForLevel } from '../src/sim/economy';
 import { storeBounds } from '../src/core/layout';
 import { deserialize, serialize } from '../src/sim/save';
 import { newGame, type StoreState } from '../src/sim/state';
-import { recomputeSlots } from '../src/sim/furniture';
+import { recomputeSlots } from '../src/sim/levels';
+import { expose } from './helpers';
 
 const rich = (level = 12): StoreState => {
   const s = newGame(5);
@@ -33,13 +34,14 @@ describe('layout inicial e capacidade', () => {
     for (const f of s.furniture) expect(canPlace(s, f.type, f.x, f.z, f.rot, f.id)).toBe(true);
     expect(s.nextFurnitureId).toBeGreaterThan(Math.max(...s.furniture.map((f) => f.id)));
   });
-  it('state.slots == recomputo a partir dos móveis; capacidade = slots × slotCapacity', () => {
+  it('state.slots == recomputo a partir dos móveis; capacidade = níveis etiquetados × slotCapacity', () => {
     const s = newGame();
     const copy = { ...s.slots };
     recomputeSlots(s);
     expect(s.slots).toEqual(copy);
-    expect(productCapacity(s, 'feijao')).toBe(24);
-    expect(productCapacity(s, 'macarrao')).toBe(32);
+    expect(s.slots.feijao).toBe(4); // 4 níveis por prateleira, todos etiquetados no início
+    expect(productCapacity(s, 'feijao')).toBe(48);
+    expect(productCapacity(s, 'macarrao')).toBe(64);
     expect(productCapacity(s, 'arroz')).toBe(0);
     expect(productCapacity(s, 'refri')).toBe(0);
   });
@@ -128,11 +130,14 @@ describe('comprar, atribuir e vender móveis', () => {
     const f = buyFurniture(s, 'shelf', 1, 4, 0, 'arroz');
     expect(s.money).toBe(before - 30000);
     expect(f.productId).toBe('arroz');
-    expect(productCapacity(s, 'arroz')).toBe(16);
-    expect(s.slots.arroz).toBe(2);
+    expect(productCapacity(s, 'arroz')).toBe(32);
+    expect(s.slots.arroz).toBe(4);
     buyFurniture(s, 'shelf', 4, 4, 0, 'feijao');
-    expect(productCapacity(s, 'feijao')).toBe(48);
-    expect(s.slots.feijao).toBe(4);
+    expect(productCapacity(s, 'feijao')).toBe(96);
+    expect(s.slots.feijao).toBe(8);
+    const plain = buyFurniture(s, 'shelf', 7, 4, 0); // sem produto: níveis vazios sem etiqueta
+    expect(plain.levels).toEqual([{ units: 0 }, { units: 0 }, { units: 0 }, { units: 0 }]);
+    expect(plain.productId).toBeUndefined();
   });
   it('categoria/licença validadas na atribuição', () => {
     const s = rich();
@@ -142,7 +147,7 @@ describe('comprar, atribuir e vender móveis', () => {
     expect(() => assignProduct(s, fr.id, 'refri')).toThrow('Categoria não licenciada');
     s.licenses.push('bebidas');
     assignProduct(s, fr.id, 'refri');
-    expect(productCapacity(s, 'refri')).toBe(30);
+    expect(productCapacity(s, 'refri')).toBe(40);
     expect(() => assignProduct(s, s.furniture.find((f) => f.type === 'counter')!.id, 'arroz')).toThrow();
     assignProduct(s, fr.id, undefined);
     expect(productCapacity(s, 'refri')).toBe(0);
@@ -150,7 +155,7 @@ describe('comprar, atribuir e vender móveis', () => {
   it('vender devolve 50% e move o excedente exposto para a calçada (ou depósito)', () => {
     const s = rich();
     const sh = s.furniture.find((f) => f.productId === 'feijao')!;
-    s.shelf.feijao = 24;
+    expose(s, 'feijao', 24);
     const before = s.money;
     expect(sellFurniture(s, sh.id)).toBe(15000);
     expect(s.money).toBe(before + 15000);
@@ -161,9 +166,10 @@ describe('comprar, atribuir e vender móveis', () => {
     // com depósito: vai para o depósito
     unlockStorage(s);
     const sh2 = s.furniture.find((f) => f.productId === 'macarrao')!;
-    s.shelf.macarrao = 32;
+    expose(s, 'macarrao', 32);
     sellFurniture(s, sh2.id);
     expect(s.storage.macarrao).toBe(32);
+    expect(s.shelf.macarrao).toBe(0);
   });
   it('último caixa não pode ser vendido', () => {
     const s = rich();
@@ -294,12 +300,17 @@ describe('caixas e estoque físico', () => {
     expect(() => discardBox(s, 0)).toThrow('ainda tem');
     expect(placeUnits(s, 0, 99)).toBe(8);
     expect(placeUnits(s, 1, 99)).toBe(12);
-    expect(placeUnits(s, 2, 99)).toBe(0); // capacidade 24
-    expect(s.shelf.feijao).toBe(24);
+    expect(placeUnits(s, 2, 99)).toBe(12);
+    expect(s.shelf.feijao).toBe(36);
+    expect(s.furniture.find((f) => f.id === 2)!.levels!.map((l) => l.units)).toEqual([12, 12, 12, 0]); // enche nível a nível
+    orderBoxes(s, 'feijao', 2);
+    expect(placeUnits(s, 3, 99)).toBe(12);
+    expect(placeUnits(s, 4, 99)).toBe(0); // capacidade 48 (4 níveis × 12)
+    expect(s.shelf.feijao).toBe(48);
     discardBox(s, 0);
-    expect(s.sidewalk).toHaveLength(2);
-    expect(() => placeUnits(s, 5, 1)).toThrow('inexistente');
-    expect(s.costBasis.feijao!.units).toBe(36);
+    expect(s.sidewalk).toHaveLength(4);
+    expect(() => placeUnits(s, 9, 1)).toThrow('inexistente');
+    expect(s.costBasis.feijao!.units).toBe(60);
   });
   it('produto sem prateleira não pode ser reposto; calçada tem limite', () => {
     const s = rich();
@@ -357,12 +368,15 @@ describe('clientes e vendas', () => {
   });
   it('takeFromShelf / returnToShelf / basketTotal', () => {
     const s = newGame();
-    s.shelf.feijao = 3;
+    expose(s, 'feijao', 3);
     expect(takeFromShelf(s, 'feijao', 5)).toBe(3);
     expect(s.shelf.feijao).toBe(0);
     expect(takeFromShelf(s, 'feijao', 1)).toBe(0);
     returnToShelf(s, 'feijao', 2);
     expect(s.shelf.feijao).toBe(2);
+    returnToShelf(s, 'feijao', 50); // não cabe tudo (48): o resto vai para a calçada em caixa fechada
+    expect(s.shelf.feijao).toBe(48);
+    expect(s.sidewalk).toEqual([{ productId: 'feijao', units: 4, open: false }]);
     const p = priceInfo(s, 'arroz').sell;
     expect(basketTotal(s, [{ productId: 'arroz', qty: 2 }, { productId: 'feijao', qty: 1 }])).toBe(2 * p + priceInfo(s, 'feijao').sell);
   });
@@ -503,14 +517,18 @@ describe('save', () => {
     delete old.decor;
     old.level = 5;
     old.slots = { arroz: 2, feijao: 2, macarrao: 2, cafe: 2 };
+    old.shelf = { feijao: 10, arroz: 3 }; // arroz sem móvel no layout inicial: volta em caixa
     const s = deserialize(JSON.stringify(old));
     expect(s.furniture.filter((f) => f.type === 'shelf')).toHaveLength(2);
     expect(s.furniture.some((f) => f.type === 'counter')).toBe(true);
     expect(s.levelAck).toBe(5);
     expect(consumeLevelUps(s)).toEqual([]);
-    expect(productCapacity(s, 'feijao')).toBe(24);
-    expect(s.slots.feijao).toBe(2);
+    expect(productCapacity(s, 'feijao')).toBe(48);
+    expect(s.slots.feijao).toBe(4);
     expect(s.slots.arroz).toBe(0);
+    expect(s.shelf.feijao).toBe(10);
+    expect(s.shelf.arroz).toBe(0);
+    expect(s.sidewalk).toEqual([{ productId: 'arroz', units: 3, open: false }]);
     expect(s.decor.wallColor).toBeTruthy();
     expect(s.nextFurnitureId).toBeGreaterThan(3);
   });

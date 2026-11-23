@@ -3,6 +3,8 @@
  * olhar arrastando na metade direita (ou em qualquer ponto quando sentado), mouse arrastando no desktop, teclado
  * (WASD/setas; E/Espaço ação com segurar; G arremessar; Q largar; C abrir/fechar caixa; F secundário) e toques curtos
  * (`onTap`, usados sentado no caixa). Toques sobre elementos de UI nunca viram olhar/joystick.
+ * Multitoque (Fase 4): joystick e olhar são rastreados cada um pelo seu `pointerId` (sem captura e sem
+ * `preventDefault` em toques de outros alvos), então um dedo no joystick não impede o toque nos botões.
  */
 export class Input {
   /** Eixos de movimento no espaço da tela: x = direita, y = frente (−1..1, comprimento ≤ 1). */
@@ -17,6 +19,8 @@ export class Input {
   seated = false;
   /** Teclas de ação desligadas (modo de posicionamento do world usa R/Enter/Esc/Del). */
   actionKeys = true;
+  /** FASE 4: sensibilidade do olhar (toque e mouse), `lookSensitivity` das opções (0,4–2,0; padrão 1). */
+  sensitivity = 1;
   onActionDown: () => void = () => {};
   onActionUp: () => void = () => {};
   onThrow: () => void = () => {};
@@ -191,7 +195,7 @@ export class Input {
     this.lx = e.clientX; this.ly = e.clientY;
     this.lookDist += Math.hypot(dx, dy);
     if (this.locked) return;
-    const k = this.lookMouse ? 0.0042 : 0.0058 * Math.min(1.4, Math.max(0.55, 390 / Math.max(1, window.innerHeight)));
+    const k = (this.lookMouse ? 0.0042 : 0.0058 * Math.min(1.4, Math.max(0.55, 390 / Math.max(1, window.innerHeight)))) * this.sensitivity;
     this.dYaw -= dx * k;
     this.dPitch -= dy * k;
   }

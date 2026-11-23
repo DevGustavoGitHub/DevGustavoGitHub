@@ -12,6 +12,9 @@ import { DECAL } from './tex';
 import { Batch, meshesOf, type Kind, type Spec } from './batch';
 import { signCell, uvToCell } from './atlas';
 import { productVisual, categoryColor, pushMatrix } from './products';
+import { categoryColorOf } from './look';
+import { LICENSES, productById } from '../sim/catalog';
+import { furnitureCatalog } from '../sim/api';
 
 export interface FurnitureView {
   group: THREE.Group;
@@ -27,98 +30,190 @@ const glow = (c: number): Spec => ['glow', c];
 const FRAME = matte(0xe9ecef), DARK = matte(0x474c57), STEEL = metal(0xb9c2cc), GLASS: Spec = ['glass', 0xbfe9ff];
 const WOOD = matte(0xc9a06a);
 
-interface Slot { x: number; y: number; z: number; ry: number }
-/** Gera slots (prateleira em níveis) preenchendo primeiro a fileira da frente, distribuído entre os níveis. */
-function gridSlots(pid: string, levelsY: number[], width: number, depth: number, zCenter: number, maxRows = 3): Slot[] {
+/* ---------------- FASE 4: níveis (prateleiras) por móvel ----------------
+ * Cada nível de shelf/fridge/freezer tem produto e quantidade próprios (Furniture.levels; reserva: modelo antigo).
+ * Índice do nível: shelf/fridge = de CIMA para baixo (0 = prateleira de cima); freezer = cestos da ESQUERDA para a
+ * direita, vistos da frente (−x local → +x). Quantidade = levels.length (reserva: FurnitureSpec.slots do tipo).
+ * `levelGeoms` é a fonte única das alturas/regiões: desenho das tábuas, itens, etiquetas, destaque e levelAt. */
+export type DisplayType = 'shelf' | 'fridge' | 'freezer';
+export const isDisplayType = (t: string): t is DisplayType => t === 'shelf' || t === 'fridge' || t === 'freezer';
+export const MAX_LEVELS = 6;
+export interface LevelGeom {
+  /** Região local do nível [cx, cy, cz, w, h, d] (contorno de destaque e levelAt). */
+  box: SBox;
+  /** y local da BASE da tábua do nível (shelf/fridge; freezer = fundo). */
+  board: number;
+  /** Área útil dos itens: centro x/z, largura, profundidade, piso (y) e altura livre. */
+  x: number; z: number; w: number; d: number; floor: number; clear: number;
+  /** Centro da etiqueta de preço (local, frente +z). */
+  tag: readonly [number, number, number];
+}
+const SHELF_Y0 = 0.1, SHELF_TOP = 1.34, FRIDGE_Y0 = 0.2, FRIDGE_TOP = 1.78, FREEZER_W = 1.8;
+const geomCache = new Map<string, LevelGeom[]>();
+/** Geometria dos `n` níveis de um tipo de exposição ([] para os demais tipos). */
+export function levelGeoms(type: FurnitureType, n: number): LevelGeom[] {
+  if (!isDisplayType(type) || !(n >= 1)) return [];
+  n = Math.min(MAX_LEVELS, Math.floor(n));
+  const key = `${type}|${n}`;
+  let out = geomCache.get(key);
+  if (out) return out;
+  out = [];
+  if (type === 'freezer') {
+    const cw = FREEZER_W / n;
+    for (let i = 0; i < n; i++) {
+      const x0 = -FREEZER_W / 2 + i * cw, x1 = x0 + cw, bx0 = i === 0 ? -1 : x0, bx1 = i === n - 1 ? 1 : x1;
+      out.push({ box: [(bx0 + bx1) / 2, 0.39, 0, bx1 - bx0, 0.78, 0.98], board: 0.2, x: (x0 + x1) / 2, z: 0, w: cw - 0.06, d: 0.76, floor: 0.22, clear: 0.48, tag: [(x0 + x1) / 2, 0.57, 0.488] });
+    }
+  } else {
+    const sh = type === 'shelf';
+    const y0 = sh ? SHELF_Y0 : FRIDGE_Y0, top = sh ? SHELF_TOP : FRIDGE_TOP, step = (top - y0) / n, th = sh ? 0.04 : 0.025;
+    for (let i = 0; i < n; i++) {
+      const k = n - 1 - i; // k = de baixo para cima
+      const board = y0 + k * step, next = k === n - 1 ? top : y0 + (k + 1) * step, lo = k === 0 ? (sh ? 0.1 : 0.14) : board;
+      out.push({
+        box: [0, (lo + next) / 2, 0, 1.96, next - lo, sh ? 0.96 : 0.98], board,
+        x: 0, z: -0.02, w: sh ? 1.76 : 1.74, d: sh ? 0.82 : 0.8, floor: board + th, clear: next - board - th - 0.02,
+        tag: sh ? [0, board + 0.07, 0.478] : [-0.5, board + 0.045, 0.512],
+      });
+    }
+  }
+  geomCache.set(key, out);
+  return out;
+}
+/** Alturas (y local da base da tábua) dos níveis, na ordem dos índices (shelf/fridge: de cima para baixo). */
+export const levelHeights = (type: FurnitureType, n: number): number[] => levelGeoms(type, n).map((g) => g.board);
+/** Nível que contém o ponto LOCAL do móvel (x,y,z; frente +z); null fora do móvel/tipo sem níveis. */
+export function levelIndexAt(type: FurnitureType, n: number, x: number, y: number, z: number): number | null {
+  const g = levelGeoms(type, n);
+  if (!g.length || Math.abs(x) > 1.12 || Math.abs(z) > 0.66 || y < -0.05) return null;
+  if (type === 'freezer') {
+    if (y > 1.0) return null;
+    return Math.max(0, Math.min(g.length - 1, Math.floor(((x + FREEZER_W / 2) / FREEZER_W) * g.length)));
+  }
+  if (y > (type === 'shelf' ? 1.75 : 2.15)) return null;
+  for (let i = 0; i < g.length; i++) if (y >= g[i]!.board) return i; // do nível de cima para baixo
+  return g.length - 1;
+}
+
+let specN: Partial<Record<FurnitureType, number>> | null = null;
+/** Nº de níveis do tipo pela regra do sim (FurnitureSpec.slots); reserva se o catálogo falhar. */
+export function specLevelCount(type: FurnitureType): number {
+  if (!specN) {
+    specN = { shelf: 2, fridge: 3, freezer: 3 };
+    try { for (const s of furnitureCatalog()) if (isDisplayType(s.type) && s.slots > 0) specN[s.type] = s.slots; } catch { /* sim antigo */ }
+  }
+  return isDisplayType(type) ? Math.min(MAX_LEVELS, Math.max(1, specN[type] ?? 1)) : 0;
+}
+/** Produto (etiqueta) de cada nível: Furniture.levels; reserva (sem levels) = todos com o produto antigo do móvel. */
+export function levelPids(f: Pick<Furniture, 'type' | 'productId' | 'levels'>): (string | undefined)[] {
+  if (!isDisplayType(f.type)) return [];
+  const lv = Array.isArray(f.levels) ? f.levels : null;
+  if (lv && lv.length) return lv.slice(0, MAX_LEVELS).map((l) => (l && typeof l.productId === 'string' && l.productId ? l.productId : undefined));
+  return Array.from({ length: specLevelCount(f.type) }, () => f.productId || undefined);
+}
+/** Chave da placa do móvel: produto único, categoria dominante (níveis misturados) ou '-' (VAZIO). */
+export function signKeyOf(pids: readonly (string | undefined)[]): string {
+  const set = [...new Set(pids.filter((p): p is string => !!p))];
+  if (set.length <= 1) return set[0] ?? '-';
+  const count = new Map<string, number>();
+  for (const p of pids) { if (!p) continue; let c = '?'; try { c = productById(p).category; } catch { /* */ } count.set(c, (count.get(c) ?? 0) + 1); }
+  let best = '?', bn = -1;
+  for (const [c, k] of count) if (k > bn) { best = c; bn = k; }
+  return LICENSES.some((l) => l.id === best) ? `cat:${best}` : set[0]!;
+}
+const signColor = (key: string): number => (key.startsWith('cat:') ? categoryColorOf(key.slice(4)) : categoryColor(key === '-' ? undefined : key));
+
+interface Slot { x: number; y: number; z: number; ry: number; s: number }
+/** Posições dos itens de UM nível: fileira da frente primeiro (até 2 camadas se couber), depois as de trás.
+ *  Produto mais alto que o vão do nível é reduzido (escala uniforme `s`) para não atravessar a tábua de cima. */
+function levelSlotsOf(type: FurnitureType, n: number, i: number, pid: string): Slot[] {
+  const L = levelGeoms(type, n)[i];
+  if (!L) return [];
   const v = productVisual(pid);
-  const cols = Math.max(1, Math.floor(width / (v.w + 0.015)));
-  const rows = Math.max(1, Math.min(maxRows, Math.floor(depth / (v.d + 0.015))));
-  const px = width / cols, pz = depth / rows;
+  const sc = Math.min(1, L.clear / Math.max(0.01, v.h));
+  const vw = v.w * sc, vh = v.h * sc, vd = v.d * sc;
+  const cols = Math.max(1, Math.floor(L.w / (vw + 0.015)));
+  const layers = Math.max(1, Math.min(2, Math.floor(L.clear / (vh + 0.01))));
+  // empilhado: só 2 fileiras (a 3ª quase não aparece) para manter o nº de itens/triângulos do layout antigo de 3 tábuas
+  const rows = Math.max(1, Math.min(type === 'freezer' ? 4 : layers > 1 ? 2 : 3, Math.floor(L.d / (vd + 0.015))));
+  const px = L.w / cols, pz = L.d / rows;
   const out: Slot[] = [];
-  const total = levelsY.length * cols * rows;
-  for (let k = 0; k < total; k++) {
-    const lvl = k % levelsY.length, idx = Math.floor(k / levelsY.length);
-    const col = idx % cols, row = Math.floor(idx / cols);
+  let k = 0;
+  for (let row = 0; row < rows; row++) for (let ly = 0; ly < layers; ly++) for (let col = 0; col < cols; col++, k++) {
     out.push({
-      x: -width / 2 + (col + 0.5) * px + (hash01(k, 1) - 0.5) * 0.01,
-      y: levelsY[lvl]!,
-      z: zCenter + depth / 2 - (row + 0.5) * pz,
-      ry: (hash01(k, 2) - 0.5) * 0.2,
+      x: L.x - L.w / 2 + (col + 0.5) * px + (hash01(k, 1, i) - 0.5) * 0.01,
+      y: L.floor + ly * (vh + 0.004),
+      z: L.z + L.d / 2 - (row + 0.5) * pz,
+      ry: (hash01(k, 2, i) - 0.5) * 0.2,
+      s: sc,
     });
   }
   return out;
 }
-
-const SHELF_LEVELS = [0.14, 0.54, 0.94];
-const FRIDGE_LEVELS = [0.2, 0.62, 1.04, 1.46];
-/** Slots de exibição do móvel (coordenadas locais) ou [] se não exibe produto. */
-function slotsOf(f: Furniture): Slot[] {
-  const pid = f.productId;
-  if (!pid) return [];
-  switch (f.type) {
-    case 'shelf': return gridSlots(pid, SHELF_LEVELS.map((y) => y + 0.04), 1.76, 0.82, -0.02);
-    case 'fridge': return gridSlots(pid, FRIDGE_LEVELS.map((y) => y + 0.013), 1.74, 0.8, -0.02);
-    case 'freezer': {
-      const v = productVisual(pid);
-      const ly = [0.22]; if (v.h * 2 < 0.5) ly.push(0.22 + v.h);
-      return gridSlots(pid, ly, 1.74, 0.76, 0, 4);
-    }
-    default: return [];
-  }
-}
 const slotCache = new Map<string, Slot[]>();
-function cachedSlots(f: Furniture): Slot[] {
-  const key = `${f.type}|${f.productId ?? ''}`;
+function levelSlots(type: FurnitureType, n: number, i: number, pid: string): Slot[] {
+  const key = `${type}|${n}|${i}|${pid}`;
   let s = slotCache.get(key);
-  if (!s) { s = slotsOf(f); slotCache.set(key, s); }
+  if (!s) { s = levelSlotsOf(type, n, i, pid); slotCache.set(key, s); }
   return s;
+}
+/** Itens visíveis no nível: proporcional a `fill` (= units / capacidade), mínimo 1 com estoque. */
+export function levelVisible(type: FurnitureType, n: number, i: number, pid: string | undefined, fill: number): number {
+  if (!pid || !(fill > 0)) return 0;
+  const s = levelSlots(type, n, i, pid).length;
+  return Math.min(s, Math.max(1, Math.round(s * Math.min(1, fill))));
 }
 
 const dummy = new THREE.Object3D();
 const W = new THREE.Matrix4(), L = new THREE.Matrix4();
-/** Matrizes de mundo dos itens expostos (n proporcional à fração de estoque). `cx/cz` = centro do footprint (tiles). */
-export function furnitureItems(f: Furniture, fraction: number, cx: number, cz: number): number[] {
-  const out: number[] = [];
-  const slots = cachedSlots(f);
-  if (fraction <= 0 || slots.length === 0) return out;
-  const n = Math.min(slots.length, Math.max(1, Math.round(slots.length * Math.min(1, fraction))));
+/** Matrizes de mundo dos itens expostos, POR NÍVEL (cada nível só com o seu produto), agrupadas por produto em `out`. */
+export function furnitureItems(f: Furniture, levels: readonly { pid?: string; fill: number }[], cx: number, cz: number, out: Map<string, number[]>): void {
+  const n = levels.length;
   dummy.position.set(cx, 0.01, cz); dummy.rotation.set(0, (f.rot * Math.PI) / 180, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
   W.copy(dummy.matrix);
   for (let i = 0; i < n; i++) {
-    const s = slots[i]!;
-    dummy.position.set(s.x, s.y, s.z); dummy.rotation.set(0, s.ry, 0); dummy.updateMatrix();
-    L.multiplyMatrices(W, dummy.matrix);
-    pushMatrix(out, L);
+    const { pid, fill } = levels[i]!;
+    const k = levelVisible(f.type, n, i, pid, fill);
+    if (!pid || !k) continue;
+    const slots = levelSlots(f.type, n, i, pid);
+    let arr = out.get(pid);
+    if (!arr) out.set(pid, (arr = []));
+    for (let j = 0; j < k; j++) {
+      const s = slots[j]!;
+      dummy.position.set(s.x, s.y, s.z); dummy.rotation.set(0, s.ry, 0); dummy.scale.setScalar(s.s); dummy.updateMatrix();
+      L.multiplyMatrices(W, dummy.matrix);
+      pushMatrix(arr, L);
+    }
   }
-  return out;
+  dummy.scale.setScalar(1);
 }
 
-/** Placa com o nome do produto (atlas): frente (+z) e, opcionalmente, verso. */
-function sign(b: Batch, pid: string | undefined, w: number, h: number, x: number, y: number, z: number, back = false): void {
-  const c = signCell(pid);
+/** Placa (atlas): produto, categoria (`cat:<id>`) ou '-' (VAZIO); frente (+z) e, opcionalmente, verso. */
+function sign(b: Batch, key: string, w: number, h: number, x: number, y: number, z: number, back = false): void {
+  const c = signCell(key);
   b.add(uvToCell(planeGeo(w, h).clone(), c), ['sign', 0xffffff], x, y, z);
   if (back) b.add(uvToCell(planeGeo(w, h).clone(), c), ['sign', 0xffffff], x, y, -z, { ry: Math.PI });
 }
 
-function shelf(f: Furniture): Batch {
+function shelf(lv: readonly (string | undefined)[]): Batch {
   const b = new Batch();
-  const pid = f.productId;
-  const accent = categoryColor(pid);
+  const key = signKeyOf(lv);
+  const accent = signColor(key);
   b.box(1.96, 0.1, 0.92, DARK, 0, 0, 0);
   b.box(1.9, 1.24, 0.04, matte(tint(accent, 0.78)), 0, 0.1, -0.45);
   b.box(0.06, 1.26, 0.94, FRAME, -0.97, 0.1, 0);
   b.box(0.06, 1.26, 0.94, FRAME, 0.97, 0.1, 0);
   b.box(2.0, 0.05, 0.98, FRAME, 0, 1.34, 0);
-  for (const y of SHELF_LEVELS) {
-    b.box(1.9, 0.04, 0.9, FRAME, 0, y, 0);
-    b.box(1.9, 0.06, 0.02, matte(accent), 0, y + 0.04, 0.455);
-  }
+  levelGeoms('shelf', lv.length).forEach((g, i) => {
+    b.box(1.9, 0.04, 0.9, FRAME, 0, g.board, 0);
+    b.box(1.9, 0.06, 0.02, matte(categoryColor(lv[i])), 0, g.board + 0.04, 0.455); // friso com a cor do produto do nível
+  });
   b.box(1.96, 0.27, 0.08, DARK, 0, 1.39, 0);
-  sign(b, pid, 1.96, 0.27, 0, 1.39 + 0.135, 0.041, true);
+  sign(b, key, 1.96, 0.27, 0, 1.39 + 0.135, 0.041, true);
   return b;
 }
 
-function fridge(f: Furniture): Batch {
+function fridge(lv: readonly (string | undefined)[]): Batch {
   const b = new Batch();
   const body = metal(0x3a4552);
   b.box(2.0, 0.14, 0.98, body, 0, 0, 0);
@@ -126,22 +221,30 @@ function fridge(f: Furniture): Batch {
   b.box(0.07, 1.66, 0.94, body, -0.965, 0.14, 0);
   b.box(0.07, 1.66, 0.94, body, 0.965, 0.14, 0);
   b.box(2.0, 0.28, 1.0, body, 0, 1.78, 0);
-  sign(b, f.productId, 2.0, 0.28, 0, 1.78 + 0.14, 0.501);
+  sign(b, signKeyOf(lv), 2.0, 0.28, 0, 1.78 + 0.14, 0.501);
   b.box(1.8, 0.03, 0.05, glow(0xbdf2ff), 0, 1.76, 0.45);
-  for (const y of FRIDGE_LEVELS) b.box(1.86, 0.025, 0.86, matte(0xcfe3ec), 0, y, 0);
+  levelGeoms('fridge', lv.length).forEach((g, i) => {
+    b.box(1.86, 0.025, 0.86, matte(0xcfe3ec), 0, g.board, 0);
+    b.box(1.86, 0.04, 0.015, matte(categoryColor(lv[i])), 0, g.board + 0.025, 0.425);
+  });
   for (const sx of [-0.49, 0.49]) b.box(0.94, 1.56, 0.02, GLASS, sx, 0.16, 0.49);
   for (const x of [-0.98, 0, 0.98]) b.box(0.05, 1.6, 0.05, STEEL, x, 0.14, 0.49);
   for (const x of [-0.1, 0.1]) b.box(0.03, 0.55, 0.05, STEEL, x, 0.55, 0.53);
   return b;
 }
 
-function freezer(f: Furniture): Batch {
+function freezer(lv: readonly (string | undefined)[]): Batch {
   const b = new Batch();
   const white = matte(0xe8f1f7);
   b.box(1.9, 0.1, 0.9, matte(0x3b4753), 0, 0, 0);
   b.box(1.98, 0.62, 0.96, white, 0, 0.1, 0);
   b.box(1.98, 0.05, 0.97, matte(0x22b5c9), 0, 0.42, 0);
   b.box(1.8, 0.02, 0.8, matte(0xb7d9e8), 0, 0.2, 0);
+  const g = levelGeoms('freezer', lv.length);
+  g.forEach((c, i) => {
+    if (i > 0) b.box(0.02, 0.46, 0.8, matte(0xd5e6ef), c.x - (c.w + 0.06) / 2, 0.22, 0); // divisória entre cestos
+    b.box(c.w + 0.04, 0.03, 0.012, matte(categoryColor(lv[i])), c.x, 0.66, 0.392); // friso do cesto com a cor do produto
+  });
   b.box(2.0, 0.05, 0.06, white, 0, 0.72, 0.47);
   b.box(2.0, 0.05, 0.06, white, 0, 0.72, -0.47);
   b.box(0.06, 0.05, 0.98, white, -0.97, 0.72, 0);
@@ -149,7 +252,7 @@ function freezer(f: Furniture): Batch {
   b.box(0.06, 0.05, 0.9, white, 0, 0.72, 0);
   for (const sx of [-0.49, 0.49]) b.box(0.9, 0.02, 0.86, GLASS, sx, 0.74, 0);
   b.box(0.5, 0.04, 0.04, STEEL, 0, 0.76, 0.5);
-  sign(b, f.productId, 1.1, 0.2, 0, 0.25, 0.482);
+  sign(b, signKeyOf(lv), 1.1, 0.2, 0, 0.25, 0.482);
   return b;
 }
 
@@ -340,23 +443,24 @@ function decor(f: Furniture): Batch {
   return b;
 }
 
-function structure(f: Furniture): Batch {
+function structure(f: Furniture, lv: readonly (string | undefined)[]): Batch {
   switch (f.type as FurnitureType) {
-    case 'shelf': return shelf(f);
-    case 'fridge': return fridge(f);
-    case 'freezer': return freezer(f);
+    case 'shelf': return shelf(lv);
+    case 'fridge': return fridge(lv);
+    case 'freezer': return freezer(lv);
     case 'counter': return counter();
     case 'rack': return rack();
     default: return decor(f);
   }
 }
 
-/** Geometrias fundidas (espaço local) por (tipo, produto, variante). Vivem até o fim do jogo; são poucas e reutilizadas por todos os móveis iguais. */
+/** Geometrias fundidas (espaço local) por (tipo, níveis/produtos, variante). Vivem até o fim do jogo; são poucas e reutilizadas por todos os móveis iguais. */
 const modelCache = new Map<string, Map<Kind, THREE.BufferGeometry>>();
-export function furnitureGeos(f: Furniture): Map<Kind, THREE.BufferGeometry> {
-  const key = `${f.type}|${f.type === 'decor' ? '' : f.productId ?? ''}|${f.type === 'decor' ? f.variant ?? 'plant' : ''}`;
+/** `lv` = produto de cada nível (padrão: `levelPids(f)`); a quantidade de níveis define as tábuas. */
+export function furnitureGeos(f: Furniture, lv: readonly (string | undefined)[] = levelPids(f)): Map<Kind, THREE.BufferGeometry> {
+  const key = isDisplayType(f.type) ? `${f.type}|${lv.map((p) => p ?? '').join(',')}` : f.type === 'decor' ? `decor|${f.variant ?? 'plant'}` : f.type;
   let g = modelCache.get(key);
-  if (!g) { g = structure(f).build(); modelCache.set(key, g); }
+  if (!g) { g = structure(f, lv).build(); modelCache.set(key, g); }
   return g;
 }
 
@@ -407,12 +511,5 @@ export function silhouetteOf(f: Pick<Furniture, 'type' | 'variant'>): SBox[] {
 export const chairSilhouette = (): SBox[] => SIL.chair!;
 export const deskSilhouette = (): SBox[] => SIL.desk!;
 
-/** Âncora local da etiqueta de preço (frente +z) por tipo; null se o móvel não expõe produto. */
-export function tagAnchor(type: FurnitureType): { x: number; y: number; z: number } | null {
-  switch (type) {
-    case 'shelf': return { x: 0, y: 1.012, z: 0.478 };
-    case 'fridge': return { x: 0, y: 1.6, z: 0.535 };
-    case 'freezer': return { x: 0.72, y: 0.36, z: 0.488 };
-    default: return null;
-  }
-}
+/** Nº de níveis desenhados do móvel (levels.length; reserva: FurnitureSpec.slots do tipo). */
+export const levelCountOf = (f: Pick<Furniture, 'type' | 'productId' | 'levels'>): number => levelPids(f).length;

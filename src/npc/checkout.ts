@@ -27,7 +27,14 @@ export const PLAYER_SERVE_SEC = 9;
 /** Máximo de toques por cliente: acima disso cada item na esteira representa várias unidades. */
 const MAX_TAPS = 12;
 const PLACE_EVERY = 0.42;
-const BELT_SPEED = 0.7;
+const BELT_SPEED = 0.6;
+/** Folga entre itens na esteira (m). Cada item ocupa o próprio comprimento (caixa envolvente) ao longo da esteira. */
+const BELT_GAP = 0.03;
+/** Jogador sentado: notas/cartão vêm até PAY_PULL m mais perto da câmera (nunca a menos de PAY_MIN_DIST) e maiores. */
+const PAY_PULL = 0.42;
+const PAY_MIN_DIST = 1.3;
+const CARD_NEAR_SCALE = 2.1;
+const BILL_NEAR_SCALE = 1.3;
 type Op = 'player' | 'staff' | null;
 
 interface BeltItem {
@@ -38,7 +45,11 @@ interface BeltItem {
   /** preço unitário (centavos) na hora em que foi posto na esteira */
   unit: number;
   st: 'drop' | 'belt' | 'scan';
-  slot: number;
+  /** posição do centro ao longo da esteira (m; 0 = ponta do cliente) e comprimento ocupado */
+  s: number;
+  len: number;
+  /** deslocamento vertical para a base do produto ficar na lona */
+  y0: number;
   t: number;
   x: number; y: number; z: number;
   fx: number; fy: number; fz: number;
@@ -50,7 +61,8 @@ class Service {
   phase: 'approach' | 'unload' | 'toPay' | 'pay' | 'paying' = 'approach';
   mode: Op = null;
   next = 0;
-  readonly belt: (BeltItem | null)[];
+  /** itens na esteira, do mais perto do scanner (0) ao último posto */
+  readonly belt: BeltItem[] = [];
   readonly flying: BeltItem[] = [];
   /** total acumulado do que já foi bipado (centavos) */
   total = 0;
@@ -67,9 +79,7 @@ class Service {
   pendingT = 0;
   awayT = 0;
   payTap: () => void = () => {};
-  constructor(readonly c: Customer, slots: number, readonly method: 'cash' | 'card', readonly taps: { pid: string; n: number }[]) {
-    this.belt = new Array<BeltItem | null>(slots).fill(null);
-  }
+  constructor(readonly c: Customer, readonly method: 'cash' | 'card', readonly taps: { pid: string; n: number }[]) {}
 }
 
 /** Agrupa as unidades em "toques" (no máx. ~MAX_TAPS por cliente). */
@@ -91,6 +101,13 @@ export class Lane {
   staffed = false;
   svc: Service | null = null;
   slots: THREE.Vector3[] = [];
+  /** eixo da esteira: início (ponta do cliente), direção (xz, unitária) rumo ao scanner, comprimento e alturas */
+  readonly beltA = new THREE.Vector3();
+  readonly beltDir: Vec2 = { x: 0, z: -1 };
+  beltLen = 1;
+  beltY1 = 0.9;
+  /** rotação Y dos itens: frente (+z local) virada para o operador, comprimento (x local) ao longo da esteira */
+  itemYaw = 0;
   readonly handoff = new THREE.Vector3();
   readonly scanPt = new THREE.Vector3();
   readonly bagPt = new THREE.Vector3();
@@ -132,6 +149,7 @@ export interface CashierLike {
 }
 
 const tmpV = new THREE.Vector3();
+const tmpP = { x: 0, y: 0, z: 0 };
 
 export class CheckoutManager {
   lanes: Lane[] = [];
@@ -143,6 +161,7 @@ export class CheckoutManager {
   private fbPick: FallbackPick | null = null;
   private readonly regs = new Map<THREE.Object3D, PickService>();
   private readonly pool = new Map<string, THREE.Object3D[]>();
+  private readonly dimCache = new Map<string, { sx: number; sz: number; y0: number }>();
   private readonly tmp: Vec2 = { x: 0, z: 0 };
 
   constructor(private env: Env, private onSale: () => void) {
@@ -210,9 +229,8 @@ export class CheckoutManager {
     // fallback = layout local do balcão da Fase 3 (world/furniture.ts: BELT_SLOTS, BELT_Y, HANDOFF, SEAT)
     else if (fr) slots = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => CheckoutManager.local(fr, -0.51 + (i % 2 ? 0.11 : -0.11), 0.84 - i * 0.157, 0.882, new THREE.Vector3()));
     else slots = [0, 1, 2, 3, 4, 5].map((i) => { const k = 0.6 * (1 - i / 6); return new THREE.Vector3(l.scanner.x + (q0.x - l.scanner.x) * k, 0.83, l.scanner.z + (q0.z - l.scanner.z) * k); });
-    // mantém itens na esteira se o nº de slots mudar
-    if (l.svc && l.svc.belt.length !== slots.length) { this.clear(l, l.svc); l.svc.next = 0; l.svc.total = 0; l.svc.phase = 'approach'; l.svc.belt.length = slots.length; l.svc.belt.fill(null); }
     l.slots = slots;
+    this.beltAxis(l, slots);
     const hp = w.handoffPoint ? safe('handoffPoint', () => w.handoffPoint!(id), null) : null;
     if (hp) l.handoff.copy(hp);
     else if (fr) CheckoutManager.local(fr, -0.3, 0.84, 1.12, l.handoff);
@@ -238,6 +256,36 @@ export class CheckoutManager {
       l.seat.x = l.operator.x; l.seat.z = l.operator.z; l.seat.y = 0.5;
       l.seat.yaw = Math.atan2(l.handoff.x - l.operator.x, l.handoff.z - l.operator.z);
     }
+  }
+
+  /**
+   * Eixo contínuo da esteira a partir dos slots do world (que alternam ±x): média dos 2 primeiros → média dos 2
+   * últimos, estendido meio passo em cada ponta. Os itens ocupam o próprio comprimento ao longo desse eixo.
+   */
+  private beltAxis(l: Lane, slots: THREE.Vector3[]): void {
+    const n = slots.length;
+    const s0 = slots[0]!, sN = slots[n - 1]!;
+    const s1 = n >= 4 ? slots[1]! : s0, sM = n >= 4 ? slots[n - 2]! : sN;
+    const ax = (s0.x + s1.x) / 2, az = (s0.z + s1.z) / 2, bx = (sM.x + sN.x) / 2, bz = (sM.z + sN.z) / 2;
+    let dx = bx - ax, dz = bz - az;
+    const dd = Math.hypot(dx, dz);
+    if (dd < 1e-4) { dx = 0; dz = -1; } else { dx /= dd; dz /= dd; }
+    const half = n >= 4 ? dd / (n - 2) / 2 : 0;
+    l.beltA.set(ax - dx * half, (s0.y + s1.y) / 2, az - dz * half);
+    l.beltDir.x = dx; l.beltDir.z = dz;
+    l.beltLen = Math.max(0.3, dd + half * 2);
+    l.beltY1 = (sM.y + sN.y) / 2;
+    // frente dos itens para o lado do operador
+    const mx = l.beltA.x + dx * l.beltLen / 2, mz = l.beltA.z + dz * l.beltLen / 2;
+    let px = -dz, pz = dx;
+    if (px * (l.operator.x - mx) + pz * (l.operator.z - mz) < 0) { px = -px; pz = -pz; }
+    l.itemYaw = Math.atan2(px, pz);
+  }
+  private static beltPoint<T extends { x: number; y: number; z: number }>(l: Lane, s: number, y0: number, out: T): T {
+    const k = clamp(s / l.beltLen, 0, 1);
+    out.x = l.beltA.x + l.beltDir.x * s; out.z = l.beltA.z + l.beltDir.z * s;
+    out.y = l.beltA.y + (l.beltY1 - l.beltA.y) * k + y0;
+    return out;
   }
 
   /* ---------------- operadores ---------------- */
@@ -293,9 +341,10 @@ export class CheckoutManager {
   private switchMode(l: Lane, s: Service, op: Op): void {
     s.mode = op;
     const on = op === 'player';
-    for (const it of s.belt) if (it && it.st === 'belt') this.setTappable(it, on);
+    for (const it of s.belt) if (it.st === 'belt') this.setTappable(it, on);
     if (s.shown && l.prop) {
       l.prop.setHalo(on);
+      this.placeProp(l, s);
       if (on) this.pickAdd(l.prop.group, s.payTap); else this.pickRemove(l.prop.group);
     }
   }
@@ -308,6 +357,45 @@ export class CheckoutManager {
     const m = w.makeProductMesh ? safe('makeProductMesh', () => w.makeProductMesh!(pid), null) : null;
     return m ?? fallbackProductMesh(pid);
   }
+  /** Tamanho do produto (caixa envolvente local, escala 1): x/z em m e deslocamento até a base. Cache por produto. */
+  private dims(pid: string): { sx: number; sz: number; y0: number } {
+    let d = this.dimCache.get(pid);
+    if (d) return d;
+    const obj = this.takeMesh(pid);
+    const box = new THREE.Box3();
+    const mesh = obj as THREE.Mesh;
+    if (mesh.isMesh && mesh.geometry && obj.children.length === 0) {
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      box.copy(mesh.geometry.boundingBox!);
+    } else {
+      obj.position.set(0, 0, 0); obj.rotation.set(0, 0, 0); obj.scale.setScalar(1);
+      obj.updateMatrixWorld(true);
+      box.setFromObject(obj);
+    }
+    const ok = !box.isEmpty() && Number.isFinite(box.min.y);
+    d = ok
+      ? { sx: clamp(box.max.x - box.min.x, 0.04, 0.6), sz: clamp(box.max.z - box.min.z, 0.04, 0.6), y0: clamp(-box.min.y, -0.3, 0.3) }
+      : { sx: 0.14, sz: 0.1, y0: 0 };
+    this.dimCache.set(pid, d);
+    let list = this.pool.get(pid);
+    if (!list) { list = []; this.pool.set(pid, list); }
+    list.push(obj);
+    return d;
+  }
+  /** Giro leve de cada item (rad) e o comprimento que ele ocupa ao longo da esteira. */
+  private static jitter(c: Customer, k: number): number { return (((c.id * 7 + k * 3) % 10) / 10 - 0.5) * 0.24; }
+  private itemLen(pid: string, j: number): number {
+    const d = this.dims(pid);
+    return Math.abs(d.sx * Math.cos(j)) + Math.abs(d.sz * Math.sin(j));
+  }
+  /** Cabe um item de comprimento `len` na ponta do cliente? (o último item já andou o bastante) */
+  private room(s: Service, len: number): boolean {
+    const last = s.belt[s.belt.length - 1];
+    if (!last) return true;
+    if (last.st !== 'belt') return false;
+    return last.s - last.len / 2 >= len + BELT_GAP;
+  }
+
   private release(it: BeltItem): void {
     this.setTappable(it, false);
     it.obj.parent?.remove(it.obj);
@@ -335,7 +423,7 @@ export class CheckoutManager {
 
   private start(l: Lane, c: Customer, op: Op): void {
     const { ctx } = this.env;
-    const s = new Service(c, l.slots.length, ctx.rand() < 0.6 ? 'cash' : 'card', groupTaps(c.items));
+    const s = new Service(c, ctx.rand() < 0.6 ? 'cash' : 'card', groupTaps(c.items));
     s.payTap = () => this.onPayTap(l, s);
     l.svc = s;
     c.state = 'serving';
@@ -359,8 +447,7 @@ export class CheckoutManager {
   }
 
   private beltEmpty(s: Service): boolean {
-    for (let i = 0; i < s.belt.length; i++) if (s.belt[i]) return false;
-    return s.flying.length === 0;
+    return s.belt.length === 0 && s.flying.length === 0;
   }
 
   private step(l: Lane, s: Service, op: Op, dt: number): void {
@@ -374,13 +461,18 @@ export class CheckoutManager {
         if (c.arrived || s.t > 4) { s.phase = 'unload'; s.t = 0; s.placeT = 0.25; c.setPose('place'); }
         break;
       case 'unload': {
-        const p0 = l.slots[0]!;
         if (s.next < s.taps.length) {
-          c.faceTowards(p0.x, p0.z);
-          c.setPose('place');
-          c.person.setReach(p0.x, p0.y + 0.08, p0.z);
+          // põe o próximo só quando cabe inteiro na ponta da esteira; senão espera a bipagem liberar espaço
+          const len = this.itemLen(s.taps[s.next]!.pid, CheckoutManager.jitter(c, s.next + 1));
+          const fits = this.room(s, len);
+          const px = l.beltA.x + l.beltDir.x * 0.12, pz = l.beltA.z + l.beltDir.z * 0.12;
+          c.faceTowards(px, pz);
+          if (fits || s.placeT > 0) {
+            c.setPose('place');
+            c.person.setReach(px, l.beltA.y + 0.08, pz);
+          } else { c.person.clearReach(); c.setPose('basket'); }
           s.placeT -= dt;
-          if (s.placeT <= 0 && !s.belt[0]) { this.place(l, s); s.placeT = PLACE_EVERY; }
+          if (s.placeT <= 0 && fits) { this.place(l, s, len); s.placeT = PLACE_EVERY; }
         } else if (c.person.pose === 'place') {
           c.person.clearReach(); c.setPose('normal'); c.person.setBasket(false);
         }
@@ -393,7 +485,8 @@ export class CheckoutManager {
         }
         if (s.next >= s.taps.length && this.beltEmpty(s)) {
           s.phase = 'toPay'; s.t = 0;
-          const st = this.standNear(l, l.handoff.x, l.handoff.z, 0.5 * c.person.scale + 0.04, this.tmp);
+          // jogador sentado: o cliente encosta no balcão para estender o pagamento mais perto da cadeira
+          const st = this.standNear(l, l.handoff.x, l.handoff.z, (s.mode === 'player' ? 0.4 : 0.5) * c.person.scale + 0.03, this.tmp);
           c.moveTo(st.x, st.z, true);
         }
         break;
@@ -420,22 +513,23 @@ export class CheckoutManager {
 
   /** Item mais próximo do scanner já pousado na esteira. */
   private frontItem(s: Service): BeltItem | null {
-    for (let i = s.belt.length - 1; i >= 0; i--) { const it = s.belt[i]; if (it && it.st === 'belt') return it; }
+    for (const it of s.belt) if (it.st === 'belt') return it;
     return null;
   }
 
-  private place(l: Lane, s: Service): void {
+  private place(l: Lane, s: Service, len: number): void {
     const tap = s.taps[s.next++]!;
     const c = s.c;
+    const d = this.dims(tap.pid);
     const obj = this.takeMesh(tap.pid);
     const unit = safe('sellPrice', () => sellPrice(this.env.ctx.state, tap.pid), 0);
     const h = c.heading;
     const fx = c.x + Math.sin(h) * 0.32, fz = c.z + Math.cos(h) * 0.32, fy = 0.95 * c.person.scale;
-    const it: BeltItem = { obj, pid: tap.pid, n: tap.n, unit, st: 'drop', slot: 0, t: 0, x: fx, y: fy, z: fz, fx, fy, fz, tappable: false, tap: () => {} };
+    const it: BeltItem = { obj, pid: tap.pid, n: tap.n, unit, st: 'drop', s: len / 2, len, y0: d.y0, t: 0, x: fx, y: fy, z: fz, fx, fy, fz, tappable: false, tap: () => {} };
     it.tap = () => { if (l.svc === s && s.mode === 'player') this.scan(l, s, it); };
-    s.belt[0] = it;
+    s.belt.push(it);
     obj.position.set(fx, fy, fz);
-    obj.rotation.set(0, (((c.id * 7 + s.next * 3) % 10) / 10 - 0.5) * 0.7, 0);
+    obj.rotation.set(0, l.itemYaw + CheckoutManager.jitter(c, s.next), 0);
     obj.scale.setScalar(1);
     this.env.ctx.scene.add(obj);
     c.refreshBasketFrom(s.taps, s.next);
@@ -446,7 +540,7 @@ export class CheckoutManager {
     if (it.st !== 'belt' || l.svc !== s) return;
     this.setTappable(it, false);
     const i = s.belt.indexOf(it);
-    if (i >= 0) s.belt[i] = null;
+    if (i >= 0) s.belt.splice(i, 1);
     it.st = 'scan'; it.t = 0; it.fx = it.x; it.fy = it.y; it.fz = it.z;
     s.flying.push(it);
     s.total += it.unit * it.n;
@@ -459,18 +553,15 @@ export class CheckoutManager {
   }
 
   private animate(l: Lane, s: Service, dt: number): void {
-    const belt = s.belt, slots = l.slots;
-    for (let i = belt.length - 2; i >= 0; i--) {
-      const it = belt[i];
-      if (it && it.st === 'belt' && !belt[i + 1]) { belt[i + 1] = it; belt[i] = null; it.slot = i + 1; }
-    }
+    const belt = s.belt;
+    // cada item anda rumo ao scanner até encostar (com folga) no da frente: nunca se sobrepõem
+    let limit = l.beltLen;
     for (let i = 0; i < belt.length; i++) {
-      const it = belt[i];
-      if (!it) continue;
-      const p = slots[Math.min(it.slot, slots.length - 1)]!;
+      const it = belt[i]!;
       if (it.st === 'drop') {
         it.t += dt;
         const k = Math.min(1, it.t / 0.32);
+        const p = CheckoutManager.beltPoint(l, it.s, it.y0, tmpP);
         it.x = it.fx + (p.x - it.fx) * k; it.z = it.fz + (p.z - it.fz) * k;
         it.y = it.fy + (p.y - it.fy) * k + Math.sin(k * Math.PI) * 0.12;
         if (k >= 1) {
@@ -479,10 +570,11 @@ export class CheckoutManager {
           if (s.mode === 'player') this.setTappable(it, true);
         }
       } else {
-        const dx = p.x - it.x, dy = p.y - it.y, dz = p.z - it.z;
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz), st = BELT_SPEED * dt;
-        if (d <= st) { it.x = p.x; it.y = p.y; it.z = p.z; } else { it.x += (dx / d) * st; it.y += (dy / d) * st; it.z += (dz / d) * st; }
+        const smax = limit - it.len / 2;
+        if (it.s < smax) it.s = Math.min(smax, it.s + BELT_SPEED * dt);
+        CheckoutManager.beltPoint(l, it.s, it.y0, it);
       }
+      limit = it.s - it.len / 2 - BELT_GAP;
       it.obj.position.set(it.x, it.y, it.z);
     }
     const a = l.scanPt, b = l.bagPt;
@@ -515,16 +607,35 @@ export class CheckoutManager {
     if (s.method === 'cash' && s.paid < s.reqTotal) s.paid = customerCashPayment(s.reqTotal, ctx.rand);
     const prop = (l.prop ??= this.newProp());
     prop.show(s.method, s.paid, c.id);
-    prop.group.position.copy(l.handoff);
-    if (s.mode === 'player') tmpV.copy(ctx.camera.position);
-    else tmpV.set(l.seat.x, l.seat.y + 0.75, l.seat.z);
-    prop.group.lookAt(tmpV);
     prop.setHalo(s.mode === 'player');
     if (s.mode === 'player') this.pickAdd(prop.group, s.payTap);
     s.shown = true;
     if (s.payShownAt < 0) s.payShownAt = this.clock;
     c.setPose('extend');
-    c.person.setReach(l.handoff.x, l.handoff.y, l.handoff.z);
+    this.placeProp(l, s);
+  }
+
+  /**
+   * Posição/escala das notas ou do cartão. Jogador sentado: o cliente estende o pagamento por cima do balcão, até
+   * PAY_PULL m mais perto da câmera, e o objeto fica maior (cartão ×2,1, notas ×1,3) para ser legível da cadeira.
+   */
+  private placeProp(l: Lane, s: Service): void {
+    const prop = l.prop;
+    if (!prop) return;
+    const g = prop.group;
+    g.position.copy(l.handoff);
+    if (s.mode === 'player') {
+      this.env.ctx.camera.getWorldPosition(tmpV);
+      const d = g.position.distanceTo(tmpV);
+      const pull = clamp(d - PAY_MIN_DIST, 0, PAY_PULL);
+      if (d > 1e-3) g.position.lerp(tmpV, pull / d);
+      g.scale.setScalar(s.method === 'card' ? CARD_NEAR_SCALE : BILL_NEAR_SCALE);
+    } else {
+      tmpV.set(l.seat.x, l.seat.y + 0.75, l.seat.z);
+      g.scale.setScalar(1);
+    }
+    g.lookAt(tmpV);
+    s.c.person.setReach(g.position.x, g.position.y, g.position.z);
   }
 
   private hidePay(l: Lane, s: Service): void {
@@ -586,7 +697,8 @@ export class CheckoutManager {
 
   /** Remove tudo do atendimento (itens, tocáveis, contornos, notas/cartão). */
   private clear(l: Lane, s: Service): void {
-    for (let i = 0; i < s.belt.length; i++) { const it = s.belt[i]; if (it) this.release(it); s.belt[i] = null; }
+    for (const it of s.belt) this.release(it);
+    s.belt.length = 0;
     for (const it of s.flying) this.release(it);
     s.flying.length = 0;
     if (l.prop) { this.pickRemove(l.prop.group); l.prop.hide(); }
@@ -644,12 +756,22 @@ export class CheckoutManager {
   }
 
   /** Para testes/debug. */
-  debug(): { id: number; line: number; staffed: boolean; phase: string | null; mode: Op; belt: number; flying: number; shown: boolean; total: number; slots: number }[] {
+  debug(): { id: number; line: number; staffed: boolean; phase: string | null; mode: Op; belt: number; flying: number; shown: boolean; total: number; slots: number; gap: number | null; waiting: number; payScale: number; method: 'cash' | 'card' | null }[] {
     return this.lanes.map((l) => {
       const s = l.svc;
-      let belt = 0;
-      if (s) for (const it of s.belt) if (it) belt++;
-      return { id: l.furnitureId, line: l.line.length, staffed: l.staffed, phase: s?.phase ?? null, mode: s?.mode ?? null, belt, flying: s?.flying.length ?? 0, shown: s?.shown ?? false, total: s?.total ?? 0, slots: l.slots.length };
+      // menor folga entre itens vizinhos já pousados (negativa = sobreposição)
+      let gap: number | null = null;
+      if (s) for (let i = 1; i < s.belt.length; i++) {
+        const a = s.belt[i - 1]!, b = s.belt[i]!;
+        if (a.st !== 'belt' || b.st !== 'belt') continue;
+        const g = (a.s - a.len / 2) - (b.s + b.len / 2);
+        gap = gap === null ? g : Math.min(gap, g);
+      }
+      return {
+        id: l.furnitureId, line: l.line.length, staffed: l.staffed, phase: s?.phase ?? null, mode: s?.mode ?? null, belt: s?.belt.length ?? 0,
+        flying: s?.flying.length ?? 0, shown: s?.shown ?? false, total: s?.total ?? 0, slots: l.slots.length,
+        gap: gap === null ? null : +gap.toFixed(3), waiting: s ? s.taps.length - s.next : 0, payScale: l.prop?.group.scale.x ?? 1, method: s?.method ?? null,
+      };
     });
   }
   /** Quantos objetos estão registrados como tocáveis agora. */
@@ -659,7 +781,7 @@ export class CheckoutManager {
     for (const l of this.lanes) {
       const s = l.svc;
       if (!s || s.mode !== 'player') continue;
-      for (let i = s.belt.length - 1; i >= 0; i--) { const it = s.belt[i]; if (it && it.tappable) { it.tap(); return true; } }
+      for (const it of s.belt) if (it.tappable) { it.tap(); return true; }
       if (s.shown) { s.payTap(); return true; }
     }
     return false;

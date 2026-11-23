@@ -111,8 +111,8 @@ export class Report {
     const s = this.kit.ctx.state;
     const t: string[] = [];
     if (low.length) t.push(`Estoque baixo em ${low.length} ${low.length > 1 ? 'produtos' : 'produto'}. Compre caixas no Mercado e reponha as prateleiras antes de abrir.`);
-    if (rep.lost > rep.served) t.push('Mais clientes foram embora do que compraram. Confira estoque e preços: acima de 12% do mercado afasta gente.');
-    if (rep.netProfit < 0) t.push('Dia no vermelho. Use "Definir todos pelo sugerido" na aba Preços e revise as despesas fixas.');
+    if (rep.lost > rep.served) t.push('Mais clientes foram embora do que compraram. Confira estoque e preços: mais de 10% acima do mercado afasta gente.');
+    if (rep.netProfit < 0) t.push('Dia no vermelho. Use "Definir todos no sugerido" na aba Preços e revise as despesas fixas.');
     if (s.employees.cashier === 0 && rep.served >= 25) t.push('Você atende muita gente. Contratar um caixa libera seu tempo para repor estoque.');
     if (s.money > Math.max(40 * s.rent, 500000)) t.push('Há bastante caixa parado. Que tal ampliar a loja, comprar uma licença ou mais móveis?');
     if (!t.length) t.push('Bom trabalho! Antes de abrir amanhã, confira os preços do atacado no Mercado.');

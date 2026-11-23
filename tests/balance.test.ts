@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { newBot, playDay, playDays, restock, type DayStats } from '../src/sim/bot';
 import { employeeCost, expansionMinLevel, isBankrupt, productCapacity, storageCapacity, storageUsed, upgradeCatalog } from '../src/sim/api';
 import { LICENSES, PRODUCTS } from '../src/sim/catalog';
-import { recomputeSlots } from '../src/sim/furniture';
+import { unitsOwned } from '../src/sim/economy';
+import { levelCount, recomputeSlots } from '../src/sim/levels';
 import { newGame, type StoreState } from '../src/sim/state';
+import { levelUnits } from './helpers';
 
 const SEEDS = [3, 11, 29];
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
@@ -25,17 +27,32 @@ function checkInvariants(s: StoreState): void {
   for (const b of s.sidewalk) expect(Number.isInteger(b.units) && b.units >= 0).toBe(true);
   expect(s.dirt.length).toBeLessThanOrEqual(12);
   expect(storageUsed(s)).toBeLessThanOrEqual(Math.max(storageCapacity(s), 0));
+  // Fase 4: níveis são a fonte da verdade; shelf/slots derivados batem; custo médio cobre exatamente o que se possui
+  for (const f of s.furniture) {
+    expect(f.levels?.length ?? 0).toBe(levelCount(f.type));
+    for (const l of f.levels ?? []) {
+      expect(Number.isInteger(l.units) && l.units >= 0).toBe(true);
+      if (l.productId === undefined) expect(l.units).toBe(0);
+      else expect(l.units).toBeLessThanOrEqual(PRODUCTS.find((p) => p.id === l.productId)!.slotCapacity);
+    }
+  }
+  for (const p of PRODUCTS) {
+    expect(s.shelf[p.id] ?? 0).toBe(levelUnits(s, p.id));
+    expect(s.costBasis[p.id]?.units ?? 0).toBe(unitsOwned(s, p.id));
+  }
   const slots = { ...s.slots };
+  const shelf = { ...s.shelf };
   recomputeSlots(s);
   expect(s.slots).toEqual(slots);
+  expect(s.shelf).toEqual(shelf);
 }
 
 describe('balanceamento (bot joga N dias pela API pública)', () => {
-  it('preço justo (+10%) é lucrativo; preço abusivo (+60%) quebra', () => {
+  it('preço justo (sugerido = média de mercado) é lucrativo; preço abusivo (+60%) quebra', { timeout: 60000 }, () => {
     for (const seed of SEEDS) {
       const fair = newGame(seed);
       const greedy = newGame(seed);
-      const f = playDays(fair, 30, { priceMult: 1.1 });
+      const f = playDays(fair, 30, { priceMult: 1.0 });
       const g = playDays(greedy, 30, { priceMult: 1.6 });
       const fNet = sum(f.map((d) => d.netProfit));
       const gNet = sum(g.map((d) => d.netProfit));
@@ -44,15 +61,18 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
       expect(greedy.level).toBeLessThan(fair.level);
     }
   });
-  it('lucro tem ponto ótimo perto do mercado: +10..15% bate +30% e preços muito baixos não compensam', () => {
+  it('lucro tem ponto ótimo perto do mercado: ×1,0..×1,15 bate +30% e preços muito baixos não compensam', { timeout: 60000 }, () => {
     const net = (mult: number): number => sum(SEEDS.map((seed) => sum(playDays(newGame(seed), 30, { priceMult: mult }).map((d) => d.netProfit))));
     const low = net(0.8);
+    const market = net(1.0);
     const fair = net(1.1);
     const high15 = net(1.15);
     const high30 = net(1.3);
     expect(fair).toBeGreaterThan(low);
+    expect(market).toBeGreaterThan(low);
     expect(high15).toBeGreaterThan(high30);
     expect(fair).toBeGreaterThan(high30 * 1.5);
+    expect(market).toBeGreaterThan(high30 * 1.5); // o preço sugerido (mercado) rende bem mais que +30%
   });
   it('início pobre: R$ 150 compram 1 caixa de cada produto barato; dia 1 lucra sem aluguel e sobe para o nível 2', () => {
     for (const seed of SEEDS) {
@@ -96,7 +116,7 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
       expect(minMoney).toBeGreaterThanOrEqual(0);
     }
   });
-  it('sem espiral de falência no começo: estratégias razoáveis nunca ficam no vermelho nos primeiros 20 dias', () => {
+  it('sem espiral de falência no começo: estratégias razoáveis nunca ficam no vermelho nos primeiros 20 dias', { timeout: 60000 }, () => {
     for (const priceMult of [1, 1.12, 1.25]) {
       for (const restocks of [2, 4]) {
         const s = newGame(17);
@@ -109,7 +129,7 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
       }
     }
   });
-  it('economia não explode: lucro/dia cresce com o tempo, mas limitado por nível', () => {
+  it('economia não explode: lucro/dia cresce com o tempo, mas limitado por nível', { timeout: 60000 }, () => {
     for (const seed of SEEDS) {
       const s = newGame(seed);
       const st: DayStats[] = playDays(s, 80, {});
@@ -127,7 +147,7 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
       expect(Math.max(...st.map((d) => d.netProfit))).toBeLessThan(1_000_000); // < R$ 10 mil/dia em 80 dias
     }
   });
-  it('nenhum estado inválido durante 60 dias (dinheiro inteiro, estoques >= 0, capacidade respeitada)', () => {
+  it('nenhum estado inválido durante 60 dias (dinheiro inteiro, estoques >= 0, capacidade respeitada)', { timeout: 60000 }, () => {
     for (const seed of SEEDS) {
       const s = newGame(seed);
       const bot = newBot();

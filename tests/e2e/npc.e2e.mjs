@@ -44,7 +44,7 @@ await page.evaluate(async () => {
 // estoca prateleiras e (se não houver) garante funcionamento
 await page.evaluate(() => {
   const s = __game.state;
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) s.shelf[id] = 20;
+  __npc.stock(20); // Fase 4: abastece os níveis (state.shelf é derivado)
   window.__moneyBefore = s.money;
   window.__shelfBefore = Object.values(s.shelf).reduce((a, b) => a + b, 0);
   // simula o jogador atendendo: responde ao pedido de checkout como o minigame faria

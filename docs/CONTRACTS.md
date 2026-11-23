@@ -366,3 +366,23 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
 - `npm run apk` gera o APK de depuração; assinatura com keystore de depuração FIXA versionada (credenciais públicas
   padrão de debug) para que atualizações instalem por cima sem perder o save.
 - Navegador: no primeiro toque, tentar tela cheia + `screen.orientation.lock('landscape')`; se falhar, manter o aviso.
+
+## Fase 4 — world (src/world)
+- **Desenho por nível:** cada nível de shelf/fridge/freezer desenha só o seu produto (`Furniture.levels[i].productId`), com
+  itens proporcionais a `units / slotCapacity` (mín. 1 com estoque; fileira da frente primeiro, até 2 camadas se couber;
+  produto mais alto que o vão é reduzido para caber). Nº de tábuas/cestos = `levels.length` (reserva sem `levels`: `FurnitureSpec.slots`
+  do tipo, todos com o `productId` antigo e a fração de `state.shelf/slots`). Instancing mantido (1 InstancedMesh por produto).
+- **Índice do nível:** shelf/fridge = de **cima para baixo** (0 = tábua de cima); freezer = cestos da **esquerda para a direita**
+  vistos da frente. Geometria única em `levelGeoms(type, n)` (src/world/furniture.ts: região, tábua, área útil, etiqueta);
+  `levelHeights(type, n)` = y local da base da tábua de cada índice (shelf 4 níveis: 1,03 / 0,72 / 0,41 / 0,10 m; fridge 4: 1,385 / 0,99 / 0,595 / 0,20 m).
+- **Etiqueta por nível:** cor do produto + preço; `--` quando o nível tem produto e 0 unidades; nível sem produto = sem etiqueta
+  (1 malha, 1 draw call). Frisos das tábuas na cor do produto do nível. Placa do topo: produto único, categoria dominante
+  ("Mercearia") se os níveis misturam produtos, VAZIO sem etiquetas.
+- **`levelAt(furnitureId, point)`:** ponto de mundo → coordenadas do móvel (com rotação) → índice (shelf/fridge pela altura,
+  freezer pelo x local); `null` fora do móvel ou tipo sem níveis. **`highlight(pick)`** com `pick.level` = contorno verde só da
+  região daquele nível (sem `level`, o móvel inteiro, como antes); `highlighted()` devolve o `level`.
+- **Prévia:** o fantasma usa o nº de níveis do móvel (editar) ou do tipo (novo). Caixas, monitor, posicionamento sem mudança.
+- **Debug:** `__world.levels(id)`, `levelAt(id,x,y,z)`, `levelPoint(id,level)` (centro da frente, mundo), `levelHeights(type,n)`,
+  `tagLevels()` (`{id, level, pid, text}`); `tags()` agrega por produto (`-` se todos os níveis dele esgotaram).
+- **Desempenho (perf.e2e, mesma cena):** draw calls 68–82 dentro (igual à Fase 3), low 54, texturas 16, sem vazamentos;
+  triângulos ≈ 117k (low ≈ 110k).

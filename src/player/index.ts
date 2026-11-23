@@ -4,12 +4,15 @@
  * (docs/CONTRACTS.md, "Fase 3" + "ADENDO"), caixa aberta/fechada na mão, arremesso balístico, largar via `build:box`,
  * esfregão animado, sentar no caixa e PickService (toques nos itens da esteira). Publica `services.player` e
  * `services.pick`; emite `player:action` + `stateChanged` após cada ação.
+ * FASE 4: interação POR NÍVEL (`pick.level` via `world.levelAt`; Repor → `placeUnitsInLevel`, Retirar com caixa
+ * vazia → `pullUnitsFromLevel`, decisão por `canStockLevel`), sensibilidade do olhar (`lookSensitivity`) e
+ * tentativa de tela cheia + paisagem no navegador (`landscape.ts`).
  */
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { PickInfo, PickService, PlayerService, WorldService } from '../core/services';
 import { storeBounds, trashBinPos } from '../core/layout';
-import type { Box, Furniture, StoreState } from '../sim/state';
+import type { Box, Furniture, ShelfLevel, StoreState } from '../sim/state';
 import { productById } from '../sim/catalog';
 import * as api from '../sim/api';
 import { Input } from './input';
@@ -17,6 +20,7 @@ import { Controls } from './controls';
 import { Collider, furnRect } from './collide';
 import { BOX_H, CartonKit, CartonView, HeldView, ProductTemplates, disposeShared, type HeldBox } from './hands';
 import { FallbackHighlight, FallbackPicks, localToWorld, pickOf } from './picking';
+import { setupLandscape } from './landscape';
 
 const EYE = 1.6, RADIUS = 0.3, FOV = 70;
 const WALK = 3.3, CARRY = 2.9, ACCEL = 22, DECEL = 30;
@@ -26,12 +30,18 @@ const BIN_R = 0.8, GRAV = 9.8, DROP_R = 0.26;
 const SEAT_YAW = Math.PI / 3;
 const PITCH_MIN = -1.35, PITCH_MAX = 1.2;
 
-interface Target { pick: PickInfo; key: string; obj: THREE.Object3D | null; point: THREE.Vector3 | null; dist: number }
-interface Act { key: string; label: string; enabled: boolean; hold: boolean; run?: () => boolean | void }
+interface Target { pick: PickInfo; key: string; base: string; obj: THREE.Object3D | null; point: THREE.Vector3 | null; dist: number }
+interface Act { key: string; label: string; enabled: boolean; hold: boolean; run?: () => boolean | void; box?: Box }
 interface Flying { box: Box; view: CartonView; pos: THREE.Vector3; vel: THREE.Vector3; spin: THREE.Vector3; t: number; bounces: number }
 interface Seat { counterId: number; pos: THREE.Vector3; yaw0: number; pitch0: number }
 
-const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}`;
+/** Alvo sem nível (histerese de alcance) e com nível (troca de alvo/destaque também entre níveis do mesmo móvel). */
+const baseOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}`;
+const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}:${p.level ?? ''}`;
+const isDisplay = (f: Furniture): boolean => f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer';
+/** Reserva sem `world.levelAt`: faixa vertical dos níveis por tipo (nível 0 = o de baixo). */
+const LEVEL_BAND: Partial<Record<Furniture['type'], readonly [number, number]>> = { shelf: [0.08, 1.5], fridge: [0.12, 1.9], freezer: [0.1, 0.95] };
+const LEVEL_WHY: Record<string, string> = { 'other-product': 'Outro produto', 'not-accepted': 'Não cabe aqui', full: 'Nível cheio', 'box-empty': 'Caixa vazia', 'box-closed': 'Abrir caixa' };
 const isOpen = (b: Box): boolean => b.open === true;
 const notImpl = (e: unknown): boolean => e instanceof Error && e.message.startsWith('NOT_IMPLEMENTED');
 const clamp = (v: number, a: number, b: number): number => Math.min(b, Math.max(a, v));
@@ -70,14 +80,16 @@ export default function create(): GameModule {
   let forced: PickInfo | null = null;
   let primary: Act | null = null, secondary: Act | null = null;
   let pressed = false;
-  let holding: { key: string; t: number } | null = null;
+  let holding: { key: string; t: number; box: Box | null } | null = null;
   let mopping: { t: number; x: number; z: number } | null = null;
   const flying: Flying[] = [];
   let pendingBox: { box: Box; t: number } | null = null;
   let placingBox: Box | null = null;
   let signCheck = -1;
   const tapTargets = new Map<THREE.Object3D, () => void>();
-  const prefs = { reduceMotion: false, haptics: true, fontScale: 1, colorblind: false };
+  const prefs = { reduceMotion: false, haptics: true, fontScale: 1, colorblind: false, look: 1 };
+  let landLock: ReturnType<typeof setupLandscape> | null = null;
+  const lvlPicks = new Map<string, PickInfo>(); // PickInfo com nível (cache; nunca muta o userData.pick do world)
   let catalog: api.FurnitureSpec[] | null = null;
   const heldList: HeldBox[] = [];
   let stickShown = true;
@@ -88,7 +100,7 @@ export default function create(): GameModule {
   const ray = new THREE.Raycaster();
   const hits: THREE.Intersection[] = [];
   const v2 = new THREE.Vector2();
-  const tv = new THREE.Vector3(), tv2 = new THREE.Vector3();
+  const tv = new THREE.Vector3(), tv2 = new THREE.Vector3(), tv3 = new THREE.Vector3();
   const box3 = new THREE.Box3();
   const euler = new THREE.Euler(0, 0, 0, 'YXZ');
   const wantPos = new THREE.Vector3();
@@ -99,7 +111,7 @@ export default function create(): GameModule {
   const world = (): WorldService | undefined => ctx.services.world;
   const emit = (n: string, p?: unknown): void => ctx.bus.emit(n, p);
   const changed = (what: string): void => emit('stateChanged', { what });
-  const act = (kind: string, extra: { productId?: string; furnitureId?: number } = {}): void => emit('player:action', { kind, ...extra });
+  const act = (kind: string, extra: { productId?: string; furnitureId?: number; level?: number } = {}): void => emit('player:action', { kind, ...extra });
   const sfx = (name: string): void => emit('sfx', { name });
   const toast = (text: string, kind: 'info' | 'good' | 'bad' = 'info'): void => emit('toast', { text, kind });
   const toastErr = (e: unknown): void => toast(e instanceof Error ? e.message : String(e), 'bad');
@@ -119,13 +131,11 @@ export default function create(): GameModule {
     if (k >= 0 && k !== carried.length - 1) { carried.splice(k, 1); carried.push(b); syncTop(); }
   };
   const canAct = (): boolean => !seat && !locked && !override && !building && !mopping && !trans.on && !pendingBox && !placingBox;
-  const fits = (type: Furniture['type'], pid: string): boolean => {
-    try {
-      catalog ??= api.furnitureCatalog();
-      const spec = catalog.find((c) => c.type === type);
-      const p = productById(pid);
-      return !!spec && spec.categories.includes(p.category) && st().licenses.includes(p.category);
-    } catch { return false; }
+  const boxSizeOf = (pid: string): number => { try { return productById(pid).boxSize; } catch { return Infinity; } };
+  /** Nº de níveis do móvel (Furniture.levels; sem migração: slots do tipo). */
+  const levelCount = (f: Furniture): number => {
+    if (Array.isArray(f.levels)) return f.levels.length;
+    try { catalog ??= api.furnitureCatalog(); return catalog.find((c) => c.type === f.type)?.slots ?? 0; } catch { return 0; }
   };
   const binPos = (): { x: number; z: number } => { const w = world(); return w ? w.trashBin() : trashBinPos(storeBounds(st().expansion)); };
   const canDrop = (x: number, z: number): boolean => { try { return api.canDropBox(st(), x, z); } catch { return true; } };
@@ -144,14 +154,16 @@ export default function create(): GameModule {
   };
 
   /* ---------------- preferências ---------------- */
-  const applyPrefs = (p?: { reduceMotion?: unknown; haptics?: unknown; fontSize?: unknown; colorblind?: unknown }): void => {
+  const applyPrefs = (p?: { reduceMotion?: unknown; haptics?: unknown; fontSize?: unknown; colorblind?: unknown; lookSensitivity?: unknown }): void => {
     if (p) {
+      if (typeof p.lookSensitivity === 'number' && Number.isFinite(p.lookSensitivity)) prefs.look = clamp(p.lookSensitivity, 0.4, 2);
       if (typeof p.reduceMotion === 'boolean') prefs.reduceMotion = p.reduceMotion;
       if (typeof p.haptics === 'boolean') prefs.haptics = p.haptics;
       if (typeof p.colorblind === 'boolean') prefs.colorblind = p.colorblind;
       if (typeof p.fontSize === 'string') prefs.fontScale = p.fontSize === 'small' ? 0.9 : p.fontSize === 'large' ? 1.2 : 1;
     }
     controls.setPrefs(prefs);
+    input.sensitivity = prefs.look;
     fbHL.setColor(prefs.colorblind ? 0x3d9bff : 0x2bd94a);
   };
 
@@ -253,14 +265,43 @@ export default function create(): GameModule {
     for (const h of hits) {
       const p = pickOf(h.object);
       if (!p) continue;
-      const key = keyOf(p.info);
+      const base = baseOf(p.info);
       const far = p.info.kind === 'sign' || p.info.kind === 'computer';
-      const lim = (far ? RANGE_FAR : RANGE) + (target?.key === key ? RANGE_HYST : 0);
+      const lim = (far ? RANGE_FAR : RANGE) + (target?.base === base ? RANGE_HYST : 0);
       if (h.distance > lim) return null; // o mais próximo está longe: nada atrás dele conta
       if (collider.blocked(cam.position.x, cam.position.z, h.point.x, h.point.z)) return null;
-      return { pick: p.info, key, obj: p.obj, point: h.point, dist: h.distance };
+      const info = p.info.kind === 'furniture' && p.info.id != null ? withLevel(p.info, h.point) : p.info;
+      return { pick: info, key: keyOf(info), base, obj: p.obj, point: h.point, dist: h.distance };
     }
     return null;
+  };
+  /** Nível do móvel no ponto do raycast: `world.levelAt` (fora dos níveis — tampo, base — o mais próximo na vertical). */
+  const levelAtPoint = (f: Furniture, pt: THREE.Vector3): number | null => {
+    const n = levelCount(f);
+    if (n <= 0) return null;
+    const w = world();
+    if (w?.levelAt) {
+      try {
+        let l = w.levelAt(f.id, pt);
+        for (let k = 1; l == null && k <= 10; k++) {
+          l = w.levelAt(f.id, tv3.set(pt.x, pt.y - k * 0.07, pt.z));
+          if (l == null) l = w.levelAt(f.id, tv3.set(pt.x, pt.y + k * 0.07, pt.z));
+        }
+        if (l != null && Number.isFinite(l)) return clamp(Math.round(l), 0, n - 1);
+      } catch { /* world em andamento: estimativa própria */ }
+    }
+    const [y0, y1] = LEVEL_BAND[f.type] ?? [0.1, 1.5];
+    return clamp(Math.floor(((pt.y - y0) / (y1 - y0)) * n), 0, n - 1);
+  };
+  const withLevel = (info: PickInfo, pt: THREE.Vector3): PickInfo => {
+    const f = st().furniture.find((x) => x.id === info.id);
+    if (!f || !isDisplay(f)) return info;
+    const l = levelAtPoint(f, pt);
+    if (l == null) return info;
+    const k = `${f.id}:${l}`;
+    let pi = lvlPicks.get(k);
+    if (!pi) { pi = { kind: 'furniture', id: f.id, level: l }; lvlPicks.set(k, pi); }
+    return pi;
   };
   const highlight = (t: Target | null): void => {
     const w = world();
@@ -277,7 +318,7 @@ export default function create(): GameModule {
   const updateTarget = (dt: number): void => {
     if (forced) {
       const k = keyOf(forced);
-      if (target?.key !== k) setTarget({ pick: forced, key: k, obj: null, point: null, dist: 1 });
+      if (target?.key !== k) setTarget({ pick: forced, key: k, base: baseOf(forced), obj: null, point: null, dist: 1 });
       return;
     }
     const c = cast();
@@ -319,33 +360,57 @@ export default function create(): GameModule {
   };
 
   /* ---------------- tabela de ações ---------------- */
-  const A = (key: string, label: string, run: () => boolean | void, hold = false): Act => ({ key, label, enabled: true, hold, run });
+  const A = (key: string, label: string, run: () => boolean | void, hold = false, box?: Box): Act => ({ key, label, enabled: true, hold, run, box });
   const D = (key: string, label: string): Act => ({ key, label, enabled: false, hold: false });
 
-  const stockAct = (f: Furniture, b: Box, assign: boolean): Act => {
-    if (!isOpen(b)) return A('open', 'Abrir caixa', () => setOpen(b, true));
-    if (!assign && (st().shelf[b.productId] ?? 0) >= capOf(b.productId)) return D('fullshelf', 'Prateleira cheia');
-    return A(`stock:${f.id}`, 'Repor', () => placeOne(f, b), true);
+  /** `api.canStockLevel` ('box-closed' só quando todo o resto está ok). null = API ainda NOT_IMPLEMENTED (reserva). */
+  const levelCheck = (b: Box, f: Furniture, l: number): api.LevelCheck | null => {
+    const i = idxOf(b);
+    if (i < 0) return 'box-empty';
+    try { return api.canStockLevel(st(), i, f.id, l); } catch (e) { return notImpl(e) ? null : 'not-accepted'; }
   };
-  const displayAct = (f: Furniture): Act => {
-    const s = st();
-    const cur = f.productId;
-    let any = false;
+  const pullAct = (f: Furniture, l: number, b: Box): Act => A(`pull:${f.id}:${l}`, 'Retirar', () => pullOne(f.id, l, b), true, b);
+  /**
+   * Tabela da Fase 4 (por nível): Repor (canStockLevel ok, caixa aberta) > Abrir caixa (fechada que serviria) >
+   * Retirar (caixa aberta VAZIA, nível com unidades) > Abrir caixa (fechada vazia, nível com unidades) > motivo
+   * desabilitado da caixa do topo (Outro produto / Não cabe aqui / Nível cheio / Caixa vazia). Sem caixa: Preço.
+   */
+  const displayAct = (f: Furniture, lIn: number | null): Act => {
+    const n = levelCount(f);
+    const l = lIn != null && lIn >= 0 && lIn < n ? lIn : null;
+    const lv: ShelfLevel | undefined = l != null ? f.levels?.[l] : undefined;
+    if (!carried.length) {
+      const pid = l != null ? lv?.productId : (f.levels?.find((x) => x.productId)?.productId ?? f.productId);
+      return A('price', 'Preço', () => { emit('ui:openTablet', pid ? { tab: 'prices', productId: pid } : { tab: 'prices' }); });
+    }
+    if (l == null) return D('nolevel', 'Mire uma prateleira');
+    const lvUnits = lv?.units ?? 0, lvPid = lv?.productId;
+    // segurando Retirar: continua puxando para a MESMA caixa (ela deixa de estar vazia já na 1ª unidade)
+    const hb = holding?.box;
+    if (hb && holding!.key === `pull:${f.id}:${l}` && carried.includes(hb) && isOpen(hb) && lvUnits > 0 &&
+      hb.productId === lvPid && hb.units < boxSizeOf(hb.productId)) return pullAct(f, l, hb);
+    let openFor: Box | null = null, pullBox: Box | null = null, openPull: Box | null = null, why: string | null = null;
     for (let i = carried.length - 1; i >= 0; i--) {
       const b = carried[i]!;
-      if (b.units <= 0) continue;
-      any = true;
-      if (b.productId === cur) return stockAct(f, b, false);
-    }
-    if (any) {
-      if (cur && (s.shelf[cur] ?? 0) > 0) return D('other', 'Outro produto');
-      for (let i = carried.length - 1; i >= 0; i--) {
-        const b = carried[i]!;
-        if (b.units > 0 && fits(f.type, b.productId)) return stockAct(f, b, true);
+      if (b.units <= 0) {
+        if (lvUnits > 0) { if (isOpen(b)) pullBox ??= b; else openPull ??= b; } else why ??= 'box-empty';
+        continue;
       }
-      return D('nofit', 'Não cabe aqui');
+      const r = levelCheck(b, f, l);
+      if (r === null) { // reserva (sim sem níveis): só o mesmo produto do móvel, via placeUnits
+        if (b.productId !== f.productId) why ??= 'other-product';
+        else if (isOpen(b)) return A(`stock:${f.id}:${l}`, 'Repor', () => placeOne(f.id, l, b), true, b);
+        else openFor ??= b;
+        continue;
+      }
+      if (r === 'ok' && isOpen(b)) return A(`stock:${f.id}:${l}`, 'Repor', () => placeOne(f.id, l, b), true, b);
+      if (r === 'ok' || r === 'box-closed') { openFor ??= b; continue; }
+      why ??= r;
     }
-    return A('price', 'Preço', () => { emit('ui:openTablet', cur ? { tab: 'prices', productId: cur } : { tab: 'prices' }); });
+    const ob = openFor ?? (pullBox ? null : openPull);
+    if (ob) return A('open', 'Abrir caixa', () => setOpen(ob, true));
+    if (pullBox) return pullAct(f, l, pullBox);
+    return D(`why:${why}`, LEVEL_WHY[why ?? ''] ?? 'Outro produto');
   };
   const rackAct = (f: Furniture): Act | null => {
     const t0 = top();
@@ -378,7 +443,7 @@ export default function create(): GameModule {
         const f = s.furniture.find((x) => x.id === t.pick.id);
         if (!f) return;
         const mover = carried.length ? null : A('move', 'Mover', () => { emit('build:edit', { furnitureId: f.id }); act('move', { furnitureId: f.id }); });
-        if (f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer') { primary = displayAct(f); secondary = mover; }
+        if (isDisplay(f)) { primary = displayAct(f, t.pick.level ?? null); secondary = mover; }
         else if (f.type === 'rack') { primary = rackAct(f); secondary = mover; }
         else if (f.type === 'counter') { primary = seatAct(f.id); secondary = mover; }
         else primary = mover;
@@ -438,19 +503,45 @@ export default function create(): GameModule {
     return true;
   };
   const toggleTop = (): void => { const b = top(); if (b && canAct()) setOpen(b, !isOpen(b)); };
-  const placeOne = (f: Furniture, b: Box): boolean => {
+  const furnById = (id: number): Furniture | undefined => st().furniture.find((x) => x.id === id);
+  /** Selo "Produto  n/capacidade · caixa: k" do nível. */
+  const levelBadge = (fid: number, l: number, b: Box): void => {
+    const lv = furnById(fid)?.levels?.[l];
+    const pid = lv?.productId ?? b.productId;
+    let cap = NaN;
+    try { cap = api.levelCapacity(st(), fid, l); } catch { try { cap = productById(pid).slotCapacity; } catch { /* produto desconhecido */ } }
+    const n = lv ? lv.units : (st().shelf[pid] ?? 0);
+    controls.badge(`${nameOf(pid)}  ${n}${Number.isFinite(cap) ? '/' + cap : ''}  ·  caixa: ${b.units}`);
+  };
+  /** Repor 1 unidade da caixa no nível (`placeUnitsInLevel`; reserva sem níveis: `placeUnits`). */
+  const placeOne = (fid: number, l: number, b: Box): boolean => {
     const s = st();
     if (!carried.includes(b) || !isOpen(b) || b.units <= 0) return false;
     toTop(b);
+    const before = furnById(fid)?.levels?.[l]?.productId;
+    let moved = 0;
     try {
-      if (f.productId !== b.productId) { api.assignProduct(s, f.id, b.productId); changed('furniture'); }
-      const moved = api.placeUnits(s, idxOf(b), 1);
-      if (moved <= 0) { toast('Prateleira cheia'); return false; }
+      try { moved = api.placeUnitsInLevel(s, idxOf(b), fid, l, 1); } catch (e) { if (!notImpl(e)) throw e; moved = api.placeUnits(s, idxOf(b), 1); }
     } catch (e) { toastErr(e); return false; }
+    if (moved <= 0) { toast('Nível cheio'); return false; }
     sfx('pop'); haptic(5);
-    act('placeUnits', { productId: b.productId, furnitureId: f.id }); changed('shelf');
-    const cap = capOf(b.productId);
-    controls.badge(`${nameOf(b.productId)}  ${s.shelf[b.productId] ?? 0}${cap === Infinity ? '' : '/' + cap}  ·  caixa: ${b.units}`);
+    act('placeUnits', { productId: b.productId, furnitureId: fid, level: l });
+    if (furnById(fid)?.levels?.[l]?.productId !== before) changed('furniture'); // etiqueta do nível mudou
+    changed('shelf');
+    levelBadge(fid, l, b);
+    return true;
+  };
+  /** Retirar 1 unidade do nível para a caixa (`pullUnitsFromLevel`; caixa vazia passa a ser do produto do nível). */
+  const pullOne = (fid: number, l: number, b: Box): boolean => {
+    if (!carried.includes(b) || !isOpen(b)) return false;
+    toTop(b);
+    let moved = 0;
+    try { moved = api.pullUnitsFromLevel(st(), idxOf(b), fid, l, 1); } catch (e) { toastErr(e); return false; }
+    if (moved <= 0) return false;
+    sfx('pop'); haptic(5);
+    act('pullUnits', { productId: b.productId, furnitureId: fid, level: l });
+    changed('shelf'); changed('sidewalk');
+    levelBadge(fid, l, b);
     return true;
   };
   const discard = (b: Box): boolean => {
@@ -766,7 +857,7 @@ export default function create(): GameModule {
     if (!a) return;
     if (!a.enabled) { controls.denied(); sfx('error'); haptic(25); return; }
     const r = a.run?.();
-    if (a.hold && r !== false) holding = { key: a.key, t: 0 };
+    if (a.hold && r !== false) holding = { key: a.key, t: 0, box: a.box ?? null };
   };
   const actionUp = (): void => { pressed = false; holding = null; };
   const tickHold = (dt: number): void => {
@@ -873,7 +964,8 @@ export default function create(): GameModule {
         } else endBuild(e?.placed);
       });
       on('build:end', (e?: { placed?: boolean }) => { if (building || placingBox) endBuild(e?.placed); });
-      on('settings:changed', (p?: { reduceMotion?: unknown; haptics?: unknown; fontSize?: unknown; colorblind?: unknown }) => applyPrefs(p));
+      on('settings:changed', (p?: { reduceMotion?: unknown; haptics?: unknown; fontSize?: unknown; colorblind?: unknown; lookSensitivity?: unknown }) => applyPrefs(p));
+      landLock = setupLandscape();
 
       const w = window as unknown as { __player?: unknown };
       w.__player = {
@@ -892,7 +984,24 @@ export default function create(): GameModule {
           const dx = x - pos.x, dy = y - EYE, dz = z - pos.z;
           yaw = Math.atan2(-dx, -dz); pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), PITCH_MIN, PITCH_MAX);
         },
-        target: () => (target ? { kind: target.pick.kind, id: target.pick.id ?? null, dist: +target.dist.toFixed(2) } : null),
+        target: () => (target ? { kind: target.pick.kind, id: target.pick.id ?? null, level: target.pick.level ?? null, dist: +target.dist.toFixed(2) } : null),
+        /** Mira (de onde está) um nível do móvel pelo caminho real (raycast + levelAt), varrendo a altura no centro do móvel. */
+        aimLevel: (fid: number, level: number): boolean => {
+          const f = furnById(fid);
+          if (!f) return false;
+          const r = furnRect(f), cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+          for (let y = 0.04; y <= 2.2; y += 0.04) {
+            const dx = cx - pos.x, dy = y - EYE, dz = cz - pos.z;
+            yaw = Math.atan2(-dx, -dz); pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), PITCH_MIN, PITCH_MAX);
+            desiredPose();
+            ctx.camera.position.copy(wantPos); ctx.camera.quaternion.copy(wantQuat); ctx.camera.updateMatrixWorld(true);
+            const c = cast();
+            if (c && c.pick.kind === 'furniture' && c.pick.id === fid && c.pick.level === level) { setTarget(c); return true; }
+          }
+          return false;
+        },
+        landscape: () => landLock?.info() ?? null,
+        prefs: () => ({ ...prefs, sensitivity: input.sensitivity }),
         actions: () => ({ primary: primary ? { label: primary.label, enabled: primary.enabled } : null, secondary: secondary?.label ?? null }),
         forceTarget: (p: PickInfo | null) => { forced = p; setTarget(null); },
         press: () => { actionDown(); actionUp(); },
@@ -1001,6 +1110,7 @@ export default function create(): GameModule {
 
     dispose() {
       for (const o of offs) o();
+      landLock?.dispose();
       setTarget(null);
       for (const f of flying) f.view.dispose();
       if (probe) { probe.removeFromParent(); probe.geometry.dispose(); (probe.material as THREE.Material).dispose(); probe = null; }

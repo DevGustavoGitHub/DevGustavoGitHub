@@ -65,6 +65,8 @@ export class Picks {
   private cur: PickInfo | null = null;
   private tmp = new THREE.Matrix4();
   private S = new THREE.Matrix4();
+  /** FASE 4: caixas locais de UM nível do móvel (destaque só do nível mirado); null/ausente = silhueta inteira. */
+  levelBoxes: ((p: PickInfo) => readonly SBox[] | null) | null = null;
 
   constructor(stencil: boolean) {
     this.group.name = 'pickGroup';
@@ -112,7 +114,7 @@ export class Picks {
 
   /** Contorno no alvo (null remove). Tolera alvos que deixaram de existir. */
   highlight(p: PickInfo | null): void {
-    this.cur = p ? { kind: p.kind, id: p.id } : null;
+    this.cur = p ? { kind: p.kind, id: p.id, ...(Number.isInteger(p.level) ? { level: p.level } : {}) } : null;
     const src = p ? this.srcs.get(keyOf(p)) : undefined;
     this.stencilMesh.visible = this.hullMesh.visible = this.ring.visible = false;
     if (!src) return;
@@ -121,11 +123,12 @@ export class Picks {
       this.ring.visible = true;
       return;
     }
-    const key = src.boxes.map((b) => b.map((n) => n.toFixed(3)).join(',')).join('|');
+    const boxes = (this.cur?.level !== undefined && this.levelBoxes?.(this.cur)) || src.boxes;
+    const key = boxes.map((b) => b.map((n) => n.toFixed(3)).join(',')).join('|');
     let geo = this.hullCache.get(key);
     if (!geo) {
       if (this.hullCache.size > 64) { this.hullCache.forEach((g) => g.dispose()); this.hullCache.clear(); }
-      geo = hullGeometry(src.boxes);
+      geo = hullGeometry(boxes);
       this.hullCache.set(key, geo);
     }
     for (const m of [this.stencilMesh, this.hullMesh]) {

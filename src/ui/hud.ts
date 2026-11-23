@@ -6,7 +6,7 @@
  */
 import { dailyWages, xpForLevel } from '../sim/economy';
 import { billSvg, cartSvg, gearSvg, starSvg } from './art';
-import { h, money } from './dom';
+import { h, money, tapOn } from './dom';
 import type { ToastKind, UiKit } from './kit';
 
 export interface HudHooks {
@@ -43,15 +43,15 @@ export class Hud {
   constructor(private kit: UiKit, private root: HTMLElement, hooks: HudHooks) {
     const { ctx } = kit;
     this.shownMoney = ctx.state.money;
-    this.levelBtn = h('button', { class: 'hpill lvl3', 'aria-label': 'Nível e novidades', on: { click: () => hooks.openLevel() } },
+    this.levelBtn = h('button', { class: 'hpill lvl3', 'aria-label': 'Nível e novidades', on: tapOn(() => hooks.openLevel()) },
       h('span', { class: 'lvl-star', html: starSvg(42) }, this.lvlNum), h('span', { class: 'xp3' }, this.xpFill), this.dot);
-    this.moneyBtn = h('button', { class: 'hpill money3', 'aria-label': 'Dinheiro em caixa (abre Finanças)', on: { click: () => hooks.openTablet('finance') } },
+    this.moneyBtn = h('button', { class: 'hpill money3', 'aria-label': 'Dinheiro em caixa (abre Finanças)', on: tapOn(() => hooks.openTablet('finance')) },
       h('span', { html: billSvg(34) }), this.moneyEl);
-    const gear = h('button', { class: 'hpill gear3', 'aria-label': 'Menu', html: gearSvg(28), on: { click: () => hooks.openMenu() } });
+    const gear = h('button', { class: 'hpill gear3', 'aria-label': 'Menu', html: gearSvg(28), on: tapOn(() => hooks.openMenu()) });
     this.hud = h('div', { class: 'hud hud3' }, h('div', { class: 'hud-l' }), this.badge, h('div', { class: 'hud-r' }, this.levelBtn, this.moneyBtn, gear));
     this.top = h('div', { class: 'mx-top' }, this.hud, this.toasts);
     this.slot = h('div', { class: 'mslot' });
-    this.cartBtn = h('button', { class: 'cart-fab', 'aria-label': 'Abrir mercado (computador)', title: 'Mercado (M)', html: cartSvg(30), on: { click: () => hooks.openTablet('market') } });
+    this.cartBtn = h('button', { class: 'cart-fab', 'aria-label': 'Abrir mercado (computador)', title: 'Mercado (M)', html: cartSvg(30), on: tapOn(() => hooks.openTablet('market')) });
     root.append(this.top, this.slot, this.cartBtn);
 
     const bus = ctx.bus;

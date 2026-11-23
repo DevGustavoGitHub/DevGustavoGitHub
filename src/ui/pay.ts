@@ -6,7 +6,7 @@
  * player não bipar por trás.
  */
 import { DRAWER_BILLS, DRAWER_COINS, customerCashPayment, optimalChange, sum, type Cents } from '../sim/money';
-import { clamp, h, money } from './dom';
+import { clamp, h, money, tapOn } from './dom';
 import { icon } from './icons';
 import type { UiKit } from './kit';
 
@@ -54,6 +54,7 @@ export class PayPanel {
   private done = false;
   private doneT = 0;
   private keyHandler = (e: KeyboardEvent): void => this.onKey(e);
+  private onResize = (): void => this.reorderPad();
   private refresh: () => void = () => {};
 
   constructor(private kit: UiKit, private layer: HTMLElement) {}
@@ -76,9 +77,11 @@ export class PayPanel {
       this.body);
     if (cash) this.renderCash(); else this.renderCard();
     this.layer.appendChild(this.el);
+    this.reorderPad();
     this.layer.classList.add('hud-over');
     this.kit.modalOpen('pay', { onEsc: () => void this.cancel() });
     window.addEventListener('keydown', this.keyHandler);
+    window.addEventListener('resize', this.onResize);
     this.kit.sfx('pop');
     this.display();
   }
@@ -91,7 +94,7 @@ export class PayPanel {
       const face = bill
         ? h('span', { class: 'bill3', style: `--c1:${c1};--c2:${c2}` }, h('i', null, 'R$'), h('b', null, String(d / 100)))
         : h('span', { class: `coin3${d === 100 ? ' bimetal' : ''}`, style: `--c1:${c1};--c2:${c2}` }, coinLabel(d));
-      return h('button', { class: 'pay-den', 'data-den': d, 'aria-label': denLabel(d), on: { click: () => this.give(d) } }, h('small', null, bill ? `R$ ${d / 100}` : d >= 100 ? 'R$ 1' : `${d}¢`), face);
+      return h('button', { class: 'pay-den', 'data-den': d, 'aria-label': denLabel(d), on: tapOn(() => this.give(d)) }, h('small', null, bill ? `R$ ${d / 100}` : d >= 100 ? 'R$ 1' : `${d}¢`), face);
     };
     this.refresh = (): void => {
       const giving = sum(this.picked);
@@ -105,9 +108,9 @@ export class PayPanel {
       h('div', { class: 'pay-row bills' }, BILLS3.map((d) => den(d, true))),
       h('div', { class: 'pay-row coins' }, COINS3.map((d) => den(d, false))),
       h('div', { class: 'pay-act' },
-        h('button', { class: 'pk blue', 'aria-label': 'Desfazer', html: icon('undo', 28), on: { click: () => { this.picked.pop(); this.changed(); } } }),
-        h('button', { class: 'pk green', id: 'pay-ok', on: { click: () => this.confirmCash() } }, 'OK'),
-        h('button', { class: 'pk red', 'aria-label': 'Limpar', on: { click: () => { this.picked = []; this.changed(); } } }, 'C')));
+        h('button', { class: 'pk blue', 'aria-label': 'Desfazer', html: icon('undo', 28), on: tapOn(() => { this.picked.pop(); this.changed(); }) }),
+        h('button', { class: 'pk green', id: 'pay-ok', on: tapOn(() => this.confirmCash()) }, 'OK'),
+        h('button', { class: 'pk red', 'aria-label': 'Limpar', on: tapOn(() => { this.picked = []; this.changed(); }) }, 'C')));
     this.refresh();
   }
 
@@ -139,7 +142,7 @@ export class PayPanel {
     const screen = h('b', { id: 'pay-typed' });
     this.refresh = (): void => { screen.textContent = `R$ ${this.typed || '0'}`; };
     const key = (label: string, fn: () => void, cls = 'blue', aria?: string, htmlLabel?: string): HTMLElement =>
-      h('button', { class: `pk ${cls}`, 'data-key': label, 'aria-label': aria ?? label, html: htmlLabel, on: { click: () => { fn(); this.kit.sfx('pop'); this.kit.settings.buzz(6); this.changed(); } } }, htmlLabel ? null : label);
+      h('button', { class: `pk ${cls}`, 'data-key': label, 'aria-label': aria ?? label, html: htmlLabel, on: tapOn(() => { if (this.done) return; fn(); this.kit.sfx('pop'); this.kit.settings.buzz(6); this.changed(); }) }, htmlLabel ? null : label);
     const digit = (n: number): HTMLElement => key(String(n), () => this.typeChar(String(n)));
     this.body.append(
       h('div', { class: 'pay-screen' }, h('span', null, 'Total', h('small', { class: 'due-in' }, `cobrar ${money(this.req?.total ?? 0)}`)), screen),
@@ -148,22 +151,24 @@ export class PayPanel {
         [1, 2, 3].map(digit), key('⌫', () => { this.typed = this.typed.slice(0, -1); }, 'blue', 'Apagar', icon('backspace', 26)),
         [4, 5, 6].map(digit), key(',', () => this.typeChar(','), 'blue', 'Vírgula'),
         [7, 8, 9].map(digit), digit(0),
-        h('button', { class: 'pk green ok', id: 'pay-ok', on: { click: () => this.confirmCard() } }, 'OK'),
+        h('button', { class: 'pk green ok', id: 'pay-ok', on: tapOn(() => this.confirmCard()) }, 'OK'),
         key('C', () => { this.typed = ''; }, 'red', 'Limpar')));
-    this.reorderPad();
     this.refresh();
   }
 
-  /** Teclado 3 colunas (1-9 / ⌫ 0 , / OK C) ou 4 colunas em telas baixas (o CSS decide a grade; aqui a ordem). */
+  /**
+   * Ordem das teclas conforme as colunas que o CSS deu à grade (medidas depois de montar): 3 colunas
+   * (1-9 / ⌫ 0 , / OK C), 4 colunas em telas baixas ou 5 colunas (3 linhas) nas muito baixas — sem rolagem.
+   */
   private reorderPad(): void {
-    const pad = this.el?.querySelector('.pay-pad') ?? this.body.querySelector('.pay-pad');
+    const pad = this.el?.querySelector<HTMLElement>('.pay-pad');
     if (!pad) return;
     const k = (s: string): Element | null => pad.querySelector(`[data-key="${s}"]`);
     const ok = pad.querySelector('#pay-ok');
-    const four = window.innerHeight <= 420;
-    const order = four
-      ? ['1', '2', '3', '⌫', '4', '5', '6', ',', '7', '8', '9', '0', 'C', 'OK']
-      : ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', ',', 'OK', 'C'];
+    const cols = getComputedStyle(pad).gridTemplateColumns.split(' ').filter(Boolean).length;
+    const order = cols >= 5 ? ['1', '2', '3', '⌫', 'C', '4', '5', '6', ',', '0', '7', '8', '9', 'OK']
+      : cols === 4 ? ['1', '2', '3', '⌫', '4', '5', '6', ',', '7', '8', '9', '0', 'C', 'OK']
+        : ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', ',', 'OK', 'C'];
     for (const s of order) { const e = s === 'OK' ? ok : k(s); if (e) pad.appendChild(e); }
   }
 
@@ -252,6 +257,7 @@ export class PayPanel {
   close(): void {
     window.clearTimeout(this.doneT);
     window.removeEventListener('keydown', this.keyHandler);
+    window.removeEventListener('resize', this.onResize);
     this.el?.remove();
     this.el = null;
     this.req = null;

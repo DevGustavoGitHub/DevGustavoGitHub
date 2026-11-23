@@ -13,7 +13,7 @@ import { FURNITURE_FOOTPRINT, STORAGE_DEPTH, type Bounds, type FurnitureType } f
 import type { Box, Furniture } from '../sim/state';
 import * as api from '../sim/api';
 import { productById } from '../sim/catalog';
-import { chairGeos, furnitureGeos, SEAT } from './furniture';
+import { chairGeos, furnitureGeos, levelCountOf, SEAT } from './furniture';
 import { BOX_D, BOX_W, boxGeometry } from './products';
 
 type Rot = 0 | 90 | 180 | 270;
@@ -45,7 +45,7 @@ const FEM: Record<FurnitureType, boolean> = { shelf: true, fridge: true, freezer
 const ghostCache = new Map<string, THREE.BufferGeometry>();
 /** Fantasma: todas as geometrias do móvel numa só (1 draw call), cadeira incluída no balcão. */
 function ghostGeometry(f: Furniture): THREE.BufferGeometry {
-  const key = `${f.type}|${f.productId ?? ''}|${f.variant ?? ''}`;
+  const key = `${f.type}|${levelCountOf(f)}|${f.variant ?? ''}`; // Fase 4: tábuas = nº de níveis (cores não importam no fantasma)
   let g = ghostCache.get(key);
   if (g) return g;
   const parts: THREE.BufferGeometry[] = [];
@@ -65,6 +65,7 @@ export class BuildMode {
   private type: FurnitureType = 'shelf';
   private productId: string | undefined;
   private variant: string | undefined;
+  private levels: Furniture['levels'];
   private stockIndex = -1;
   private editId = 0;
   private box: Box | null = null;
@@ -113,7 +114,7 @@ export class BuildMode {
     }
     if (!FURNITURE_FOOTPRINT[type]) return;
     this.kind = 'furniture'; this.mode = this.stockIndex >= 0 ? 'stock' : 'buy';
-    this.type = type; this.variant = variant; this.productId = type === 'decor' ? undefined : p.productId;
+    this.type = type; this.variant = variant; this.productId = type === 'decor' ? undefined : p.productId; this.levels = undefined;
     this.rot = 0; this.cost = null;
     if (this.mode === 'buy') { try { this.cost = api.furnitureCatalog().find((s) => s.type === type)?.cost ?? null; } catch { /* */ } }
     this.begin();
@@ -124,7 +125,7 @@ export class BuildMode {
     if (!f) return;
     this.end(false);
     this.kind = 'furniture'; this.mode = 'edit'; this.editId = id;
-    this.type = f.type; this.productId = f.productId; this.variant = f.variant;
+    this.type = f.type; this.productId = f.productId; this.variant = f.variant; this.levels = f.levels;
     this.x = f.x; this.z = f.z; this.rot = f.rot; this.cost = null;
     this.d.hide(id);
     this.begin();
@@ -186,7 +187,7 @@ export class BuildMode {
       this.foot = new THREE.Mesh(this.footGeo, this.footBox);
       this.foot.scale.set(BOX_W + 0.08, 1, BOX_D + 0.08);
     } else {
-      const f: Furniture = { id: -1, type: this.type, x: 0, z: 0, rot: 0, productId: this.productId, variant: this.variant };
+      const f: Furniture = { id: -1, type: this.type, x: 0, z: 0, rot: 0, productId: this.productId, variant: this.variant, levels: this.levels };
       this.ghost = new THREE.Mesh(ghostGeometry(f), this.okMat);
       this.foot = new THREE.Mesh(this.footGeo, this.footOk);
     }

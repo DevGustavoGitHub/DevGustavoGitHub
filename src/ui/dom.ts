@@ -29,6 +29,26 @@ function append(el: Node, kids: Child[]): void {
   }
 }
 
+/**
+ * Fase 4 (multitoque): ação no `pointerdown` — não espera o `click`, que o navegador descarta quando outro dedo
+ * (ex.: no joystick) está na tela. O `click` só age quando vem do teclado/leitor de tela (`detail === 0`).
+ * Uso: `h('button', { on: tapOn(fn) })`. Não usar em listas roláveis (o toque para rolar dispararia a ação).
+ */
+export function tapOn(fn: () => void): Record<string, (e: Event) => void> {
+  let fired = false;
+  return {
+    pointerdown: (e) => {
+      const pe = e as PointerEvent;
+      if (pe.button > 0 || (pe.currentTarget as HTMLButtonElement | null)?.disabled) return;
+      fired = pe.pointerType === 'touch';
+      fn();
+    },
+    // cancela o clique sintético do toque: sem isso ele cairia no painel que acabou de abrir sob o dedo ("clique fantasma")
+    touchend: (e) => { if (fired) { fired = false; if (e.cancelable) e.preventDefault(); } },
+    click: (e) => { if ((e as MouseEvent).detail === 0) fn(); },
+  };
+}
+
 export const clear = (el: Element): void => { while (el.firstChild) el.removeChild(el.firstChild); };
 
 /** `R$ 1.234,50` — dinheiro em centavos. */

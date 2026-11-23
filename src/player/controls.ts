@@ -2,6 +2,7 @@
  * Controles de jogo na tela (dono: player, z-index 30): mira central, botão de AÇÃO grande (mão + rótulo, anel verde
  * quando há alvo), Arremessar / Largar / Abrir-Fechar caixa (com caixa na mão), Mover (secundário) e o botão laranja
  * "Sair do caixa" (sentado). O contêiner não captura toques; só os botões (≥ 48 px) capturam.
+ * Fase 4: todos agem no `pointerdown` (multitoque independente do joystick), `touch-action:none` em todos.
  */
 import { ICON_BOX_CLOSE, ICON_BOX_OPEN, ICON_DROP, ICON_EXIT, ICON_HAND, ICON_MOVE, ICON_THROW } from './icons';
 
@@ -51,7 +52,7 @@ const CSS = `
 .pl-exit{position:absolute;right:calc(var(--pl-r) + 14px);top:50%;transform:translateY(-50%);pointer-events:auto;border:0;min-height:58px;padding:0 18px 0 14px;
   border-radius:16px;display:none;align-items:center;gap:10px;color:#fff;font:900 calc(17px * var(--pl-fs))/1.05 system-ui,sans-serif;text-transform:uppercase;
   letter-spacing:.02em;background:linear-gradient(180deg,#ffad33,#f28a00);box-shadow:0 4px 0 #b45f00,0 6px 16px rgba(0,0,0,.25);cursor:pointer;
-  touch-action:manipulation;-webkit-tap-highlight-color:transparent;text-align:left;outline:none}
+  touch-action:none;-webkit-tap-highlight-color:transparent;text-align:left;outline:none}
 .pl-exit svg{width:30px;height:30px;flex:none}
 .pl-exit:active{transform:translateY(calc(-50% + 3px));box-shadow:0 1px 0 #b45f00}
 .pl-exit:focus-visible{box-shadow:0 0 0 3px #fff,0 4px 0 #b45f00}
@@ -87,6 +88,8 @@ export class Controls {
   private lastAct = '';
   private lastSlots = '';
   private boxIsOpen: boolean | null = null;
+  /** pointerId que está segurando o botão de ação (null = solto). */
+  private holdId: number | null = null;
 
   constructor(parent: HTMLElement, private readonly h: ControlHandlers) {
     this.style = document.createElement('style');
@@ -130,27 +133,50 @@ export class Controls {
     parent.appendChild(this.root);
     this.layout();
 
-    // ação: pressionar/segurar (Repor repete enquanto segura)
+    // FASE 4 (multitoque): tudo age no `pointerdown` — um `click` não sai quando outro dedo está no joystick.
+    // Ação: pressionar/segurar (Repor/Retirar repetem); só o MESMO ponteiro que apertou solta o botão.
     const b = this.mainBtn;
     b.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
+      if (e.button > 0) return; // botão direito/meio do mouse
+      e.preventDefault(); // só neste alvo: não afeta os dedos do joystick/olhar
+      if (this.holdId !== null) return; // já seguro por outro dedo
+      this.holdId = e.pointerId;
       try { b.setPointerCapture(e.pointerId); } catch { /* ponteiro sintético */ }
       b.classList.add('pressed');
       this.h.actionDown();
     });
-    const release = (): void => { if (b.classList.contains('pressed')) { b.classList.remove('pressed'); this.h.actionUp(); } };
+    const release = (e: PointerEvent): void => {
+      if (e.pointerId !== this.holdId) return;
+      this.holdId = null;
+      b.classList.remove('pressed');
+      this.h.actionUp();
+    };
     b.addEventListener('pointerup', release);
     b.addEventListener('pointercancel', release);
     b.addEventListener('lostpointercapture', release);
     b.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); this.h.actionDown(); } });
     b.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') this.h.actionUp(); });
     b.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.slots.throw.btn.addEventListener('click', () => this.h.throwBox());
-    this.slots.drop.btn.addEventListener('click', () => this.h.dropBox());
-    this.slots.box.btn.addEventListener('click', () => this.h.toggleBox());
-    this.slots.move.btn.addEventListener('click', () => this.h.secondary());
-    this.exitBtn.addEventListener('click', () => this.h.exitSeat());
-    for (const s of Object.values(this.slots)) s.btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    const tapBtn = (btn: HTMLButtonElement, fn: () => void): void => {
+      btn.addEventListener('pointerdown', (e) => {
+        if (e.button > 0) return;
+        e.preventDefault();
+        btn.classList.add('pressed');
+        fn();
+      });
+      const up = (): void => btn.classList.remove('pressed');
+      btn.addEventListener('pointerup', up);
+      btn.addEventListener('pointercancel', up);
+      btn.addEventListener('pointerleave', up);
+      // teclado/leitor de tela (click sem ponteiro, detail 0); o click de um toque/clique (detail ≥ 1) já agiu no pointerdown
+      btn.addEventListener('click', (e) => { if (e.detail === 0) fn(); });
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    };
+    tapBtn(this.slots.throw.btn, () => this.h.throwBox());
+    tapBtn(this.slots.drop.btn, () => this.h.dropBox());
+    tapBtn(this.slots.box.btn, () => this.h.toggleBox());
+    tapBtn(this.slots.move.btn, () => this.h.secondary());
+    tapBtn(this.exitBtn, () => this.h.exitSeat());
   }
 
   /** Posição dos botões pequenos em arco à esquerda/acima do botão de ação (centro em right 84, bottom 94). */
@@ -226,7 +252,7 @@ export class Controls {
   }
 
   /** Solta o botão de ação (ex.: modal abriu no meio do toque). */
-  release(): void { this.mainBtn.classList.remove('pressed'); }
+  release(): void { this.holdId = null; this.mainBtn.classList.remove('pressed'); }
 
   update(dt: number): void {
     if (this.badgeT > 0) { this.badgeT -= dt; if (this.badgeT <= 0) this.badgeEl.style.opacity = '0'; }

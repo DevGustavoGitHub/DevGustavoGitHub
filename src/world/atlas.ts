@@ -3,9 +3,9 @@
  * Trocar N texturas/materiais por 1 permite fundir geometria e instanciar sem multiplicar draw calls.
  */
 import * as THREE from 'three';
-import { PRODUCTS, productById } from '../sim/catalog';
+import { LICENSES, PRODUCTS, productById } from '../sim/catalog';
 import { makeCanvas, canvasTex } from './kit';
-import { categoryColor, css } from './look';
+import { categoryColor, categoryColorOf, css } from './look';
 
 export interface Cell { u0: number; v0: number; du: number; dv: number }
 
@@ -57,12 +57,14 @@ export function uvToWhite(g: THREE.BufferGeometry, c: Cell): THREE.BufferGeometr
 /* ---- placas de topo de prateleira ---- */
 let signs: Atlas | null = null;
 let signMat: THREE.MeshStandardMaterial | null = null;
-const signAtlas = (): Atlas => signs ??= new Atlas(['-', ...PRODUCTS.map((p) => p.id)], 2, 512, 96, (g, key, w, h) => {
-  const pid = key === '-' ? undefined : key;
-  g.fillStyle = css(categoryColor(pid)); g.fillRect(0, 0, w, h);
+/** Chaves: '-' (VAZIO), id de produto, ou `cat:<categoria>` (Fase 4: móvel com níveis de produtos diferentes). */
+const signAtlas = (): Atlas => signs ??= new Atlas(['-', ...PRODUCTS.map((p) => p.id), ...LICENSES.map((l) => `cat:${l.id}`)], 2, 512, 96, (g, key, w, h) => {
+  const cat = key.startsWith('cat:') ? LICENSES.find((l) => `cat:${l.id}` === key) : undefined;
+  const pid = key === '-' || cat ? undefined : key;
+  g.fillStyle = css(cat ? categoryColorOf(cat.id) : categoryColor(pid)); g.fillRect(0, 0, w, h);
   g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(0, 0, w, h * 0.125);
   g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  let text = 'VAZIO';
+  let text = cat ? cat.name : 'VAZIO';
   if (pid) { try { text = productById(pid).name; } catch { text = pid; } }
   fitText(g, text, w * 0.9, h * 0.58);
   g.fillText(text, w / 2, h * 0.54);

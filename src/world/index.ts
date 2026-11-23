@@ -15,6 +15,7 @@ import { Env, TRASH_SILHOUETTE } from './env';
 import {
   BELT_SLOTS, BELT_Y, DESK_SIZE, HANDOFF, SCANNER, SEAT, chairGeos, chairSilhouette, deskGeos, deskSilhouette, furnitureGeos,
   furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, silhouetteOf, type SBox,
+  isDisplayType, levelCountOf, levelGeoms, levelHeights, levelIndexAt, levelPids, levelVisible,
 } from './furniture';
 import { BoxLayer, ItemLayer, BOX_H, BOX_W, BOX_D, genericVisual, productVisual, makeProductMesh, makeBoxMesh, type BoxInst } from './products';
 import { SHAPES } from './look';
@@ -194,6 +195,39 @@ export default function create(): GameModule {
     return Math.min(1, qty / cap);
   }
 
+  /* ---------------- níveis (Fase 4) ---------------- */
+  interface LevelView { pid?: string; units: number; fill: number }
+  /** Níveis do móvel para desenhar: `Furniture.levels` (fonte da verdade: produto e unidades POR NÍVEL; fill = units /
+   *  slotCapacity). Reserva sem `levels` (save/sim antigo): todos os níveis com o produto do móvel e a fração do estoque somado. */
+  function levelsOf(v: View, f: Furniture): LevelView[] {
+    if (!isDisplayType(f.type)) return [];
+    const raw = Array.isArray(f.levels) && f.levels.length ? f.levels : null;
+    const legacy = raw ? 0 : fillFraction(v, f);
+    return levelPids(f).map((pid, i): LevelView => {
+      if (!pid) return { units: 0, fill: 0 };
+      let cap = 0;
+      try { cap = productById(pid).slotCapacity; } catch { /* produto desconhecido */ }
+      if (!raw) return { pid, units: Math.round(legacy * cap), fill: legacy };
+      const u = Number(raw[i]?.units);
+      const units = Number.isFinite(u) && u > 0 ? u : 0;
+      return { pid, units, fill: units > 0 ? Math.min(1, units / (cap > 0 ? cap : units)) : 0 };
+    });
+  }
+  const LM = new THREE.Matrix4(), LI = new THREE.Matrix4(), LP = new THREE.Vector3();
+  function levelAt(id: number, point: THREE.Vector3): number | null {
+    const f = view().furniture.find((x) => x.id === id);
+    if (!f || !isDisplayType(f.type) || !point) return null;
+    LP.copy(point).applyMatrix4(LI.copy(furnitureMatrix(f, LM)).invert());
+    return levelIndexAt(f.type, levelCountOf(f), LP.x, LP.y, LP.z);
+  }
+  /** Região (caixa local) do nível para o contorno de destaque. */
+  function levelBoxes(p: PickInfo): SBox[] | null {
+    if (p.kind !== 'furniture' || p.id === undefined || p.level === undefined) return null;
+    const f = view().furniture.find((x) => x.id === p.id);
+    const g = f ? levelGeoms(f.type, levelCountOf(f))[p.level] : undefined;
+    return g ? [g.box] : null;
+  }
+
   /* ---------------- móveis ---------------- */
   function centerOf(f: Furniture): { cx: number; cz: number } {
     const fp = footprintOf(f);
@@ -241,20 +275,24 @@ export default function create(): GameModule {
       furniGroup.remove(e.group); entries.delete(id); geoChanged = true;
     }
     screens.prune(new Set(v.furniture.filter((f) => f.type === 'counter').map((f) => f.id)));
-    const fk = `${hiddenId ?? ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${f.productId ?? ''}:${f.variant ?? ''}`).join(',');
+    const lvls = new Map<number, LevelView[]>();
+    for (const f of v.furniture) if (isDisplayType(f.type)) lvls.set(f.id, levelsOf(v, f));
+    const lp = (f: Furniture): string => (lvls.get(f.id) ?? []).map((l) => l.pid ?? '').join('/');
+    const fk = `${hiddenId ?? ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${lp(f)}:${f.variant ?? ''}`).join(',');
     if (fk !== furniKey) {
       furniKey = fk;
       placeDesk(v);
-      rebuildStatic(v);
-      tags.rebuild(v.furniture, hiddenId);
+      rebuildStatic(v, lvls);
       picksDirty = true;
     }
-    const ik = fk + '|' + v.furniture.map((f) => Math.round(fillFraction(v, f) * 48)).join(',');
-    if (ik !== itemsKey) { itemsKey = ik; rebuildItems(v); }
+    // etiquetas por nível (a malha só é refeita quando produto/esgotado de algum nível muda)
+    tags.rebuild(v.furniture.filter((f) => f.id !== hiddenId && lvls.has(f.id)).map((f) => ({ f, levels: lvls.get(f.id)!.map((l) => ({ pid: l.pid, empty: !(l.fill > 0) })) })));
+    const ik = fk + '|' + v.furniture.map((f) => (lvls.get(f.id) ?? []).map((l, i, a) => levelVisible(f.type, a.length, i, l.pid, l.fill)).join('/')).join(',');
+    if (ik !== itemsKey) { itemsKey = ik; rebuildItems(v, lvls); }
     const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|${desk ? `${desk.tx},${desk.tz}` : '-'}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
   }
-  function rebuildStatic(v: View): void {
+  function rebuildStatic(v: View, lvls: Map<number, LevelView[]>): void {
     for (const m of [...furniStatic.children]) furniStatic.remove(m);
     staticGeos.forEach((g) => g.dispose()); staticGeos.length = 0;
     const occ = occupied(v);
@@ -263,7 +301,7 @@ export default function create(): GameModule {
     for (const f of v.furniture) {
       if (f.id === hiddenId) continue;
       furnitureMatrix(f, M);
-      parts.push({ geos: furnitureGeos(f), matrix: M.clone() });
+      parts.push({ geos: furnitureGeos(f, lvls.get(f.id)?.map((l) => l.pid)), matrix: M.clone() });
       if (f.type === 'counter') {
         const { cx, cz } = centerOf(f);
         const op = localToWorld(cx, cz, f.rot, SEAT.x, SEAT.z);
@@ -277,16 +315,14 @@ export default function create(): GameModule {
     const merged = combine(parts);
     for (const mesh of meshesOf(merged, furniStatic, { order: 2 })) staticGeos.push(mesh.geometry);
   }
-  function rebuildItems(v: View): void {
+  /** Itens expostos POR NÍVEL (cada nível só com o seu produto), 1 InstancedMesh por produto na ItemLayer. */
+  function rebuildItems(v: View, lvls: Map<number, LevelView[]>): void {
     const by = new Map<string, number[]>();
     for (const f of v.furniture) {
-      if (f.id === hiddenId || !f.productId) continue;
+      const lv = lvls.get(f.id);
+      if (f.id === hiddenId || !lv) continue;
       const { cx, cz } = centerOf(f);
-      const mats = furnitureItems(f, fillFraction(v, f), cx, cz);
-      if (!mats.length) continue;
-      let arr = by.get(f.productId);
-      if (!arr) by.set(f.productId, (arr = []));
-      for (let i = 0; i < mats.length; i++) arr.push(mats[i]!);
+      furnitureItems(f, lv, cx, cz, by);
     }
     itemLayer.setSource('furniture', by);
   }
@@ -433,8 +469,8 @@ export default function create(): GameModule {
   const displayPids = new Set<string>();
   function refreshTags(v: View): void {
     displayPids.clear();
-    for (const f of v.furniture) if (f.productId && (f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer')) displayPids.add(f.productId);
-    tags.refresh(displayPids, (pid) => priceCache.get(pid) ?? 0, (pid) => v.shelf[pid] ?? 0);
+    for (const f of v.furniture) for (const p of levelPids(f)) if (p) displayPids.add(p);
+    tags.refresh(displayPids, (pid) => priceCache.get(pid) ?? 0);
   }
 
   /* ---------------- sincronização geral ---------------- */
@@ -524,6 +560,7 @@ export default function create(): GameModule {
     handoffPoint: (id) => { const f = counterById(id); return f ? counterPoint(f, HANDOFF[0], HANDOFF[1], HANDOFF[2]) : null; },
     makeProductMesh: (pid) => makeProductMesh(pid),
     makeBoxMesh: (pid, open, units) => makeBoxMesh(pid, open, units),
+    levelAt: (id, point) => levelAt(id, point),
     poi: (kind, id) => {
       const v = new THREE.Vector3();
       switch (kind) {
@@ -614,6 +651,19 @@ export default function create(): GameModule {
       highlighted: () => picks.current,
       screens: () => screens.info(),
       tags: () => tags.info(),
+      /* Fase 4 (níveis) */
+      tagLevels: () => tags.levels(),
+      levels: (id: number) => { const v = view(); const f = v.furniture.find((x) => x.id === id); return f ? levelsOf(v, f) : null; },
+      levelAt: (id: number, x: number, y: number, z: number) => levelAt(id, new THREE.Vector3(x, y, z)),
+      levelHeights: (type: Furniture['type'], n: number) => levelHeights(type, n),
+      /** Ponto de mundo no centro da FRENTE do nível (testes: mirar a câmera). */
+      levelPoint: (id: number, level: number) => {
+        const f = view().furniture.find((x) => x.id === id);
+        const g = f ? levelGeoms(f.type, levelCountOf(f))[level] : undefined;
+        if (!f || !g) return null;
+        const p = new THREE.Vector3(g.box[0], g.box[1], g.box[2] + g.box[5] / 2).applyMatrix4(furnitureMatrix(f, new THREE.Matrix4()));
+        return { x: p.x, y: p.y, z: p.z };
+      },
       desk: () => (desk ? { ...desk } : null),
       chairs: () => [...chairs],
       service,
@@ -628,6 +678,7 @@ export default function create(): GameModule {
       ctx.scene.add(root);
       shop = new Shop(); env = new Env(ctx.scene);
       picks = new Picks(!!ctx.renderer.getContextAttributes()?.stencil);
+      picks.levelBoxes = levelBoxes;
       ctx.scene.fog = new THREE.Fog(0xd5ecff, 95, 230);
       root.add(env.group, shop.group, furniStatic, furniGroup, deskGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx);
       itemLayer.group.traverse((o) => { o.renderOrder = 2; });

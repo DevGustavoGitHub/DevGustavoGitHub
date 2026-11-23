@@ -3,6 +3,7 @@ import { PRODUCTS } from './catalog';
 import type { FurnitureType } from '../core/layout';
 import type { DayReport } from './economy';
 import type { StockedFurniture } from './api';
+import { emptyLevels, syncShelf } from './levels';
 import { rentFor } from './rent';
 import { INITIAL_SHELVES, START_MONEY } from './tuning';
 
@@ -55,7 +56,10 @@ export interface Furniture {
   x: number; // canto mínimo (x,z) do footprint, em tiles
   z: number;
   rot: 0 | 90 | 180 | 270;
-  /** Produto exposto (shelf/fridge/freezer). */
+  /**
+   * OBSOLETO na Fase 4 (só compatibilidade, somente leitura): DERIVADO = etiqueta do 1º nível etiquetado de `levels`
+   * (ausente se nenhum nível tem etiqueta). Saves da Fase 3 usam este campo na migração para níveis.
+   */
   productId?: string;
   /** Variante visual (decor / cores). */
   variant?: string;
@@ -128,11 +132,14 @@ export interface StoreState {
 /**
  * Layout inicial (Fase 3, como no original): o balcão e 2 prateleiras de mercearia barata já atribuídas (feijão e
  * macarrão) no fundo do salão 12x10. Sobra lugar para mais 2 prateleiras na mesma fileira (x = 7 e 10, z = 2).
+ * Fase 4: os 4 níveis de cada prateleira começam com a etiqueta do produto e 0 unidades.
  */
 export function initialFurniture(): Furniture[] {
   return [
     { id: 1, type: 'counter', x: 8, z: 6, rot: 0 },
-    ...INITIAL_SHELVES.map((productId, i): Furniture => ({ id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, productId })),
+    ...INITIAL_SHELVES.map((productId, i): Furniture => ({
+      id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, productId, levels: emptyLevels('shelf', productId),
+    })),
   ];
 }
 /** Próximo id livre depois do layout inicial. */
@@ -145,13 +152,7 @@ export const DEFAULT_DECOR: Readonly<Decor> = { wallColor: '#6cc8f0', floorColor
 
 export function newGame(seed = 1): StoreState {
   const market: Record<string, number> = {};
-  const slots: Record<string, number> = {};
-  for (const p of PRODUCTS) {
-    market[p.id] = 1;
-    slots[p.id] = 0;
-  }
-  // Loja inicial: 2 prateleiras (2 slots cada) para os produtos de INITIAL_SHELVES (ver initialFurniture).
-  for (const id of INITIAL_SHELVES) slots[id] = 2;
+  for (const p of PRODUCTS) market[p.id] = 1;
   const s: StoreState = {
     version: 1,
     seed,
@@ -163,7 +164,7 @@ export function newGame(seed = 1): StoreState {
     licenses: ['mercearia'],
     market,
     prices: {},
-    slots,
+    slots: {}, // derivados dos níveis (syncShelf abaixo)
     shelf: {},
     storage: {},
     sidewalk: [],
@@ -188,5 +189,6 @@ export function newGame(seed = 1): StoreState {
     furnitureStock: [],
   };
   s.rent = rentFor(s);
+  syncShelf(s);
   return s;
 }

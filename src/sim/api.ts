@@ -11,10 +11,13 @@ import {
   addXp, buyBoxes, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
 } from './economy';
 import {
-  canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay, reconcile,
-  specOf, storageCapacity as storageCapacityImpl, storageUsed as storageUsedImpl, productCapacity as productCapacityImpl,
-  displayTypeFor, storagePassage,
+  canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay,
+  specOf, storageCapacity as storageCapacityImpl, storageUsed as storageUsedImpl, displayTypeFor, storagePassage,
 } from './furniture';
+import {
+  acceptsProduct, canDisplay, emptyLevels, productCapacity as productCapacityImpl, reconcile, returnUnits, stockProduct, syncShelf,
+  unstockProduct,
+} from './levels';
 import { marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
 import { rentFor } from './rent';
@@ -29,7 +32,10 @@ import {
 export type { DayReport };
 
 /* ---------- Móveis / layout ---------- */
-/** `slots`: shelf/fridge/freezer = slots de produto (× slotCapacity do produto); rack = nº de caixas no depósito. */
+/**
+ * `slots`: shelf/fridge/freezer = nº de NÍVEIS do móvel (Fase 4: 4 / 4 / 3; cada nível guarda até slotCapacity unidades
+ * de um produto); rack = nº de caixas no depósito.
+ */
 export interface FurnitureSpec { type: FurnitureType; name: string; cost: Cents; minLevel: number; slots: number; /** categorias aceitas (vazio = qualquer/nenhuma) */ categories: string[] }
 export function furnitureCatalog(): FurnitureSpec[] { return catalogImpl(); }
 /** Itens de decoração (id = variante passada como 5º argumento de buyFurniture). Preço/nível próprios; `furnitureCatalog()` traz o preço-base. */
@@ -60,10 +66,9 @@ export function buyFurniture(state: StoreState, type: FurnitureType, x: number, 
   if (productId !== undefined && isDisplay(type)) checkAssign(state, type, productId);
   state.money -= cost;
   const f: Furniture = { id: state.nextFurnitureId++, type, x, z, rot };
-  if (productId !== undefined) {
-    if (isDisplay(type)) f.productId = productId;
-    else if (type === 'decor') f.variant = productId; // decor: o 5º argumento é a variante visual
-  }
+  // Fase 4: expositor nasce com níveis vazios (sem etiqueta; com `productId`, todos etiquetados com ele)
+  if (isDisplay(type)) f.levels = emptyLevels(type, productId);
+  else if (type === 'decor' && productId !== undefined) f.variant = productId; // decor: o 5º argumento é a variante visual
   state.furniture.push(f);
   reconcile(state);
   return f;
@@ -77,8 +82,11 @@ export function moveFurniture(state: StoreState, id: number, x: number, z: numbe
   f.rot = rot;
 }
 
-/** Vende o móvel por 50% do custo; o estoque exposto volta para o depósito/calçada conforme regra do sim. */
-export function sellFurniture(state: StoreState, id: number): Cents {
+/**
+ * Tira o móvel do salão (vender/desmontar): recusa o último balcão e a estante que deixaria o depósito acima da
+ * capacidade; as unidades dos níveis voltam ao depósito (se couber) ou viram caixas fechadas na calçada.
+ */
+function removeFurniture(state: StoreState, id: number, rackMsg: string): Furniture {
   const f = furnitureById(state, id);
   if (f.type === 'counter' && state.furniture.filter((x) => x.type === 'counter').length <= 1) {
     throw new Error('A loja precisa de pelo menos um caixa registradora');
@@ -87,25 +95,40 @@ export function sellFurniture(state: StoreState, id: number): Cents {
   state.furniture.splice(idx, 1);
   if (f.type === 'rack' && storageUsedImpl(state) > storageCapacityImpl(state)) {
     state.furniture.splice(idx, 0, f);
-    throw new Error('Esvazie o depósito antes de vender a estante');
+    throw new Error(rackMsg);
   }
+  for (const l of f.levels ?? []) if (l.productId !== undefined) returnUnits(state, l.productId, l.units);
+  delete f.levels;
+  reconcile(state);
+  return f;
+}
+
+/** Vende o móvel por 50% do custo; o estoque exposto volta para o depósito/calçada conforme regra do sim. */
+export function sellFurniture(state: StoreState, id: number): Cents {
+  const f = removeFurniture(state, id, 'Esvazie o depósito antes de vender a estante');
   const refund = Math.round(furnitureCost(f.type, f.variant) * SELL_REFUND);
   state.money += refund;
-  reconcile(state);
   return refund;
 }
 
-/** Define qual produto o shelf/fridge/freezer expõe (validando categoria licenciada e tipo do móvel). */
+/**
+ * Etiqueta os níveis VAZIOS (0 unidades) do shelf/fridge/freezer com o produto (validando tipo do móvel, categoria e
+ * licença); `undefined` tira a etiqueta dos níveis vazios. Níveis com unidades mantêm o próprio produto (Fase 4).
+ */
 export function assignProduct(state: StoreState, furnitureId: number, productId: string | undefined): void {
   const f = furnitureById(state, furnitureId);
   if (!isDisplay(f.type)) throw new Error('Este móvel não expõe produtos');
   if (productId !== undefined) checkAssign(state, f.type, productId);
-  if (productId === undefined) delete f.productId;
-  else f.productId = productId;
-  reconcile(state);
+  reconcile(state); // garante os níveis
+  for (const l of f.levels ?? []) {
+    if (l.units > 0) continue;
+    if (productId === undefined) delete l.productId;
+    else l.productId = productId;
+  }
+  syncShelf(state);
 }
 
-/** Capacidade total de prateleira de um produto = soma dos móveis atribuídos a ele. state.slots deve ficar consistente. */
+/** Capacidade de exposição de um produto = nº de níveis com a etiqueta dele × slotCapacity (state.slots = nº de níveis). */
 export function productCapacity(state: StoreState, productId: string): number { return productCapacityImpl(state, productId); }
 
 /** Capacidade do depósito em caixas (0 se bloqueado) e ocupação atual. */
@@ -192,16 +215,18 @@ function boxAt(state: StoreState, boxIndex: number) {
   return box;
 }
 
-/** Move até n unidades da caixa para a prateleira do produto, respeitando productCapacity. Retorna quantas moveu. */
+/**
+ * Move até n unidades da caixa para a exposição: enche os níveis com a etiqueta do produto e depois níveis livres
+ * (sem etiqueta) de móveis que aceitam a categoria. Retorna quantas moveu (0 = tudo cheio).
+ * Fase 4: para repor um nível específico (o que o jogador mira) use `placeUnitsInLevel`.
+ */
 export function placeUnits(state: StoreState, boxIndex: number, n: number): number {
   const box = boxAt(state, boxIndex);
   if (!Number.isInteger(n) || n <= 0) throw new Error('Quantidade inválida');
-  const cap = productCapacityImpl(state, box.productId);
-  if (cap === 0) throw new Error('Nenhuma prateleira exibe este produto');
-  const moved = Math.min(n, box.units, cap - (state.shelf[box.productId] ?? 0));
-  if (moved <= 0) return 0;
+  if (!canDisplay(state, box.productId)) throw new Error('Nenhuma prateleira exibe este produto');
+  if (box.units <= 0) return 0;
+  const moved = stockProduct(state, box.productId, Math.min(n, box.units));
   box.units -= moved;
-  state.shelf[box.productId] = (state.shelf[box.productId] ?? 0) + moved;
   return moved;
 }
 
@@ -291,17 +316,18 @@ export function acceptsPrice(state: StoreState, productId: string, rand: () => n
   return { ok: rand() < buyProbability(ratio), ratio };
 }
 
-/** Retira do estoque de prateleira ao cliente colocar no carrinho. Retorna qtd realmente retirada (pode ser < qty). */
+/**
+ * Retira do estoque exposto ao cliente colocar no carrinho (do nível mais cheio do produto). Retorna qtd realmente
+ * retirada (pode ser < qty). Fase 4: para tirar de um nível específico use `takeFromLevel`.
+ */
 export function takeFromShelf(state: StoreState, productId: string, qty: number): number {
   if (!Number.isInteger(qty) || qty <= 0) return 0;
-  const n = Math.min(qty, state.shelf[productId] ?? 0);
-  state.shelf[productId] = (state.shelf[productId] ?? 0) - n;
-  return n;
+  return unstockProduct(state, productId, qty);
 }
+/** Devolve à exposição (níveis do produto, depois níveis livres); o que não couber vai para o depósito/calçada. */
 export function returnToShelf(state: StoreState, productId: string, qty: number): void {
   if (!Number.isInteger(qty) || qty <= 0) return;
-  state.shelf[productId] = (state.shelf[productId] ?? 0) + qty;
-  reconcile(state); // se o móvel foi vendido no meio tempo, o excedente vai para depósito/calçada
+  returnUnits(state, productId, qty - stockProduct(state, productId, qty));
 }
 /** Total do carrinho ao preço de venda atual. */
 export function basketTotal(state: StoreState, items: { productId: string; qty: number }[]): Cents {
@@ -398,8 +424,8 @@ export function priceInfo(state: StoreState, productId: string): { wholesale: Ce
   const basis = state.costBasis[productId];
   return { wholesale: w, market: marketAverage(state, productId), sell: sellPrice(state, productId), cost: basis && basis.units > 0 ? basis.avg : w };
 }
-/** Preço sugerido (mercado +12%, múltiplo de R$ 0,05). */
-export const suggestedPrice = (state: StoreState, productId: string): Cents => roundPrice(marketAverage(state, productId) * 1.12);
+/** Preço sugerido = média de mercado do dia (Fase 4: ×1,00, não mais +12%; múltiplo de R$ 0,05). */
+export const suggestedPrice = (state: StoreState, productId: string): Cents => roundPrice(marketAverage(state, productId));
 
 export { checkoutCapacity, footprintOf, STORAGE_DEPTH };
 
@@ -673,7 +699,8 @@ export function placeFromStock(state: StoreState, index: number, x: number, z: n
   if (productId !== undefined && isDisplay(item.type)) checkAssign(state, item.type, productId);
   state.furnitureStock.splice(index, 1);
   const f: Furniture = { id: state.nextFurnitureId++, type: item.type, x, z, rot };
-  if (productId !== undefined && isDisplay(item.type)) f.productId = productId;
+  // Fase 4: níveis vazios sem etiqueta (com `productId`, todos etiquetados com ele)
+  if (isDisplay(item.type)) f.levels = emptyLevels(item.type, productId);
   if (item.variant !== undefined) f.variant = item.variant;
   state.furniture.push(f);
   reconcile(state);
@@ -681,18 +708,8 @@ export function placeFromStock(state: StoreState, index: number, x: number, z: n
 }
 /** Desmonta um móvel montado de volta para o estoque (alternativa a vender); estoque exposto vai para depósito/calçada. */
 export function storeFurniture(state: StoreState, id: number): void {
-  const f = furnitureById(state, id);
-  if (f.type === 'counter' && state.furniture.filter((x) => x.type === 'counter').length <= 1) {
-    throw new Error('A loja precisa de pelo menos um caixa registradora');
-  }
-  const idx = state.furniture.indexOf(f);
-  state.furniture.splice(idx, 1);
-  if (f.type === 'rack' && storageUsedImpl(state) > storageCapacityImpl(state)) {
-    state.furniture.splice(idx, 0, f);
-    throw new Error('Esvazie o depósito antes de desmontar a estante');
-  }
+  const f = removeFurniture(state, id, 'Esvazie o depósito antes de desmontar a estante');
   state.furnitureStock.push(f.variant !== undefined ? { type: f.type, variant: f.variant } : { type: f.type });
-  reconcile(state);
 }
 
 /**
@@ -747,20 +764,126 @@ export function furnitureForProduct(productId: string): FurnitureType { return d
  * Fonte da verdade do estoque exposto: Furniture.levels. state.shelf[produto] e state.slots viram DERIVADOS
  * (o sim recalcula após cada mutação) e continuam válidos para leitura por ui/npc/world.
  * ===================================================================== */
-const p4 = (n: string): never => { throw new Error(`NOT_IMPLEMENTED: ${n}`); };
 export type LevelCheck = 'ok' | 'other-product' | 'not-accepted' | 'full' | 'box-empty' | 'box-closed';
-/** Níveis do móvel (cópia somente leitura; vazio para tipos sem níveis). */
-export function furnitureLevels(state: StoreState, furnitureId: number): ShelfLevel[] { return p4('furnitureLevels'); }
-/** Unidades que cabem no nível para o produto (o do nível, ou `productId` se informado). */
-export function levelCapacity(state: StoreState, furnitureId: number, level: number, productId?: string): number { return p4('levelCapacity'); }
-/** Pode repor a caixa `boxIndex` no nível? (categoria aceita, nível vazio/sem etiqueta/mesmo produto, espaço, caixa aberta e com unidades). */
-export function canStockLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number): LevelCheck { return p4('canStockLevel'); }
-/** Move até n unidades da caixa para o nível. Nível sem produto (ou com outro produto e 0 un.) passa a ser do produto da caixa. Retorna movidas. */
-export function placeUnitsInLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number, n: number): number { return p4('placeUnitsInLevel'); }
-/** Puxa até n unidades do nível para a caixa: caixa vazia passa a ser do produto do nível; caixa do mesmo produto recebe até boxSize. Retorna movidas. */
-export function pullUnitsFromLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number, n: number): number { return p4('pullUnitsFromLevel'); }
-/** Cliente retira do nível (retorna qtd retirada). */
-export function takeFromLevel(state: StoreState, furnitureId: number, level: number, qty: number): number { return p4('takeFromLevel'); }
-/** Onde o produto está exposto (níveis com etiqueta do produto, com ou sem unidades). */
-export function locateProduct(state: StoreState, productId: string): { furnitureId: number; level: number; units: number }[] { return p4('locateProduct'); }
-// suggestedPrice já existe (acima, seção de preços): na FASE 4 passa a ser a MÉDIA DE MERCADO (×1,00), não +12%.
+
+/** Nível `level` do móvel (lança 'Nível inexistente' fora de 0..níveis−1). */
+function levelOf(f: Furniture, level: number): ShelfLevel {
+  const l = Number.isInteger(level) ? f.levels?.[level] : undefined;
+  if (!l) throw new Error('Nível inexistente');
+  return l;
+}
+/** Expositor com níveis (lança para balcão/estante/decoração). */
+function displayOf(state: StoreState, furnitureId: number): Furniture & { levels: ShelfLevel[] } {
+  const f = furnitureById(state, furnitureId);
+  if (!f.levels) throw new Error('Este móvel não expõe produtos');
+  return f as Furniture & { levels: ShelfLevel[] };
+}
+const notAcceptedMsg = (f: Furniture, name: string): string => `${name} não cabe em ${DISPLAY_NAMES[f.type] ?? 'este móvel'}`;
+
+/** Níveis do móvel (cópia somente leitura; vazio para tipos sem níveis). Móvel inexistente lança. */
+export function furnitureLevels(state: StoreState, furnitureId: number): ShelfLevel[] {
+  return (furnitureById(state, furnitureId).levels ?? []).map((l) => ({ ...l }));
+}
+/**
+ * Unidades que cabem no nível (capacidade TOTAL, não o espaço livre) para o produto: o do nível, ou `productId` se
+ * informado. 0 se o nível não tem etiqueta (e nenhum `productId`) ou se o móvel não aceita a categoria.
+ */
+export function levelCapacity(state: StoreState, furnitureId: number, level: number, productId?: string): number {
+  const f = displayOf(state, furnitureId);
+  const pid = productId ?? levelOf(f, level).productId;
+  if (productId !== undefined) levelOf(f, level); // valida o índice mesmo com productId
+  if (pid === undefined) return 0;
+  const p = productById(pid);
+  return acceptsProduct(f, p) ? p.slotCapacity : 0;
+}
+/**
+ * Pode repor a caixa `boxIndex` no nível? Precedência: 'box-empty' (caixa sem unidades — o player oferece Retirar se o
+ * nível tem unidades) → 'not-accepted' (móvel sem níveis ou categoria recusada) → 'other-product' (nível com OUTRO
+ * produto e unidades) → 'full' (mesmo produto, nível cheio) → 'box-closed' (todo o resto ok, falta abrir a caixa) → 'ok'.
+ * Caixa/móvel/nível inexistentes lançam.
+ */
+export function canStockLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number): LevelCheck {
+  const box = boxAt(state, boxIndex);
+  const f = furnitureById(state, furnitureId);
+  if (box.units <= 0) {
+    if (f.levels) levelOf(f, level);
+    return 'box-empty';
+  }
+  if (!f.levels) return 'not-accepted';
+  const l = levelOf(f, level);
+  const p = productById(box.productId);
+  if (!acceptsProduct(f, p)) return 'not-accepted';
+  if (l.productId !== undefined && l.productId !== p.id && l.units > 0) return 'other-product';
+  if (l.productId === p.id && l.units >= p.slotCapacity) return 'full';
+  if (box.open !== true) return 'box-closed';
+  return 'ok';
+}
+/**
+ * Move até n unidades da caixa para o nível. Nível sem produto (ou com outro produto e 0 un.) passa a ser do produto
+ * da caixa. Retorna movidas (0 = caixa vazia ou nível cheio). Lança: categoria recusada, nível com outro produto e
+ * unidades, quantidade inválida, caixa/móvel/nível inexistentes. Não exige caixa aberta (quem exige é o player).
+ */
+export function placeUnitsInLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number, n: number): number {
+  const box = boxAt(state, boxIndex);
+  if (!Number.isInteger(n) || n <= 0) throw new Error('Quantidade inválida');
+  const f = displayOf(state, furnitureId);
+  const l = levelOf(f, level);
+  const p = productById(box.productId);
+  if (!acceptsProduct(f, p)) throw new Error(notAcceptedMsg(f, p.name));
+  const same = l.productId === p.id;
+  if (!same && l.productId !== undefined && l.units > 0) throw new Error('Este nível tem outro produto');
+  const have = same ? l.units : 0;
+  const moved = Math.min(n, box.units, p.slotCapacity - have);
+  if (moved <= 0) return 0;
+  l.productId = p.id;
+  l.units = have + moved;
+  box.units -= moved;
+  syncShelf(state);
+  return moved;
+}
+/**
+ * Puxa até n unidades do nível para a caixa: caixa vazia passa a ser do produto do nível; caixa do mesmo produto recebe
+ * até boxSize. O nível mantém a etiqueta (com 0 un. aceita outro produto). Retorna movidas (0 = nível vazio ou caixa
+ * cheia). Lança: caixa com unidades de outro produto, quantidade inválida, caixa/móvel/nível inexistentes.
+ * O custo médio (costBasis) não muda: as unidades continuam do mesmo produto.
+ */
+export function pullUnitsFromLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number, n: number): number {
+  const box = boxAt(state, boxIndex);
+  if (!Number.isInteger(n) || n <= 0) throw new Error('Quantidade inválida');
+  const l = levelOf(displayOf(state, furnitureId), level);
+  if (l.productId === undefined || l.units <= 0) return 0;
+  if (box.units > 0 && box.productId !== l.productId) throw new Error('A caixa tem outro produto');
+  const p = productById(l.productId);
+  const inBox = Math.max(0, box.units);
+  const moved = Math.min(n, l.units, p.boxSize - inBox);
+  if (moved <= 0) return 0;
+  box.productId = p.id;
+  box.units = inBox + moved;
+  l.units -= moved;
+  syncShelf(state);
+  return moved;
+}
+/**
+ * Cliente retira do nível (unidades do produto ATUAL do nível: confira `furnitureLevels(...)[level].productId` ou o
+ * resultado de `locateProduct`). Retorna qtd retirada; 0 para qtd inválida ou móvel/nível que não existe mais.
+ */
+export function takeFromLevel(state: StoreState, furnitureId: number, level: number, qty: number): number {
+  if (!Number.isInteger(qty) || qty <= 0 || !Number.isInteger(level)) return 0;
+  const l = state.furniture.find((f) => f.id === furnitureId)?.levels?.[level];
+  if (!l || l.productId === undefined || l.units <= 0) return 0;
+  const n = Math.min(qty, l.units);
+  l.units -= n;
+  syncShelf(state);
+  return n;
+}
+/** Onde o produto está exposto (níveis com etiqueta do produto, com ou sem unidades), na ordem dos móveis e níveis. */
+export function locateProduct(state: StoreState, productId: string): { furnitureId: number; level: number; units: number }[] {
+  const out: { furnitureId: number; level: number; units: number }[] = [];
+  for (const f of state.furniture) {
+    (f.levels ?? []).forEach((l, level) => {
+      if (l.productId === productId) out.push({ furnitureId: f.id, level, units: l.units });
+    });
+  }
+  return out;
+}
+// suggestedPrice (seção de preços, acima) na FASE 4 é a MÉDIA DE MERCADO (×1,00), não +12%.

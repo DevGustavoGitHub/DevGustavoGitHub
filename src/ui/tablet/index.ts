@@ -3,7 +3,8 @@
  * esquerda (ponto vermelho = novidade liberada não vista) e painel branco com cartões azul-marinho. O HUD fica visível
  * por cima (o painel começa abaixo dele). Abre por `ui:openTablet {tab?, productId?}`, pelo atalho de carrinho e pelo menu.
  */
-import { clear, h } from '../dom';
+import { billSvg } from '../art';
+import { clear, h, money } from '../dom';
 import { icon } from '../icons';
 import type { UiKit } from '../kit';
 import { markSeen, unseenTabs } from '../unlocks';
@@ -74,6 +75,9 @@ export class Tablet {
   private focusId: string | null = null;
   private focusUntil = 0;
   private focusScroll = false;
+  /** Dinheiro no cabeçalho (no celular o tablet cobre o HUD). */
+  private cashEl: HTMLElement | null = null;
+  private cashV = NaN;
 
   constructor(private kit: UiKit, private layer: HTMLElement) {
     this.api = {
@@ -110,14 +114,19 @@ export class Tablet {
       this.tabBtns.set(t.id, b);
       rail.appendChild(b);
     }
+    this.cashV = NaN;
+    this.cashEl = h('span', { class: 't3-cash-v' });
     this.overlay = h('div', { class: 'mx-modal mx-dim tb-wrap', role: 'dialog', 'aria-label': 'Computador da loja' },
       h('section', { class: 'tablet t3' }, rail,
         h('div', { class: 't3-panel' },
-          h('header', { class: 't3-head' }, this.title, h('button', { class: 't3-x', 'aria-label': 'Fechar', html: icon('close', 30), on: { click: () => this.close() } })),
+          h('header', { class: 't3-head' },
+            h('span', { class: 't3-cash', 'aria-label': 'Dinheiro em caixa', html: billSvg(26) }, this.cashEl),
+            this.title, h('button', { class: 't3-x', 'aria-label': 'Fechar', html: icon('close', 30), on: { click: () => this.close() } })),
           this.body)));
     this.overlay.addEventListener('pointerdown', (e) => { if (e.target === this.overlay) this.close(); });
     this.layer.appendChild(this.overlay);
-    this.layer.classList.add('hud-over');
+    this.layer.classList.add('hud-over', 'tb-open');
+    this.syncCash();
     this.kit.modalOpen('tablet', { onEsc: () => this.close() });
     this.kit.sfx('pop');
     this.show(this.current);
@@ -129,7 +138,8 @@ export class Tablet {
     this.overlay.remove();
     this.overlay = null;
     this.tabBtns.clear();
-    this.layer.classList.remove('hud-over');
+    this.cashEl = null;
+    this.layer.classList.remove('hud-over', 'tb-open');
     this.kit.modalClose('tablet');
   }
 
@@ -182,8 +192,17 @@ export class Tablet {
     } else { this.focusId = null; this.api.focus = null; }
   }
 
+  private syncCash(): void {
+    const v = this.kit.ctx.state.money;
+    if (!this.cashEl || v === this.cashV) return;
+    this.cashV = v;
+    this.cashEl.textContent = money(v);
+    this.cashEl.parentElement?.classList.toggle('neg', v < 0);
+  }
+
   update(dt: number): void {
     if (!this.overlay) return;
+    this.syncCash();
     this.liveT += dt;
     if (this.liveT >= 1) {
       this.liveT = 0;

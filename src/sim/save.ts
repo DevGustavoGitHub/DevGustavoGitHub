@@ -1,8 +1,8 @@
 import { FURNITURE_FOOTPRINT, type FurnitureType } from '../core/layout';
 import type { StockedFurniture } from './api';
-import { recomputeSlots } from './furniture';
+import { migrateLevels } from './levels';
 import { rentFor } from './rent';
-import { INITIAL_NEXT_FURNITURE_ID, initialFurniture, newGame, type StoreState } from './state';
+import { INITIAL_NEXT_FURNITURE_ID, initialFurniture, newGame, type Furniture, type StoreState } from './state';
 
 export const SAVE_KEY = 'mercadinho-sim:save:v1';
 
@@ -26,6 +26,8 @@ const count = (n: unknown): number => (typeof n === 'number' && Number.isFinite(
  * - Fase 3: furnitureStock ausente => [] (entradas inválidas descartadas); ledger sem happy/angry => atendidos contam
  *   como felizes e perdidos como irritados; Box.open inválido => removido (ausente = fechada); save anterior à Fase 3
  *   => aluguel recalculado no modelo novo (rent.ts). A decoração salva é mantida (só saves sem decor ganham a paleta nova).
+ * - Fase 4: `Furniture.levels` (levels.migrateLevels): saves sem níveis ganham níveis etiquetados com o produto antigo
+ *   do móvel e o estoque exposto somado é distribuído por eles (sobra → depósito/calçada); shelf/slots recalculados.
  */
 export function deserialize(raw: string): StoreState {
   const data = JSON.parse(raw) as Partial<StoreState>;
@@ -72,7 +74,11 @@ export function deserialize(raw: string): StoreState {
   if (!Array.isArray(s.sidewalk)) s.sidewalk = [];
   for (const b of s.sidewalk) if (b.open !== undefined && typeof b.open !== 'boolean') delete b.open;
   if (!phase3 || !Number.isFinite(s.rent) || s.rent < 0) s.rent = rentFor(s);
-  recomputeSlots(s);
+  // Fase 4: níveis por móvel. Save sem nenhum nível (Fase 3 ou anterior): etiqueta os níveis com Furniture.productId e
+  // distribui o estoque exposto somado (data.shelf) pelos níveis; com níveis, só saneia. shelf/slots são derivados.
+  if (typeof s.storage !== 'object' || s.storage === null || Array.isArray(s.storage)) s.storage = {};
+  const legacyLevels = !(Array.isArray(data.furniture) && data.furniture.some((f) => Array.isArray((f as Partial<Furniture> | null)?.levels)));
+  migrateLevels(s, data.shelf, legacyLevels);
   return s;
 }
 

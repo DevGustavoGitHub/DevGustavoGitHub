@@ -1,20 +1,26 @@
 /**
- * Etiquetas de preço na frente de prateleiras/geladeiras/freezers: ponto com a cor do produto + "R$ 8,70",
- * ou "--" quando o produto está esgotado na prateleira (ou o móvel não tem produto).
- * Um atlas de canvas (uma célula por produto, redesenhada só quando preço/esgotado mudam) e UMA malha fundida
- * com todas as etiquetas (reconstruída só quando os móveis mudam) = 1 draw call.
+ * Etiquetas de preço POR NÍVEL (Fase 4) na frente de prateleiras/geladeiras/freezers: ponto com a cor do produto +
+ * "R$ 8,70", ou "--" quando o nível tem etiqueta (produto) mas 0 unidades. Nível sem produto = sem etiqueta.
+ * Um atlas de canvas (por produto: célula de preço, redesenhada só quando o preço muda, e célula "--") e UMA malha
+ * fundida com todas as etiquetas (reconstruída quando móveis/etiquetas/esgotado mudam; poucos quads) = 1 draw call.
  */
 import * as THREE from 'three';
 import type { Furniture } from '../sim/state';
 import { PRODUCTS } from '../sim/catalog';
 import { canvasTex } from './kit';
 import { categoryColor, css } from './look';
-import { tagAnchor } from './furniture';
+import { levelGeoms } from './furniture';
 import { footprintOf } from './nav';
 
-const COLS = 6, ROWS = 8, CW = 1024, CH = 512, TW = 0.2, TH = 0.075;
-const cellW = Math.floor(CW / COLS), cellH = Math.floor(CH / ROWS);
+const COLS = 6, CW = 1024, CELL_H = 64, TW = 0.2, TH = 0.075;
+const cellW = Math.floor(CW / COLS);
+const KEYS = ['-', ...PRODUCTS.flatMap((p) => [p.id, `${p.id}|-`])];
+const ROWS = Math.ceil(KEYS.length / COLS);
+const CH = 2 ** Math.ceil(Math.log2(ROWS * CELL_H));
 const brl = (c: number): string => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Etiqueta de um nível: produto (undefined = sem etiqueta) e se está esgotado (0 unidades). */
+export interface TagLevel { pid?: string; empty: boolean }
 
 export class PriceTags {
   readonly mesh: THREE.Mesh;
@@ -23,6 +29,8 @@ export class PriceTags {
   private tex: THREE.CanvasTexture;
   private cells = new Map<string, number>();
   private sigs = new Map<string, string>();
+  private stocked = new Map<string, boolean>();
+  private placed: { id: number; level: number; pid: string; empty: boolean }[] = [];
   private geoKey = '';
   constructor() {
     this.canvas.width = CW; this.canvas.height = CH;
@@ -30,22 +38,23 @@ export class PriceTags {
     this.tex = canvasTex(this.canvas); this.tex.anisotropy = 4;
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ map: this.tex }));
     this.mesh.name = 'priceTags'; this.mesh.renderOrder = 2; this.mesh.frustumCulled = false;
-    ['-', ...PRODUCTS.map((p) => p.id)].forEach((k, i) => this.cells.set(k, i));
-    this.draw('-', null);
+    KEYS.forEach((k, i) => this.cells.set(k, i));
+    for (const k of KEYS) this.draw(k, null); // preço real chega no 1º refresh
   }
   private uv(key: string): [number, number, number, number] {
     const i = this.cells.get(key) ?? 0;
     const c = i % COLS, r = Math.floor(i / COLS);
-    return [(c * cellW + 2) / CW, 1 - ((r + 1) * cellH - 2) / CH, (cellW - 4) / CW, (cellH - 4) / CH];
+    return [(c * cellW + 2) / CW, 1 - ((r + 1) * CELL_H - 2) / CH, (cellW - 4) / CW, (CELL_H - 4) / CH];
   }
   private draw(key: string, price: number | null): void {
     const i = this.cells.get(key);
     if (i === undefined) return;
-    const g = this.g, x = (i % COLS) * cellW, y = Math.floor(i / COLS) * cellH, w = cellW, h = cellH;
+    const pid = key === '-' ? undefined : key.split('|')[0];
+    const g = this.g, x = (i % COLS) * cellW, y = Math.floor(i / COLS) * CELL_H, w = cellW, h = CELL_H;
     g.clearRect(x, y, w, h);
     g.fillStyle = '#ffd84d'; g.fillRect(x + 2, y + 2, w - 4, h - 4);
     g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + 2, y + h - 8, w - 4, 6);
-    g.fillStyle = key === '-' ? '#9aa3ad' : css(categoryColor(key));
+    g.fillStyle = pid ? css(categoryColor(pid)) : '#9aa3ad';
     g.beginPath(); g.arc(x + 26, y + h / 2 - 1, 14, 0, Math.PI * 2); g.fill();
     g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 2; g.stroke();
     g.fillStyle = '#1d2128'; g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -55,38 +64,44 @@ export class PriceTags {
     g.fillText(text, x + 26 + (w - 26) / 2 + 6, y + h / 2);
     this.tex.needsUpdate = true;
   }
-  /** Redesenha as células cujo preço/esgotado mudou. `price(pid)` em centavos. */
-  refresh(pids: Iterable<string>, price: (pid: string) => number, stock: (pid: string) => number): void {
+  /** Redesenha as células de preço que mudaram. `price(pid)` em centavos. */
+  refresh(pids: Iterable<string>, price: (pid: string) => number): void {
     for (const pid of pids) {
       if (!this.cells.has(pid)) continue;
-      const empty = stock(pid) <= 0;
       let p = 0;
-      if (!empty) { try { p = price(pid); } catch { p = 0; } }
-      const sig = empty ? '-' : String(p);
+      try { p = price(pid); } catch { p = 0; }
+      const sig = String(p);
       if (this.sigs.get(pid) === sig) continue;
       this.sigs.set(pid, sig);
-      this.draw(pid, empty ? null : p);
+      this.draw(pid, p);
     }
   }
-  /** Reconstrói os quads (um por móvel de exposição). */
-  rebuild(furniture: readonly Furniture[], hiddenId: number | null): void {
-    const list = furniture.filter((f) => f.id !== hiddenId && tagAnchor(f.type));
-    const key = list.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${f.productId ?? ''}`).join(',');
+  /** Reconstrói os quads: uma etiqueta por nível com produto (célula de preço, ou "--" se esgotado). */
+  rebuild(list: readonly { f: Furniture; levels: readonly TagLevel[] }[]): void {
+    const key = list.map(({ f, levels }) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${levels.map((l) => (l.pid ? `${l.pid}${l.empty ? '-' : ''}` : '')).join('/')}`).join(',');
     if (key === this.geoKey) return;
     this.geoKey = key;
+    this.placed = []; this.stocked.clear();
     const pos: number[] = [], uv: number[] = [], idx: number[] = [];
-    for (const f of list) {
-      const a = tagAnchor(f.type)!;
+    for (const { f, levels } of list) {
+      const geoms = levelGeoms(f.type, levels.length);
       const fp = footprintOf(f);
       const cx = f.x + fp.w / 2, cz = f.z + fp.d / 2, t = (f.rot * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
-      const [u0, v0, du, dv] = this.uv(f.productId && this.cells.has(f.productId) ? f.productId : '-');
-      const base = pos.length / 3;
-      for (const [lx, ly, uu, vv] of [[-TW / 2, -TH / 2, 0, 0], [TW / 2, -TH / 2, 1, 0], [TW / 2, TH / 2, 1, 1], [-TW / 2, TH / 2, 0, 1]] as const) {
-        const px = a.x + lx, pz = a.z;
-        pos.push(cx + px * c + pz * s, a.y + ly, cz - px * s + pz * c);
-        uv.push(u0 + uu * du, v0 + vv * dv);
-      }
-      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      levels.forEach((l, li) => {
+        const a = geoms[li];
+        if (!l.pid || !a) return;
+        this.placed.push({ id: f.id, level: li, pid: l.pid, empty: l.empty });
+        this.stocked.set(l.pid, (this.stocked.get(l.pid) ?? false) || !l.empty);
+        const ck = l.empty ? `${l.pid}|-` : l.pid;
+        const [u0, v0, du, dv] = this.uv(this.cells.has(ck) ? ck : '-');
+        const base = pos.length / 3;
+        for (const [lx, ly, uu, vv] of [[-TW / 2, -TH / 2, 0, 0], [TW / 2, -TH / 2, 1, 0], [TW / 2, TH / 2, 1, 1], [-TW / 2, TH / 2, 0, 1]] as const) {
+          const px = a.tag[0] + lx, pz = a.tag[2];
+          pos.push(cx + px * c + pz * s, a.tag[1] + ly, cz - px * s + pz * c);
+          uv.push(u0 + uu * du, v0 + vv * dv);
+        }
+        idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      });
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -95,7 +110,15 @@ export class PriceTags {
     this.mesh.geometry.dispose();
     this.mesh.geometry = geo;
   }
-  /** Assinaturas atuais (debug/testes): pid → "-" (esgotado) ou preço em centavos. */
-  info(): Record<string, string> { return Object.fromEntries(this.sigs); }
+  /** Debug/testes: por produto exposto → "-" (todos os níveis dele esgotados) ou preço em centavos. */
+  info(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [pid, any] of this.stocked) out[pid] = any ? (this.sigs.get(pid) ?? '0') : '-';
+    return out;
+  }
+  /** Debug/testes: etiquetas por nível (móvel, nível, produto, texto). */
+  levels(): { id: number; level: number; pid: string; text: string }[] {
+    return this.placed.map((p) => ({ id: p.id, level: p.level, pid: p.pid, text: p.empty ? '--' : brl(Number(this.sigs.get(p.pid) ?? 0)) }));
+  }
   dispose(): void { this.mesh.geometry.dispose(); (this.mesh.material as THREE.Material).dispose(); this.tex.dispose(); }
 }

@@ -2,6 +2,8 @@
  * Módulo de UI (DOM/CSS) — Fase 3: HUD no layout de referência, atalho de carrinho, missões com setas, comemoração de
  * nível, noite + "Terminar o dia" + resumo, Mercado com carrinho e estoque de montagem, painéis de troco/maquininha,
  * aviso de orientação. Os controles de jogo (joystick, ação, sair do caixa...) são do `player`.
+ * Fase 4: sensibilidade da câmera nas Opções, preço sugerido = `api.suggestedPrice`, telas sem rolagem no celular
+ * deitado (tablet em tela inteira), botões do HUD/pagamento no `pointerdown` e aviso de orientação ciente da trava.
  * Eventos: ver docs/CONTRACTS.md (seções "Fase 3" e "Fase 3 — ui"). Só muda estado via sim/api.ts (e economy.ts).
  */
 import type { GameContext, GameModule } from '../core/module';
@@ -22,6 +24,7 @@ import { baseCss } from './styles-base';
 import { playCss } from './styles-play';
 import { phase2Css, scaleFonts } from './styles-phase2';
 import { phase3Css } from './styles-phase3';
+import { phase4Css } from './styles-phase4';
 import { tabletCss } from './styles-tablet';
 import { Tablet } from './tablet';
 import { parseAutoToast, recordToday } from './tablet/auto';
@@ -96,7 +99,7 @@ export default function create(): GameModule {
     init(ctx: GameContext) {
       kit = new UiKit(ctx);
       const style = h('style', { id: 'mx-style' });
-      style.textContent = scaleFonts(baseCss + tabletCss + playCss + phase2Css + phase3Css);
+      style.textContent = scaleFonts(baseCss + tabletCss + playCss + phase2Css + phase3Css + phase4Css);
       document.head.appendChild(style);
       root = h('div', { class: 'mx-root', style: 'pointer-events:none' });
       ctx.uiRoot.appendChild(root);

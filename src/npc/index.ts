@@ -15,6 +15,7 @@ import { CheckoutManager } from './checkout';
 import { Customer } from './customer';
 import { productById } from '../sim/catalog';
 import { createFallbackWorld } from './fallbackWorld';
+import { stockForTest } from './helpers';
 import { type CustomerKind, disposeModels, pickKind } from './model';
 import { type AgentLike, type BubbleKey, type Env, clamp, safe } from './shared';
 import { Cashier, Janitor, Staff, Stocker, type StaffRole } from './staff';
@@ -251,6 +252,10 @@ export default function create(): GameModule {
         stats,
         lanes: () => mgr.debug(),
         sync: () => syncStaff(false),
+        /** Teste (Fase 4): abastece os níveis etiquetados com até n un. (só `productId`, se dado); devolve o total posto. */
+        stock: (n = 30, productId?: string) => stockForTest(ctx.state, n, productId),
+        /** Teste (Fase 4): onde o cliente encontra o produto (api.locateProduct; null = API de níveis indisponível). */
+        locate: (productId: string) => safe('locateProduct', () => api.locateProduct(ctx.state, productId), null),
       };
     },
     update(dt) {

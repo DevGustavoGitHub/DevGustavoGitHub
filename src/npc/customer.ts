@@ -2,7 +2,8 @@
 import * as api from '../sim/api';
 import type { Lane, CheckoutManager } from './checkout';
 import { Agent } from './agent';
-import { footprint, furnitureFor, maybeDirt } from './helpers';
+import { footprint, furnitureFor, locate, maybeDirt } from './helpers';
+import type { Furniture } from '../sim/state';
 import { PRODUCTS } from '../sim/catalog';
 import { sellPrice, marketAverage } from '../sim/market';
 import { type CustomerKind, MAX_BASKET_ITEMS, Person, type PersonSpec, pickKind, randomCustomerSpec } from './model';
@@ -32,6 +33,13 @@ export class Customer extends Agent {
   method: 'cash' | 'card' = 'cash';
   private entry: Item | null = null;
   private furnId = -1;
+  /** FASE 4: nível alvo no móvel (-1 = sem API de níveis → takeFromShelf). */
+  private level = -1;
+  /** Trocas de móvel (nível esvaziou no caminho) e tentativas de retirada do item atual. */
+  private hops = 0;
+  private tries = 0;
+  /** O preço do item atual já foi avaliado (não sorteia de novo ao trocar de nível/móvel). */
+  private priced = false;
   private recorded = false;
   private angry = false;
   private warned = false;
@@ -206,40 +214,123 @@ export class Customer extends Agent {
     this.person.setBasketItems(this.basketIds);
   }
 
-  private pickNext(): void {
-    // escolhe o próximo item cujo móvel esteja mais perto; descarta os sem móvel
-    let bi = -1, bd = Infinity, bf = null as ReturnType<typeof furnitureFor>;
-    for (let i = this.list.length - 1; i >= 0; i--) {
-      const it = this.list[i]!;
-      const f = furnitureFor(this.env, it.productId, this.x, this.z);
-      if (!f) { this.list.splice(i, 1); this.outOfStock++; continue; }
+  private furniture(id: number): Furniture | null {
+    const list = this.env.ctx.state.furniture;
+    for (let i = 0; i < list.length; i++) if (list[i]!.id === id) return list[i]!;
+    return null;
+  }
+
+  /**
+   * Onde pegar o produto: o nível COM unidades mais próximo (api.locateProduct); sem nenhum com unidades, um nível
+   * etiquetado (o cliente vai até lá e mostra "Sem estoque"). Sem a API de níveis: móvel do produto (level -1).
+   */
+  private findSpot(pid: string, skipF = -1): { f: Furniture; level: number; units: number } | null {
+    const spots = locate(this.env, pid);
+    if (!spots) {
+      const f = furnitureFor(this.env, pid, this.x, this.z);
+      return f && f.id !== skipF ? { f, level: -1, units: this.env.ctx.state.shelf[pid] ?? 0 } : null;
+    }
+    let best: { f: Furniture; level: number; units: number } | null = null;
+    let bd = Infinity;
+    for (const s of spots) {
+      if (s.furnitureId === skipF) continue;
+      const f = this.furniture(s.furnitureId);
+      if (!f) continue;
       const fp = footprint(f);
       const d = (f.x + fp.w / 2 - this.x) ** 2 + (f.z + fp.d / 2 - this.z) ** 2;
-      if (d < bd) { bd = d; bi = i; bf = f; }
+      const has = s.units > 0, bestHas = !!best && best.units > 0;
+      if (best && (bestHas && !has || (has === bestHas && d >= bd))) continue;
+      best = { f, level: s.level, units: s.units }; bd = d;
     }
-    if (bi < 0 || !bf) { this.toCheckout(); return; }
+    return best;
+  }
+
+  private pickNext(): void {
+    // escolhe o próximo item cujo móvel esteja mais perto; descarta os sem móvel
+    let bi = -1, bd = Infinity;
+    let bs: { f: Furniture; level: number; units: number } | null = null;
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const it = this.list[i]!;
+      const sp = this.findSpot(it.productId);
+      if (!sp) { this.list.splice(i, 1); this.outOfStock++; continue; }
+      const fp = footprint(sp.f);
+      const d = (sp.f.x + fp.w / 2 - this.x) ** 2 + (sp.f.z + fp.d / 2 - this.z) ** 2;
+      if (d < bd) { bd = d; bi = i; bs = sp; }
+    }
+    if (bi < 0 || !bs) { this.toCheckout(); return; }
     this.entry = this.list.splice(bi, 1)[0]!;
-    this.furnId = bf.id;
-    const acc = this.env.world().furnitureAccess(bf.id);
-    if (!acc) { this.outOfStock++; this.state = 'pickNext'; return; }
+    this.furnId = bs.f.id;
+    this.level = bs.level;
+    this.hops = 0; this.tries = 0; this.priced = false;
+    const acc = this.env.world().furnitureAccess(bs.f.id);
+    if (!acc) { this.entry = null; this.outOfStock++; this.state = 'pickNext'; return; }
     this.moveTo(acc.x, acc.z);
     this.state = 'walkShelf';
+  }
+
+  /**
+   * O nível alvo ainda tem unidades? Se esvaziou no caminho: outro nível do mesmo móvel, outro móvel (até 2 trocas)
+   * ou desiste do item com o balão "Sem estoque". true = pode pegar aqui (this.level atualizado).
+   */
+  private ensureUnits(e: Item): boolean {
+    if (this.level < 0) return true; // sem API de níveis: takeFromShelf decide
+    const spots = locate(this.env, e.productId);
+    if (!spots) { this.level = -1; return true; }
+    let alt = -1, altU = 0;
+    for (const s of spots) {
+      if (s.furnitureId !== this.furnId || s.units <= 0) continue;
+      if (s.level === this.level) return true;
+      if (s.units > altU) { alt = s.level; altU = s.units; }
+    }
+    if (alt >= 0) { this.level = alt; return true; }
+    if (this.hops < 2) {
+      const sp = this.findSpot(e.productId, this.furnId);
+      const acc = sp && sp.units > 0 ? this.env.world().furnitureAccess(sp.f.id) : null;
+      if (sp && acc) {
+        this.hops++;
+        this.furnId = sp.f.id; this.level = sp.level;
+        this.setPose('basket');
+        this.moveTo(acc.x, acc.z);
+        this.state = 'walkShelf';
+        return false;
+      }
+    }
+    this.noStock();
+    return false;
+  }
+
+  private noStock(): void {
+    this.entry = null;
+    this.outOfStock++;
+    this.env.say(this, 'semestoque', 1.8);
+    this.state = 'react'; this.timer = 1.2; this.setPose('basket');
   }
 
   private decide(): void {
     const e = this.entry;
     if (!e) { this.state = 'pickNext'; return; }
-    const { state, rand, bus } = this.env.ctx;
-    const ap = safe('acceptsPrice', () => api.acceptsPrice(state, e.productId, rand), { ok: true, ratio: 1 });
-    const picky = this.kind === 'picky';
-    // exigente: rejeita qualquer preço acima de ~1,1x o mercado (limite exato, sem sorteio)
-    const ratio = picky ? safe('ratio', () => sellPrice(state, e.productId) / marketAverage(state, e.productId), ap.ratio) : ap.ratio;
-    if (picky ? (ratio > 1.1 || !ap.ok) : !ap.ok) {
-      this.complaints += picky ? 2 : 1;
-      this.env.say(this, picky ? 'pickyno' : 'caro', picky ? 2.6 : 1.8);
-      bus.emit('customerComplaint', { customerId: this.id, productId: e.productId, ratio: picky ? Math.max(ratio, ap.ratio) * 1.15 : ap.ratio });
-      this.entry = null; this.state = 'react'; this.timer = 1.4;
-      return;
+    if (!this.ensureUnits(e)) return;
+    if (!this.priced) {
+      this.priced = true;
+      const { state, rand, bus } = this.env.ctx;
+      const ap = safe('acceptsPrice', () => api.acceptsPrice(state, e.productId, rand), { ok: true, ratio: 1 });
+      const real = safe('ratio', () => sellPrice(state, e.productId) / marketAverage(state, e.productId), ap.ratio);
+      const ratio = Number.isFinite(real) ? real : Number.isFinite(ap.ratio) ? ap.ratio : 1;
+      // exigente: rejeita qualquer preço acima de 1,10x o mercado (limite exato, sem sorteio) e reclama em dobro
+      const pickyNo = this.kind === 'picky' && ratio > 1.1;
+      if (pickyNo || !ap.ok) {
+        // FASE 4: só reclama ("Caro!" + customerComplaint) se o preço estiver mesmo acima do mercado (> 1,05);
+        // perto do preço de mercado o cliente apenas deixa o item na prateleira, sem balão
+        if (pickyNo || ratio > 1.05) {
+          this.complaints += pickyNo ? 2 : 1;
+          this.env.say(this, pickyNo ? 'pickyno' : 'caro', pickyNo ? 2.6 : 1.8);
+          bus.emit('customerComplaint', { customerId: this.id, productId: e.productId, ratio: pickyNo ? ratio * 1.15 : ratio });
+          this.entry = null; this.state = 'react'; this.timer = 1.4;
+        } else {
+          this.entry = null; this.state = 'react'; this.timer = 0.6;
+        }
+        return;
+      }
     }
     if (this.units >= MAX_BASKET_ITEMS * (this.kind === 'bulk' ? 6 : 3)) { this.entry = null; this.state = 'react'; this.timer = 0.2; return; }
     this.state = 'grab';
@@ -247,17 +338,39 @@ export class Customer extends Agent {
     this.setPose('grab');
   }
 
-  private takeItem(): void {
-    const e = this.entry!;
-    this.entry = null;
+  /** Retira do nível alvo e completa com outros níveis do mesmo móvel. -1 = API de níveis indisponível. */
+  private takeLevels(e: Item): number {
     const { state } = this.env.ctx;
-    const got = safe('takeFromShelf', () => api.takeFromShelf(state, e.productId, e.qty), 0);
+    const first = safe('takeFromLevel', () => api.takeFromLevel(state, this.furnId, this.level, e.qty), -1);
+    if (first < 0) return -1;
+    let got = first;
+    if (got < e.qty) {
+      const spots = locate(this.env, e.productId) ?? [];
+      for (const s of spots) {
+        if (got >= e.qty) break;
+        if (s.furnitureId !== this.furnId || s.level === this.level || s.units <= 0) continue;
+        got += Math.max(0, safe('takeFromLevel', () => api.takeFromLevel(state, s.furnitureId, s.level, Math.min(e.qty - got, s.units)), 0));
+      }
+    }
+    return got;
+  }
+
+  private takeItem(): void {
+    const e = this.entry;
+    if (!e) { this.state = 'pickNext'; return; }
+    const { state } = this.env.ctx;
+    let got = this.level >= 0 ? this.takeLevels(e) : -1;
+    if (got < 0) { this.level = -1; got = safe('takeFromShelf', () => api.takeFromShelf(state, e.productId, e.qty), 0); }
     if (got <= 0) {
-      this.outOfStock++;
-      this.env.say(this, 'semestoque', 1.8);
-      this.state = 'react'; this.timer = 1.2; this.setPose('basket');
+      // o nível esvaziou enquanto o cliente pegava: outro nível/móvel (sem rever o preço) ou "Sem estoque"
+      if (this.level >= 0 && ++this.tries < 4) {
+        if (this.ensureUnits(e)) { this.state = 'grab'; this.timer = 0.35; }
+        return; // senão ensureUnits já mandou a outro móvel ou desistiu ("Sem estoque")
+      }
+      this.noStock();
       return;
     }
+    this.entry = null;
     const ex = this.items.find((i) => i.productId === e.productId);
     if (ex) ex.qty += got; else this.items.push({ productId: e.productId, qty: got });
     this.units += got;

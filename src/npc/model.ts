@@ -442,6 +442,7 @@ export class Person {
         const wx = this.rwx - g.position.x, wz = this.rwz - g.position.z;
         const lx = (wx * ch - wz * shh) / this.scale, lz = (wx * shh + wz * ch) / this.scale, ly = this.rwy / this.scale;
         if (pose === 'place') spX += 0.22;
+        else spX += clamp((Math.hypot(lx - REST.uArmR[0], lz) - 0.4) * 0.5, 0, 0.2); // alvo longe: debruça no balcão
         const dx = lx - REST.uArmR[0], dy = ly - (REST.uArmR[1] - (pose === 'place' ? 0.05 : 0)), dz = lz - REST.uArmR[2] - (pose === 'place' ? 0.08 : 0);
         const d = Math.max(0.12, Math.sqrt(dx * dx + dy * dy + dz * dz));
         const a = UPPER_ARM, bL = FORE_ARM, cc = Math.min(a + bL - 0.002, d);

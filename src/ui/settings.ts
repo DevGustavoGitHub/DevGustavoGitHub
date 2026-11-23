@@ -1,4 +1,4 @@
-/** Opções do jogador (localStorage 'mercadinho:settings'); emite 'settings:changed' {quality,volume,haptics,fontSize,reduceMotion,colorblind}. */
+/** Opções do jogador (localStorage 'mercadinho:settings'); emite 'settings:changed' {quality,volume,haptics,fontSize,reduceMotion,colorblind,lookSensitivity}. */
 import type { EventBus } from '../core/events';
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -13,14 +13,21 @@ export interface Settings {
   reduceMotion: boolean;
   /** Troca verde/vermelho por azul/laranja e acrescenta ícones ↑↓. */
   colorblind: boolean;
+  /** Fase 4: sensibilidade da câmera (multiplicador do olhar, 0,4–2,0; o player aplica). */
+  lookSensitivity: number;
 }
+export const LOOK_MIN = 0.4;
+export const LOOK_MAX = 2;
+/** Sensibilidade válida: limitada a 0,4–2,0 em passos de 0,1 (padrão 1,0). */
+export const clampLook = (v: unknown): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(LOOK_MAX, Math.max(LOOK_MIN, v)) * 10) / 10 : 1;
 export const FONT_SCALE: Record<FontSize, number> = { small: 0.9, medium: 1, large: 1.2 };
 export const SETTINGS_KEY = 'mercadinho:settings';
 
 const prefersReduced = (): boolean => {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 };
-const defaults = (): Settings => ({ quality: 'medium', volume: 0.8, haptics: true, fontSize: 'medium', reduceMotion: prefersReduced(), colorblind: false });
+const defaults = (): Settings => ({ quality: 'medium', volume: 0.8, haptics: true, fontSize: 'medium', reduceMotion: prefersReduced(), colorblind: false, lookSensitivity: 1 });
 
 export function loadSettings(): Settings {
   try {
@@ -35,6 +42,7 @@ export function loadSettings(): Settings {
       fontSize: d.fontSize === 'small' || d.fontSize === 'large' || d.fontSize === 'medium' ? d.fontSize : DEFAULTS.fontSize,
       reduceMotion: typeof d.reduceMotion === 'boolean' ? d.reduceMotion : DEFAULTS.reduceMotion,
       colorblind: typeof d.colorblind === 'boolean' ? d.colorblind : DEFAULTS.colorblind,
+      lookSensitivity: clampLook(d.lookSensitivity),
     };
   } catch {
     return defaults();
@@ -59,7 +67,10 @@ export class SettingsStore {
   }
   set(p: Partial<Settings>): void {
     this.value = { ...this.value, ...p };
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.value)); } catch { /* modo privado */ }
+    // preserva campos gravados por outros módulos (contrato: quem grava outro campo mantém os demais)
+    let extra: Record<string, unknown> = {};
+    try { extra = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Record<string, unknown>; } catch { /* corrompido */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...extra, ...this.value })); } catch { /* modo privado */ }
     this.emit();
   }
   /** Adota mudança vinda de fora (ex.: `quality:auto` do world) sem emitir de volta. */

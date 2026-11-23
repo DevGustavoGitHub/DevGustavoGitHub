@@ -1,5 +1,6 @@
 import { LICENSES, PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay, pickProduct } from './demand';
+import { stockProduct, unstockProduct } from './levels';
 import { advanceMarket, marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
 import { rentFor } from './rent';
@@ -85,18 +86,20 @@ export function buyBoxes(state: StoreState, productId: string, boxes: number): C
   return cost;
 }
 
-/** Move unidades das caixas da calçada para a prateleira, até a capacidade. Caixas esvaziadas somem (lixeira). */
+/**
+ * Move unidades das caixas da calçada para a exposição (níveis do produto, depois níveis livres compatíveis; ver
+ * levels.stockProduct), até encher. Caixas esvaziadas somem (lixeira).
+ */
 export function putOnShelf(state: StoreState, productId: string): number {
-  const room = shelfCapacity(state, productId) - (state.shelf[productId] ?? 0);
   let moved = 0;
   for (const box of state.sidewalk) {
-    if (box.productId !== productId || room - moved <= 0) continue;
-    const n = Math.min(box.units, room - moved);
+    if (box.productId !== productId || box.units <= 0) continue;
+    const n = stockProduct(state, productId, box.units);
     box.units -= n;
     moved += n;
+    if (box.units > 0) break; // exposição cheia
   }
   state.sidewalk = state.sidewalk.filter((b) => b.units > 0);
-  state.shelf[productId] = (state.shelf[productId] ?? 0) + moved;
   return moved;
 }
 
@@ -112,7 +115,7 @@ export function recordSale(state: StoreState, productId: string, qty: number): C
   const price = sellPrice(state, productId);
   const basis = state.costBasis[productId];
   const avg = basis?.avg ?? wholesale(state, productId);
-  state.shelf[productId] = have - qty;
+  unstockProduct(state, productId, qty);
   if (basis) basis.units = Math.max(0, basis.units - qty);
   const total = price * qty;
   state.ledger.revenue += total;

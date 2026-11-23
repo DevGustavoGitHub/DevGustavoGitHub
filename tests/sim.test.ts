@@ -93,10 +93,11 @@ describe('economia', () => {
   it('prateleira respeita capacidade e caixas esvaziadas somem', () => {
     const s = newGame();
     s.money = 100_000;
-    buyBoxes(s, 'feijao', 3); // 36 un, capacidade 2 slots * 12 = 24
-    expect(putOnShelf(s, 'feijao')).toBe(24);
-    expect(s.shelf.feijao).toBe(24);
+    buyBoxes(s, 'feijao', 5); // 60 un, capacidade 4 níveis * 12 = 48
+    expect(putOnShelf(s, 'feijao')).toBe(48);
+    expect(s.shelf.feijao).toBe(48);
     expect(s.sidewalk.reduce((a, b) => a + b.units, 0)).toBe(12);
+    expect(s.sidewalk).toHaveLength(1); // as 4 caixas esvaziadas somem
   });
   it('balanceamento: preço justo dá lucro; preço abusivo (+60%) rende bem menos', () => {
     const run = (mult: number) => {

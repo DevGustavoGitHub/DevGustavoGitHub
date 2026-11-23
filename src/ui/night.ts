@@ -3,7 +3,7 @@
  * botão "Terminar o dia". O relatório só abre quando o jogador toca no botão (o index confirma se ainda há clientes).
  */
 import { moonSvg } from './art';
-import { h } from './dom';
+import { h, tapOn } from './dom';
 import type { Hud } from './hud';
 import type { UiKit } from './kit';
 import { managerSvg } from './manager';
@@ -23,7 +23,7 @@ export class Night {
         h('div', { class: 'mc-ic' }, h('div', { class: 'night-ic' }, h('b', null, 'Noite'), h('span', null, time))),
         h('div', { class: 'mc-main' }, h('div', { class: 'mc-tx' }, 'Nenhum cliente novo virá à noite'))),
       h('div', { class: 'mc-face', html: managerSvg('bust') }));
-    this.btn = h('button', { class: 'endday', id: 'end-day', on: { click: () => this.endDay() } },
+    this.btn = h('button', { class: 'endday', id: 'end-day', on: tapOn(() => this.endDay()) },
       h('span', { html: moonSvg(40) }), h('span', null, 'Terminar', h('br'), 'o dia'));
     this.hud.slot.prepend(this.card);
     this.root.appendChild(this.btn);

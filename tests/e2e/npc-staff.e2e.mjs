@@ -20,7 +20,7 @@ const check = (n, ok, x = '') => { console.log(ok ? 'PASS' : 'FAIL', n, x); if (
 
 await page.evaluate(() => {
   const s = __game.state;
-  for (const id of ['feijao', 'macarrao']) s.shelf[id] = 3;
+  __npc.stock(3); // Fase 4: níveis (state.shelf é derivado)
   s.sidewalk.push({ productId: 'macarrao', units: 20 }, { productId: 'feijao', units: 12 });
   s.dirt.push({ x: 3.5, z: 6.5 }, { x: 9.5, z: 8.5 });
   s.employees.cashier = 1; s.employees.stocker = 1; s.employees.janitor = 1;

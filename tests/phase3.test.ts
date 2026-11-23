@@ -12,6 +12,7 @@ import { deserialize, serialize } from '../src/sim/save';
 import { DEFAULT_DECOR, newGame, type StoreState } from '../src/sim/state';
 import { RENT, UPGRADES } from '../src/sim/tuning';
 import { SIDEWALK_DEPTH, storeBounds } from '../src/core/layout';
+import { expose } from './helpers';
 
 const at = (level: number, money = 100_000_000): StoreState => {
   const s = newGame(7);
@@ -92,9 +93,11 @@ describe('estoque de montagem (placeFromStock / storeFurniture)', () => {
     const f = placeFromStock(s, 0, 7, 2, 0, 'arroz');
     expect(f).toMatchObject({ type: 'shelf', x: 7, z: 2, rot: 0, productId: 'arroz' });
     expect(s.money).toBe(m0);
-    expect(productCapacity(s, 'arroz')).toBe(16);
-    expect(s.slots.arroz).toBe(2);
+    expect(f.levels).toEqual([0, 1, 2, 3].map(() => ({ productId: 'arroz', units: 0 }))); // 4 níveis etiquetados
+    expect(productCapacity(s, 'arroz')).toBe(32);
+    expect(s.slots.arroz).toBe(4);
     const d = placeFromStock(s, 0, 0, 6, 0);
+    expect(d.levels).toBeUndefined(); // decoração não tem níveis
     expect(d.variant).toBe('rug');
     expect(s.furnitureStock).toEqual([]);
     expect(new Set(s.furniture.map((x) => x.id)).size).toBe(s.furniture.length);
@@ -102,7 +105,7 @@ describe('estoque de montagem (placeFromStock / storeFurniture)', () => {
   it('desmontar devolve ao estoque; exposto vai para a calçada; regras do último caixa e da estante ocupada', () => {
     const s = at(12);
     const sh = s.furniture.find((f) => f.productId === 'feijao')!;
-    s.shelf.feijao = 20;
+    expose(s, 'feijao', 20);
     const m0 = s.money;
     storeFurniture(s, sh.id);
     expect(s.money).toBe(m0); // não é venda
@@ -110,8 +113,9 @@ describe('estoque de montagem (placeFromStock / storeFurniture)', () => {
     expect(s.furnitureStock).toEqual([{ type: 'shelf' }]);
     expect(s.shelf.feijao).toBe(0);
     expect(s.sidewalk.reduce((a, b) => a + b.units, 0)).toBe(20);
+    expect(s.sidewalk.map((b) => b.units)).toEqual([12, 8]); // caixas fechadas de até boxSize
     placeFromStock(s, 0, sh.x, sh.z, 0, 'feijao');
-    expect(productCapacity(s, 'feijao')).toBe(24);
+    expect(productCapacity(s, 'feijao')).toBe(48);
     expect(() => storeFurniture(s, s.furniture.find((f) => f.type === 'counter')!.id)).toThrow('pelo menos um caixa');
     unlockStorage(s);
     const rack = buyFurniture(s, 'rack', 1, -3, 0);
@@ -172,22 +176,31 @@ describe('caixas no chão (dropBox / canDropBox / setBoxOpen)', () => {
     expect(back.sidewalk[0]!.open).toBe(true);
     expect(back.furnitureStock).toEqual([{ type: 'shelf' }]);
   });
-  it('assignProduct abastece móvel novo/vazio e troca o produto de móvel esgotado (categoria aceita)', () => {
+  it('assignProduct etiqueta os níveis vazios de móvel novo/esgotado (categoria aceita); níveis com unidades ficam', () => {
     const s = at(6);
     s.licenses.push('bebidas', 'laticinios');
     checkoutCart(s, [{ kind: 'furniture', id: 'fridge', qty: 1 }]);
     const fr = placeFromStock(s, 0, 7, 2, 0);
     expect(fr.productId).toBeUndefined();
+    expect(fr.levels).toEqual([{ units: 0 }, { units: 0 }, { units: 0 }, { units: 0 }]); // sem etiqueta
     assignProduct(s, fr.id, 'refri');
-    expect(productCapacity(s, 'refri')).toBe(30);
+    expect(productCapacity(s, 'refri')).toBe(40);
     expect(s.shelf.refri ?? 0).toBe(0); // esgotado: troca livre
     assignProduct(s, fr.id, 'leite');
     expect(productCapacity(s, 'refri')).toBe(0);
-    expect(productCapacity(s, 'leite')).toBe(36);
+    expect(productCapacity(s, 'leite')).toBe(48);
     expect(() => assignProduct(s, fr.id, 'feijao')).toThrow('não cabe');
     const sh = s.furniture.find((f) => f.productId === 'macarrao')!;
     assignProduct(s, sh.id, 'arroz'); // macarrão sem estoque exposto
-    expect(productCapacity(s, 'arroz')).toBe(16);
+    expect(productCapacity(s, 'arroz')).toBe(32);
+    expect(s.sidewalk).toHaveLength(0);
+    // com unidades num nível: só os vazios trocam de etiqueta (nada vai para a calçada)
+    expose(s, 'arroz', 5);
+    assignProduct(s, sh.id, 'cafe');
+    expect(sh.levels!.map((l) => l.productId)).toEqual(['arroz', 'cafe', 'cafe', 'cafe']);
+    expect(s.shelf.arroz).toBe(5);
+    assignProduct(s, sh.id, undefined);
+    expect(sh.levels).toEqual([{ productId: 'arroz', units: 5 }, { units: 0 }, { units: 0 }, { units: 0 }]);
     expect(s.sidewalk).toHaveLength(0);
   });
 });

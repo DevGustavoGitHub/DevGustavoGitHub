@@ -39,7 +39,11 @@ export interface DayStats extends DayReport {
   money: number;
 }
 
-export const defaultBotOptions: BotOptions = { priceMult: 1.12, restocks: 4, invest: true };
+/**
+ * Fase 4: o preço sugerido virou a média de mercado e a curva de aceitação ficou mais tolerante; o bot (jogador
+ * razoável) cobra +10%, o ponto de maior lucro da curva nova (o sugerido ×1,0 rende ~85% disso). Ver GDD §4.5.
+ */
+export const defaultBotOptions: BotOptions = { priceMult: 1.1, restocks: 4, invest: true };
 
 const BY_POPULARITY = [...PRODUCTS].sort((a, b) => b.popularity - a.popularity);
 

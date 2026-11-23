@@ -31,7 +31,7 @@ const until = async (fn, arg, ms = 40000) => {
 await page.evaluate(() => {
   const s = __game.state;
   s.money = 5_000_000;
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) s.shelf[id] = 20;
+  __npc.stock(20); // Fase 4: abastece os níveis (state.shelf é derivado)
   window.__toasts = []; window.__reqs = []; window.__compl = [];
   __game.bus.on('toast', (t) => window.__toasts.push(t.text));
   __game.bus.on('checkoutRequest', (r) => window.__reqs.push(r));
@@ -59,7 +59,7 @@ await page.evaluate(() => {
 /* ---------- 1) pedido automático ---------- */
 await page.evaluate(() => {
   const s = __game.state;
-  s.shelf.arroz = 0;
+  __npc.stock(0, 'arroz');
   s.sidewalk.length = 0;
   s.autoOrders = { arroz: { minUnits: 9999, boxes: 1 } };
   __game.clock.openStore();
@@ -76,7 +76,7 @@ check('pedido automático novamente a cada hora', !!t2, String(t2));
 // repositor abastece as caixas novas (várias por viagem quando houver)
 await page.evaluate(() => {
   const s = __game.state;
-  s.employees.stocker = 4; s.shelf.macarrao = 0; s.shelf.feijao = 0;
+  s.employees.stocker = 4; __npc.stock(0, 'macarrao'); __npc.stock(0, 'feijao');
   s.autoOrders = {};
   s.sidewalk.length = 0;
   s.sidewalk.push({ productId: 'macarrao', units: 20 }, { productId: 'feijao', units: 12 });
@@ -91,7 +91,8 @@ await page.evaluate(() => { __game.state.employees.stocker = 0; __npc.sync(); })
 /* ---------- 2) cancelamento do checkout ---------- */
 await page.evaluate(() => {
   __game.clock.phase = 'open'; __game.clock.minute = 600; __game.state.employees.stocker = 0;
-  for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) __game.state.shelf[id] = 20;
+  __npc.stock(20);
+  window.__compl.length = 0; // Fase 4: preço = mercado (prices = {}) → nenhuma reclamação
   window.__reqs.length = 0; window.__mode = 'cancel'; window.__cancels = 0; window.__stopAfterCancel = true; window.__autoPay = true;
   __game.state.prices = {};
   __npc.timeScale = 10;
@@ -126,6 +127,9 @@ const gone = await page.evaluate((id) => { const i = __npc.customerInfo(id); ret
 check('após 3 cancelamentos o cliente desiste e sai', gone);
 await page.evaluate(() => { window.__mode = 'ok'; });
 
+const complAtMarket = await page.evaluate(() => window.__compl.slice());
+check('preço = mercado: rejeição sem reclamação (Caro! só acima de 1,05)', complAtMarket.length === 0, JSON.stringify(complAtMarket.slice(0, 3)));
+
 /* ---------- 3) clientes especiais ---------- */
 const dist = await page.evaluate(() => __npc.sampleKinds(6000));
 console.log('dist', JSON.stringify(dist));
@@ -146,8 +150,10 @@ const kinds = await page.evaluate(() => __npc.customers().map((c) => c.kind));
 check('tipos presentes na loja', ['bulk', 'picky', 'kid'].every((k) => kinds.includes(k)), kinds.join(','));
 const comp = await until(() => window.__compl.length >= 1 ? window.__compl.length : null, undefined, 60000);
 check('exigente reclama de preço alto', !!comp, String(comp));
+const complR = await page.evaluate(() => window.__compl.map((c) => +c.ratio.toFixed(2)));
+check('toda reclamação tem razão > 1,05', complR.length > 0 && complR.every((r) => r > 1.05), JSON.stringify(complR.slice(0, 8)));
 // bulk/kid: restaura preços e confere tamanho da compra
-await page.evaluate(() => { const s = __game.state; s.prices = {}; for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) s.shelf[id] = 40; });
+await page.evaluate(() => { const s = __game.state; s.prices = {}; __npc.stock(40); });
 await page.evaluate(() => {
   __game.clock.phase = 'open'; __game.clock.minute = 600;
   window.__max = {};

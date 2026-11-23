@@ -173,7 +173,7 @@ export const phase3Css = `
 .rotate .rot-ic{width:150px;height:130px}.rotate .ph{transform-origin:60px 52px;animation:mx-rot 2.4s ease-in-out infinite}
 .rotate h2{margin:0;font-size:26px;font-weight:900}.rotate p{margin:0;font-size:16px;opacity:.9;max-width:300px;line-height:1.4}
 @keyframes mx-rot{0%,18%{transform:rotate(0)}50%,78%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
-@media (orientation:portrait) and (max-width:1024px){.rotate{display:flex}}
+.rotate.on{display:flex} /* a classe vem de rotate.ts (retrato sem paisagem travada) */
 
 /* ---------------- tablet (computador) ---------------- */
 .tb-wrap{align-items:stretch;padding:calc(var(--hud-b,52px) + 6px) calc(var(--sa-r) + 8px) calc(var(--sa-b) + 6px) calc(var(--sa-l) + 4px)}

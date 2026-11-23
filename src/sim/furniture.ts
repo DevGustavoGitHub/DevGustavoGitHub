@@ -1,16 +1,20 @@
 /** Regras de móveis: catálogo, colisão, caminho livre, capacidade. api.ts expõe estas funções. */
 import { FURNITURE_FOOTPRINT, STORAGE_DEPTH, doorX, storeBounds, type FurnitureType } from '../core/layout';
 import type { FurnitureSpec } from './api';
-import { PRODUCTS, productById } from './catalog';
+import { productById } from './catalog';
 import { DECOR_ITEMS, STORAGE } from './tuning';
 import type { Cents } from './money';
 import type { Furniture, StoreState } from './state';
 
 export type Rot = 0 | 90 | 180 | 270;
 
+/**
+ * Fase 4: `slots` dos expositores = nº de NÍVEIS (prateleiras) do móvel, como estantes reais: prateleira 4,
+ * geladeira 4 (porta com 4 prateleiras), freezer 3 (cestos). Cada nível guarda um produto (capacidade = slotCapacity).
+ */
 const CATALOG: FurnitureSpec[] = [
-  { type: 'shelf', name: 'Prateleira', cost: 30000, minLevel: 1, slots: 2, categories: ['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos'] },
-  { type: 'fridge', name: 'Geladeira', cost: 50000, minLevel: 2, slots: 3, categories: ['bebidas', 'laticinios', 'hortifruti', 'frios'] },
+  { type: 'shelf', name: 'Prateleira', cost: 30000, minLevel: 1, slots: 4, categories: ['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos'] },
+  { type: 'fridge', name: 'Geladeira', cost: 50000, minLevel: 2, slots: 4, categories: ['bebidas', 'laticinios', 'hortifruti', 'frios'] },
   { type: 'freezer', name: 'Freezer', cost: 150000, minLevel: 10, slots: 3, categories: ['congelados'] },
   { type: 'counter', name: 'Caixa registradora', cost: 100000, minLevel: 4, slots: 0, categories: [] },
   /** rack: `slots` = nº de caixas que a estante guarda no depósito. */
@@ -56,23 +60,7 @@ export function storagePassage(expansion: number): { x0: number; x1: number } {
   return { x0: dx - 1, x1: dx + 1 };
 }
 
-/* ---------- capacidade ---------- */
-
-export function recomputeSlots(state: StoreState): void {
-  for (const p of PRODUCTS) state.slots[p.id] = 0;
-  for (const f of state.furniture) {
-    if (!f.productId || !isDisplay(f.type)) continue;
-    state.slots[f.productId] = (state.slots[f.productId] ?? 0) + specOf(f.type).slots;
-  }
-}
-
-export function productCapacity(state: StoreState, productId: string): number {
-  const slots = state.furniture.reduce(
-    (a, f) => (f.productId === productId && isDisplay(f.type) ? a + specOf(f.type).slots : a),
-    0,
-  );
-  return slots * productById(productId).slotCapacity;
-}
+/* ---------- capacidade (exposição por níveis: levels.ts) ---------- */
 
 export function storageCapacity(state: StoreState): number {
   if (!state.storageUnlocked) return 0;
@@ -83,33 +71,6 @@ export function storageUsed(state: StoreState): number {
   let n = 0;
   for (const [id, units] of Object.entries(state.storage)) if (units > 0) n += Math.ceil(units / productById(id).boxSize);
   return n;
-}
-
-/**
- * Chamar após qualquer mudança em móveis/atribuições: recalcula state.slots e devolve o excedente exposto
- * (unidades acima da nova capacidade) para o depósito (se couber) ou para caixas na calçada.
- */
-export function reconcile(state: StoreState): void {
-  recomputeSlots(state);
-  for (const p of PRODUCTS) {
-    const have = state.shelf[p.id] ?? 0;
-    const cap = productCapacity(state, p.id);
-    if (have <= cap) continue;
-    const excess = have - cap;
-    state.shelf[p.id] = cap;
-    const stored = state.storage[p.id] ?? 0;
-    const extraBoxes = Math.ceil((stored + excess) / p.boxSize) - Math.ceil(stored / p.boxSize);
-    if (state.storageUnlocked && storageUsed(state) + extraBoxes <= storageCapacity(state)) {
-      state.storage[p.id] = stored + excess;
-    } else {
-      let rest = excess;
-      while (rest > 0) {
-        const n = Math.min(p.boxSize, rest);
-        state.sidewalk.push({ productId: p.id, units: n, open: false });
-        rest -= n;
-      }
-    }
-  }
 }
 
 /* ---------- colocação ---------- */

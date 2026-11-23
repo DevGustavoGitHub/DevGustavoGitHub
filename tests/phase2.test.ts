@@ -13,6 +13,7 @@ import { deserialize, serialize } from '../src/sim/save';
 import { newGame, type StoreState } from '../src/sim/state';
 import { BANKRUPTCY, EMPLOYEE_TABLE, UPGRADES } from '../src/sim/tuning';
 import { storeBounds } from '../src/core/layout';
+import { expose } from './helpers';
 
 const at = (level: number, money = 100_000_000): StoreState => {
   const s = newGame(7);
@@ -159,7 +160,7 @@ describe('pedidos automáticos', () => {
     const s = at(5);
     setAutoOrder(s, 'arroz', { minUnits: 20, boxes: 2 });
     setAutoOrder(s, 'feijao', { minUnits: 5, boxes: 1 });
-    s.shelf.feijao = 5; // no limite: não compra
+    expose(s, 'feijao', 5); // no limite: não compra
     const m0 = s.money;
     const bought = runAutoOrders(s);
     expect(bought.map((b) => b.productId)).toEqual(['arroz']);
@@ -235,7 +236,7 @@ describe('melhorias (dolly)', () => {
 
 describe('histórico e produtos mais vendidos', () => {
   const sellSome = (s: StoreState, id: string, qty: number): void => {
-    s.shelf[id] = (s.shelf[id] ?? 0) + qty;
+    expose(s, id, qty);
     expect(takeFromShelf(s, id, qty)).toBe(qty);
     completeSale(s, [{ productId: id, qty }], 0.5, 4);
   };
@@ -298,8 +299,8 @@ describe('save: migração e persistência', () => {
     takeLoan(s, 300000);
     setAutoOrder(s, 'arroz', { minUnits: 7, boxes: 3 });
     buyUpgrade(s, 'dolly');
-    s.shelf.arroz = 5;
-    takeFromShelf(s, 'arroz', 3);
+    expose(s, 'arroz', 5);
+    expect(takeFromShelf(s, 'arroz', 3)).toBe(3);
     completeSale(s, [{ productId: 'arroz', qty: 3 }], 0.5, 4);
     closeDay(s);
     expect(deserialize(serialize(s))).toEqual(s);
