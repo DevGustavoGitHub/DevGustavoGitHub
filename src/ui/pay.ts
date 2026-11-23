@@ -5,7 +5,7 @@
  * `checkoutResult {customerId, ok, speed, mistakes}` (speed = só o pagamento). Abre como modal (`ui:modal`) para o
  * player não bipar por trás.
  */
-import { customerCashPayment, optimalChange, sum, type Cents } from '../sim/money';
+import { DRAWER_BILLS, DRAWER_COINS, customerCashPayment, optimalChange, sum, type Cents } from '../sim/money';
 import { clamp, h, money } from './dom';
 import { icon } from './icons';
 import type { UiKit } from './kit';
@@ -20,8 +20,9 @@ export interface PayRequest {
   stage?: 'pay';
 }
 
-const BILLS3: readonly Cents[] = [200, 500, 1000, 2000, 5000];
-const COINS3: readonly Cents[] = [5, 10, 25, 50, 100];
+/** Gaveta da referência: notas e moedas em ordem crescente (R$ 2…50; R$ 0,05…1). */
+const BILLS3: readonly Cents[] = [...DRAWER_BILLS].sort((a, b) => a - b);
+const COINS3: readonly Cents[] = [...DRAWER_COINS].sort((a, b) => a - b);
 const BILL_C: Record<number, [string, string]> = {
   200: ['#7cc0f0', '#3a7fbf'], 500: ['#b59af0', '#6f55bd'], 1000: ['#f09a9a', '#bd4c4c'], 2000: ['#f0cf62', '#b8921a'], 5000: ['#f6ae66', '#c4741e'],
 };

@@ -105,7 +105,7 @@ export function autoTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
       else tab.refresh();
     };
     grid.appendChild(h('div', { class: `card${r ? '' : ' off'}`, 'data-product': p.id },
-      h('div', { class: 'card-head' }, productTile(p.name, p.category),
+      h('div', { class: 'card-head' }, productTile(p),
         h('div', { class: 'grow' }, h('h5', null, p.name), h('small', null, `Em estoque: ${owned} un · caixa com ${p.boxSize}`)),
         below ? badge('Abaixo do mínimo', 'warn') : r ? badge('Ligado', 'good') : badge('Desligado', 'mute'),
         toggle(!!r, `Pedido automático de ${p.name}`, (on) => {

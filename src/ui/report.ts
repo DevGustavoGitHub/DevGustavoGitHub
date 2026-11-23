@@ -23,11 +23,9 @@ const writeJson = (k: string, v: unknown): void => { try { localStorage.setItem(
 
 /** Números do resumo (felizes/irritados vêm do sim; relatórios antigos caem em atendidos/perdidos). */
 export function summaryOf(r: DayReport): { total: number; happy: number; angry: number; income: number; expense: number; profit: number } {
-  const x = r as DayReport & { happy?: number; angry?: number };
-  return {
-    total: r.served + r.lost, happy: x.happy ?? r.served, angry: x.angry ?? r.lost,
-    income: r.revenue + r.tips, expense: r.cogs + r.fixed, profit: r.netProfit,
-  };
+  const happy = r.happy ?? r.served, angry = r.angry ?? r.lost;
+  const income = r.income ?? r.revenue + r.tips, expense = r.expenses ?? r.cogs + r.fixed;
+  return { total: happy + angry, happy, angry, income, expense, profit: income - expense };
 }
 
 export class Report {
@@ -116,7 +114,7 @@ export class Report {
     if (rep.lost > rep.served) t.push('Mais clientes foram embora do que compraram. Confira estoque e preços: acima de 12% do mercado afasta gente.');
     if (rep.netProfit < 0) t.push('Dia no vermelho. Use "Definir todos pelo sugerido" na aba Preços e revise as despesas fixas.');
     if (s.employees.cashier === 0 && rep.served >= 25) t.push('Você atende muita gente. Contratar um caixa libera seu tempo para repor estoque.');
-    if (s.money > 40 * s.rent) t.push('Há bastante caixa parado. Que tal ampliar a loja, comprar uma licença ou mais móveis?');
+    if (s.money > Math.max(40 * s.rent, 500000)) t.push('Há bastante caixa parado. Que tal ampliar a loja, comprar uma licença ou mais móveis?');
     if (!t.length) t.push('Bom trabalho! Antes de abrir amanhã, confira os preços do atacado no Mercado.');
     return t.slice(0, 2);
   }
@@ -124,7 +122,8 @@ export class Report {
   /** Relatório completo (o mesmo da Fase 2), mostrado em "Detalhes". */
   private details(r: DayReport, prev: DayReport | null, low: Low, gain: { xp: number; lvl: number }, rep0: number): HTMLElement {
     const s = this.kit.ctx.state;
-    const wages = Math.max(0, r.fixed - s.rent - (r.interest ?? 0));
+    const rent = r.rent ?? Math.max(0, r.fixed - (r.wages ?? 0) - (r.interest ?? 0));
+    const wages = r.wages ?? Math.max(0, r.fixed - rent - (r.interest ?? 0));
     const stars = (v: number): string => '★'.repeat(Math.round(v)) + '☆'.repeat(5 - Math.round(v));
     const m = summaryOf(r);
     return h('div', { class: 'rp-body' },
@@ -132,7 +131,7 @@ export class Report {
         kv('Receita bruta', h('span', null, money(r.revenue), this.delta(r.revenue, prev?.revenue, money))),
         kv('Gorjetas', money(r.tips)),
         kv('Custo das mercadorias (COGS)', money(-r.cogs)),
-        kv('Aluguel', money(-s.rent)),
+        kv('Aluguel', money(-rent)),
         kv('Salários', money(-wages)),
         r.interest ? kv('Juros do empréstimo', money(-r.interest)) : null,
         kv('Lucro líquido', h('span', { class: r.netProfit < 0 ? 'bad' : 'good' }, money(r.netProfit, { sign: true }), this.delta(r.netProfit, prev?.netProfit, money)), 'total')),

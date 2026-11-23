@@ -13,6 +13,9 @@ import { Batch, meshesOf, type Spec } from './batch';
 import { uvToCell, type Cell } from './atlas';
 import { DECAL, brickTex, decalMaterial, drawSign, tileTex, woodTex } from './tex';
 
+/** Compatibilidade: o ambiente externo mudou para env.ts. */
+export { Env, ROAD_WIDTH } from './env';
+
 /** Medidas da fachada (metros). */
 export const FACADE = { t: 0.2, sill: 0.55, winTop: 2.45, doorTop: 2.45, band0: WALL_HEIGHT, band1: 4.2, pierDoor: 0.7, pierCorner: 0.55, pierMid: 0.9 };
 

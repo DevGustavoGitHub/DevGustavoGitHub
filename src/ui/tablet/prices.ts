@@ -43,8 +43,8 @@ export function pricesTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
     const sug = suggestedPrice(cost, market);
     const btn = (label: string, d: number): HTMLElement =>
       h('button', { class: 'btn small', on: { click: () => setOne(p.id, price + d) } }, label);
-    grid.appendChild(h('div', { class: 'card' },
-      h('div', { class: 'card-head' }, productTile(p.name, p.category),
+    grid.appendChild(h('div', { class: 'card', 'data-product': p.id },
+      h('div', { class: 'card-head' }, productTile(p),
         h('div', { class: 'grow' }, h('h5', null, p.name), h('small', null, s.prices[p.id] === undefined ? 'Preço automático (mercado)' : 'Preço definido por você')),
         badge(v.text, v.tone)),
       kv('Custo médio de compra', money(cost)),
