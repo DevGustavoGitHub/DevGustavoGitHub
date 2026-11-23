@@ -418,3 +418,33 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   `takeFromLevel` (confira o `productId` do nível; 0 = móvel sumiu/esvaziou); desistência segue com `returnToShelf`. Repositor: `placeUnits`
   vale, mas para repor o móvel até onde andou use `locateProduct` + `placeUnitsInLevel`. **ui** — preço sugerido = mercado (sem +12%);
   `productCapacity`/`state.slots` contam níveis (4 por prateleira); `economy.shelfCapacity`/`unitsOwned` seguem válidos.
+
+## Fase 4 — player (src/player)
+- **Nível mirado:** no hit de móvel shelf/fridge/freezer o player chama `world.levelAt(furnitureId, hitPoint)`; fora dos níveis
+  (tampo, base, lateral) procura o nível mais próximo na vertical (passos de 7 cm, até 70 cm). Sem `levelAt`: estimativa própria
+  (nível 0 = o de cima; freezer da esquerda para a direita). O alvo vira um `PickInfo` NOVO `{kind:'furniture', id, level}` (o
+  `userData.pick` do world nunca é alterado) e `world.highlight` é chamado também quando só o nível muda (troca após 0,07 s).
+- **Ações por nível** (decididas por `api.canStockLevel` sobre as caixas carregadas, do topo para a base): **Repor** (caixa aberta,
+  `ok`; segurar = 1 un./0,12 s → `placeUnitsInLevel(…, pick.level, 1)`) > **Abrir caixa** (caixa fechada que serviria: `box-closed`) >
+  **Retirar** (caixa ABERTA e VAZIA, nível com unidades; segurar → `pullUnitsFromLevel(…, 1)`; enquanto segura continua puxando
+  para a MESMA caixa até encher `boxSize` ou esvaziar o nível — não vira "Repor" no meio) > **Abrir caixa** (fechada vazia, nível com
+  unidades) > desabilitados **Outro produto** / **Não cabe aqui** / **Nível cheio** / **Caixa vazia**. Sem caixa: **Preço** →
+  `ui:openTablet {tab:'prices', productId do nível}` (nível sem etiqueta: sem `productId`; alvo sem nível: 1º nível etiquetado) e
+  secundário **Mover**. `assignProduct`/`placeUnits` não são mais usados pelo player.
+- **`player:action`:** `placeUnits` e o novo `pullUnits` levam `{productId, furnitureId, level}`; depois `stateChanged {what:'shelf'}`
+  (+ `'furniture'` quando a etiqueta do nível muda, + `'sidewalk'` no Retirar). Selo na tela: "Produto n/capacidade · caixa: k"
+  (`levelCapacity` = capacidade total do nível).
+- **Multitoque:** todos os botões do player agem no `pointerdown` (o `click` só vale com `detail === 0`, teclado/leitor de tela) e têm
+  `touch-action:none`; o botão de ação guarda o `pointerId` que o apertou e só solta no `pointerup`/`pointercancel`/`lostpointercapture`
+  desse mesmo ponteiro. Joystick e olhar seguem por `pointerId` sem capturar outros dedos; nenhum `preventDefault` global (só
+  `contextmenu` na área livre e teclas Espaço/setas). Medido no e2e: com dois dedos (CDP) o Chromium NÃO entrega `click` ao botão,
+  por isso o bug do usuário.
+- **Sensibilidade:** `lookSensitivity` (0,4–2,0; padrão 1) lido de `localStorage['mercadinho:settings']` no início e de cada
+  `settings:changed` (evento sem o campo mantém o valor); multiplica o olhar por toque e por mouse (`__player.prefs()`).
+- **Paisagem no navegador** (`src/player/landscape.ts`): no 1º `pointerup` de toque (o gesto que dá ativação ao toque) tenta
+  `documentElement.requestFullscreen({navigationUI:'hide'})` + `screen.orientation.lock('landscape')`, falhas silenciosas, até 2
+  tentativas. Não roda no app nativo (`window.Capacitor` com `isNativePlatform()`), em iframe (artefato), com mouse, nem sob WebDriver
+  (testes) salvo `?fs=1`. Estado em `__player.landscape()`.
+- **Debug novo:** `__player.target()` com `level`, `__player.aimLevel(furnitureId, level)` (mira pelo caminho real: raycast +
+  `levelAt`), `__player.prefs()`, `__player.landscape()`. E2E: `tests/e2e/player-fp.e2e.mjs` (`npx vite build && npx vite preview
+  --port 5202`; `PLAYER_URL`, prints em `PLAYER_SHOTS`).
