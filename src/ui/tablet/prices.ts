@@ -17,12 +17,13 @@ export function suggestedPrice(state: StoreState, productId: string): number {
 
 /**
  * Selo do preço em relação à média de mercado, coerente com a curva de aceitação da Fase 4 (≈95% dos clientes
- * aceitam em 1,00, ≈85–90% em 1,10, metade por volta de 1,30; "Caro!" só acima de 1,05; exigentes recusam > 1,10).
+ * aceitam em 1,00 e ≈88% em 1,10 — o lucro máximo fica perto de 1,10 —, metade por volta de 1,30; exigentes
+ * recusam acima de 1,10). Justo = até +10%.
  */
 export function verdict(ratio: number): { text: string; tone: 'good' | 'bad' | 'warn' | 'info' } {
   if (ratio < 0.95) return { text: 'Barato', tone: 'info' };
-  if (ratio <= 1.05) return { text: 'Justo', tone: 'good' };
-  if (ratio <= 1.2) return { text: 'Caro', tone: 'warn' };
+  if (ratio <= 1.1 + 1e-9) return { text: 'Justo', tone: 'good' };
+  if (ratio <= 1.25) return { text: 'Caro', tone: 'warn' };
   return { text: 'Abusivo', tone: 'bad' };
 }
 
@@ -34,7 +35,7 @@ export function pricesTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
     kit.act('price', () => setPrice(s, id, Math.max(PRICE_STEP, v)), undefined, 'pop');
   };
   body.appendChild(h('div', { class: 'card-actions' },
-    h('span', { class: 'muted', style: 'font-size:13px;flex:1;min-width:180px' }, 'Preço por unidade, em passos de R$ 0,05. O sugerido é a média do mercado: quase todo cliente aceita. Acima de 10% muitos desistem e os exigentes reclamam.'),
+    h('span', { class: 'muted', style: 'font-size:13px;flex:1;min-width:180px' }, 'Preço por unidade, em passos de R$ 0,05. O sugerido é a média do mercado: quase todo cliente aceita. Até 10% acima ainda é justo e costuma render mais; acima disso muitos desistem e os exigentes reclamam.'),
     h('button', { class: 'btn accent small', id: 'price-all', on: { click: () => {
       kit.act('price', () => { for (const p of list) setPrice(s, p.id, suggestedPrice(s, p.id)); }, 'Preço sugerido aplicado a todos os produtos.', 'pop');
     } } }, 'Definir todos no sugerido')));

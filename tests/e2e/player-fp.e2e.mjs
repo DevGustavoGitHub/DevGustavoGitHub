@@ -93,7 +93,12 @@ const giveBox = (pid, units, open = false) => page.evaluate(([pid, units, open])
 const dropAll = () => page.evaluate(() => __player.dropAll());
 const shelfOf = (pid) => page.evaluate((p) => { const f = __game.state.furniture.find((x) => x.productId === p); return f ? { id: f.id, x: f.x, z: f.z, rot: f.rot } : null; }, pid);
 /** FASE 4: níveis do móvel (teste escreve direto; os derivados se recalculam na próxima mutação da sim). */
-const setLevels = (id, levels) => page.evaluate(([id, levels]) => { const f = __game.state.furniture.find((x) => x.id === id); f.levels = levels.map((l) => ({ ...l })); __game.bus.emit('stateChanged', { what: 'shelf' }); }, [id, levels]);
+const setLevels = (id, levels) => page.evaluate(([id, levels]) => {
+  const f = __game.state.furniture.find((x) => x.id === id);
+  const n = Math.max(levels.length, f.levels?.length ?? 0), fill = levels.find((l) => l.productId)?.productId;
+  f.levels = Array.from({ length: n }, (_, i) => ({ ...(levels[i] ?? (fill ? { productId: fill, units: 0 } : { units: 0 })) }));
+  __game.bus.emit('stateChanged', { what: 'shelf' });
+}, [id, levels]);
 const lvls = (id) => page.evaluate((id) => (__game.state.furniture.find((x) => x.id === id)?.levels ?? []).map((l) => ({ ...l })), id);
 const boxNow = () => page.evaluate(() => { const b = __player.svc.carrying; return b ? { pid: b.productId, units: b.units, open: !!b.open } : null; });
 /** Fica 1,6 m à frente do móvel e mira o nível `lvl` pelo caminho real (raycast + world.levelAt), via __player.aimLevel. */
@@ -194,8 +199,9 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const before = (await lvls(f.id))[0].units;
   await shot('p2-caixa-aberta-repor');
   await holdSel('.pl-act-btn', 1600);
-  const after = { shelf: (await lvls(f.id))[0].units, units: (await boxNow())?.units, other: (await lvls(f.id))[1].units };
-  check('segurar "Repor" repete no nível mirado (placeUnitsInLevel, 1 un. a cada ~0,12 s)', after.shelf - before >= 4 && after.shelf - before <= 12 && after.other === 0, `${before} → ${after.shelf} (outro nível ${after.other})`);
+  const L = await lvls(f.id);
+  const after = { shelf: L[0].units, units: (await boxNow())?.units, other: L.slice(1).reduce((a, l) => a + l.units, 0), n: L.length };
+  check('segurar "Repor" repete no nível mirado (placeUnitsInLevel, 1 un. a cada ~0,12 s)', after.shelf - before >= 4 && after.shelf - before <= 12 && after.other === 0, `${before} → ${after.shelf} (outros níveis ${after.other}; ${after.n} níveis)`);
   check('player:action placeUnits por unidade (com level)', (await evs('player:action')).filter((e) => e.kind === 'placeUnits' && e.level === 0).length === after.shelf - before);
   await tapSel('.pl-box .pl-btn');
   await until(() => __player.held().open[0] === 0);

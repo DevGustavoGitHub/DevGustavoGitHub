@@ -39,7 +39,7 @@ interface Seat { counterId: number; pos: THREE.Vector3; yaw0: number; pitch0: nu
 const baseOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}`;
 const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}:${p.level ?? ''}`;
 const isDisplay = (f: Furniture): boolean => f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer';
-/** Reserva sem `world.levelAt`: faixa vertical dos níveis por tipo (nível 0 = o de baixo). */
+/** Reserva sem `world.levelAt`: faixa vertical dos níveis (nível 0 = o de CIMA, como no world; freezer: da esquerda p/ a direita). */
 const LEVEL_BAND: Partial<Record<Furniture['type'], readonly [number, number]>> = { shelf: [0.08, 1.5], fridge: [0.12, 1.9], freezer: [0.1, 0.95] };
 const LEVEL_WHY: Record<string, string> = { 'other-product': 'Outro produto', 'not-accepted': 'Não cabe aqui', full: 'Nível cheio', 'box-empty': 'Caixa vazia', 'box-closed': 'Abrir caixa' };
 const isOpen = (b: Box): boolean => b.open === true;
@@ -290,8 +290,14 @@ export default function create(): GameModule {
         if (l != null && Number.isFinite(l)) return clamp(Math.round(l), 0, n - 1);
       } catch { /* world em andamento: estimativa própria */ }
     }
+    const r = furnRect(f), cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+    if (f.type === 'freezer') { // eixo x local do móvel, visto de frente: esquerda → direita
+      const a = (f.rot * Math.PI) / 180, lx = (pt.x - cx) * Math.cos(a) - (pt.z - cz) * Math.sin(a);
+      const w = f.rot === 90 || f.rot === 270 ? r.z1 - r.z0 : r.x1 - r.x0;
+      return clamp(Math.floor((lx / Math.max(0.1, w) + 0.5) * n), 0, n - 1);
+    }
     const [y0, y1] = LEVEL_BAND[f.type] ?? [0.1, 1.5];
-    return clamp(Math.floor(((pt.y - y0) / (y1 - y0)) * n), 0, n - 1);
+    return clamp(n - 1 - Math.floor(((pt.y - y0) / (y1 - y0)) * n), 0, n - 1);
   };
   const withLevel = (info: PickInfo, pt: THREE.Vector3): PickInfo => {
     const f = st().furniture.find((x) => x.id === info.id);
@@ -363,11 +369,11 @@ export default function create(): GameModule {
   const A = (key: string, label: string, run: () => boolean | void, hold = false, box?: Box): Act => ({ key, label, enabled: true, hold, run, box });
   const D = (key: string, label: string): Act => ({ key, label, enabled: false, hold: false });
 
-  /** `api.canStockLevel` ('box-closed' só quando todo o resto está ok). null = API ainda NOT_IMPLEMENTED (reserva). */
-  const levelCheck = (b: Box, f: Furniture, l: number): api.LevelCheck | null => {
+  /** `api.canStockLevel` (ordem da sim: box-empty, not-accepted, other-product, full, box-closed, ok). */
+  const levelCheck = (b: Box, f: Furniture, l: number): api.LevelCheck => {
     const i = idxOf(b);
     if (i < 0) return 'box-empty';
-    try { return api.canStockLevel(st(), i, f.id, l); } catch (e) { return notImpl(e) ? null : 'not-accepted'; }
+    try { return api.canStockLevel(st(), i, f.id, l); } catch { return 'not-accepted'; }
   };
   const pullAct = (f: Furniture, l: number, b: Box): Act => A(`pull:${f.id}:${l}`, 'Retirar', () => pullOne(f.id, l, b), true, b);
   /**
@@ -397,12 +403,6 @@ export default function create(): GameModule {
         continue;
       }
       const r = levelCheck(b, f, l);
-      if (r === null) { // reserva (sim sem níveis): só o mesmo produto do móvel, via placeUnits
-        if (b.productId !== f.productId) why ??= 'other-product';
-        else if (isOpen(b)) return A(`stock:${f.id}:${l}`, 'Repor', () => placeOne(f.id, l, b), true, b);
-        else openFor ??= b;
-        continue;
-      }
       if (r === 'ok' && isOpen(b)) return A(`stock:${f.id}:${l}`, 'Repor', () => placeOne(f.id, l, b), true, b);
       if (r === 'ok' || r === 'box-closed') { openFor ??= b; continue; }
       why ??= r;
@@ -513,16 +513,14 @@ export default function create(): GameModule {
     const n = lv ? lv.units : (st().shelf[pid] ?? 0);
     controls.badge(`${nameOf(pid)}  ${n}${Number.isFinite(cap) ? '/' + cap : ''}  ·  caixa: ${b.units}`);
   };
-  /** Repor 1 unidade da caixa no nível (`placeUnitsInLevel`; reserva sem níveis: `placeUnits`). */
+  /** Repor 1 unidade da caixa no nível mirado (`placeUnitsInLevel`; nunca assignProduct/placeUnits). */
   const placeOne = (fid: number, l: number, b: Box): boolean => {
     const s = st();
     if (!carried.includes(b) || !isOpen(b) || b.units <= 0) return false;
     toTop(b);
     const before = furnById(fid)?.levels?.[l]?.productId;
     let moved = 0;
-    try {
-      try { moved = api.placeUnitsInLevel(s, idxOf(b), fid, l, 1); } catch (e) { if (!notImpl(e)) throw e; moved = api.placeUnits(s, idxOf(b), 1); }
-    } catch (e) { toastErr(e); return false; }
+    try { moved = api.placeUnitsInLevel(s, idxOf(b), fid, l, 1); } catch (e) { toastErr(e); return false; }
     if (moved <= 0) { toast('Nível cheio'); return false; }
     sfx('pop'); haptic(5);
     act('placeUnits', { productId: b.productId, furnitureId: fid, level: l });
@@ -989,8 +987,10 @@ export default function create(): GameModule {
         aimLevel: (fid: number, level: number): boolean => {
           const f = furnById(fid);
           if (!f) return false;
-          const r = furnRect(f), cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
-          for (let y = 0.04; y <= 2.2; y += 0.04) {
+          const r = furnRect(f), a = (f.rot * Math.PI) / 180;
+          for (let k = 0; k < 2 * 55; k++) {
+            const off = k < 55 ? 0 : 0.4, y = 0.04 + (k % 55) * 0.04; // centro do móvel, depois rente à frente (níveis baixos)
+            const cx = (r.x0 + r.x1) / 2 + Math.sin(a) * off, cz = (r.z0 + r.z1) / 2 + Math.cos(a) * off;
             const dx = cx - pos.x, dy = y - EYE, dz = cz - pos.z;
             yaw = Math.atan2(-dx, -dz); pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), PITCH_MIN, PITCH_MAX);
             desiredPose();

@@ -4,7 +4,7 @@ import type { Box } from '../sim/state';
 import { STORAGE_DEPTH, storeBounds } from '../core/layout';
 import type { Lane } from './checkout';
 import { Agent } from './agent';
-import { furnitureFor, shelfRoom } from './helpers';
+import { furnitureFor, furnitureWithRoom, shelfRoom, stockLevelsHere } from './helpers';
 import { Person, staffSpec } from './model';
 import { type Env, dist2, safe } from './shared';
 
@@ -255,7 +255,7 @@ export class Stocker extends Staff {
   private nextShelf(): void {
     while (this.stack.length > 0) {
       const b = this.stack[0]!;
-      const f = furnitureFor(this.env, b.productId, this.x, this.z);
+      const f = furnitureWithRoom(this.env, b.productId, this.x, this.z);
       const acc = f ? this.env.world().furnitureAccess(f.id) : null;
       if (f && acc && shelfRoom(this.env, b.productId) > 0) {
         this.furnId = f.id;
@@ -287,12 +287,16 @@ export class Stocker extends Staff {
     if (!b) { this.nextShelf(); return; }
     const idx = state.sidewalk.indexOf(b);
     if (idx < 0) { this.stack.shift(); this.nextShelf(); return; }
-    const room = shelfRoom(this.env, b.productId);
-    const n = Math.min(b.units, Math.max(0, room));
-    if (n > 0) {
-      safe('placeUnits', () => api.placeUnits(state, idx, n), 0);
-      this.env.sfx('box', this.x, this.z); this.env.changed('shelf');
+    // FASE 4: abastece os níveis do produto no móvel até onde andou (placeUnitsInLevel); sem níveis/API: placeUnits
+    const f = state.furniture.find((x) => x.id === this.furnId);
+    let moved = f ? stockLevelsHere(this.env, idx, f, b.productId) : -1;
+    if (moved < 0) {
+      const n = Math.min(b.units, Math.max(0, shelfRoom(this.env, b.productId)));
+      moved = n > 0 ? safe('placeUnits', () => api.placeUnits(state, idx, n), 0) : 0;
     }
+    if (moved > 0) { this.env.sfx('box', this.x, this.z); this.env.changed('shelf'); }
+    // sobrou e há espaço em outro móvel do produto: leva a mesma caixa até lá
+    if (moved > 0 && b.units > 0 && furnitureWithRoom(this.env, b.productId, this.x, this.z)) { this.nextShelf(); return; }
     this.stack.shift();
     if (b.units <= 0) this.junk.push(b);
     else { this.setOpen(b, false); this.release(b); }

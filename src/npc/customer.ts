@@ -338,19 +338,20 @@ export class Customer extends Agent {
     this.setPose('grab');
   }
 
-  /** Retira do nível alvo e completa com outros níveis do mesmo móvel. -1 = API de níveis indisponível. */
+  /**
+   * Retira do nível alvo e completa com outros níveis do mesmo móvel. Só retira de níveis que AINDA têm a etiqueta do
+   * produto (takeFromLevel tira o produto atual do nível; o jogador pode ter trocado no caminho). -1 = API indisponível.
+   */
   private takeLevels(e: Item): number {
     const { state } = this.env.ctx;
-    const first = safe('takeFromLevel', () => api.takeFromLevel(state, this.furnId, this.level, e.qty), -1);
-    if (first < 0) return -1;
-    let got = first;
-    if (got < e.qty) {
-      const spots = locate(this.env, e.productId) ?? [];
-      for (const s of spots) {
-        if (got >= e.qty) break;
-        if (s.furnitureId !== this.furnId || s.level === this.level || s.units <= 0) continue;
-        got += Math.max(0, safe('takeFromLevel', () => api.takeFromLevel(state, s.furnitureId, s.level, Math.min(e.qty - got, s.units)), 0));
-      }
+    const spots = locate(this.env, e.productId);
+    if (!spots) return -1;
+    const here = spots.filter((s) => s.furnitureId === this.furnId && s.units > 0)
+      .sort((a, b) => (a.level === this.level ? -1 : b.level === this.level ? 1 : b.units - a.units));
+    let got = 0;
+    for (const s of here) {
+      if (got >= e.qty) break;
+      got += Math.max(0, safe('takeFromLevel', () => api.takeFromLevel(state, s.furnitureId, s.level, Math.min(e.qty - got, s.units)), 0));
     }
     return got;
   }
