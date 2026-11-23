@@ -33,6 +33,9 @@ const P: Record<string, string> = {
   warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4.500M12 17.300v.2"/>',
   bank: '<path d="M3.500 9.500L12 4l8.500 5.500z"/><path d="M6 11v6M10 11v6M14 11v6M18 11v6M4 20h16"/>',
   play: '<path d="M8 5.500v13l11-6.500z"/>',
+  wrench: '<path d="M14.700 6.300a4.200 4.200 0 00-5.400 5.400L3.500 17.500l3 3 5.800-5.800a4.200 4.200 0 005.400-5.400l-2.600 2.600-2.700-.3-.3-2.700z"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+  moon: '<path d="M20 14.500A8.500 8.500 0 019.500 4 8.500 8.500 0 1020 14.500z"/>',
 };
 export type IconName = keyof typeof P;
 export function icon(name: string, size = 22): string {

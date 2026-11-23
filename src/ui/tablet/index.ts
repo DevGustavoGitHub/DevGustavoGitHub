@@ -1,51 +1,65 @@
-/** Tablet/computador de gestão: modal com abas reativas ao estado. */
-import { clear, h, money } from '../dom';
+/**
+ * Tablet/computador de gestão (Fase 3, visual da referência): cabeçalho azul com o nome da aba, trilho de ícones à
+ * esquerda (ponto vermelho = novidade liberada não vista) e painel branco com cartões azul-marinho. O HUD fica visível
+ * por cima (o painel começa abaixo dele). Abre por `ui:openTablet {tab?, productId?}`, pelo atalho de carrinho e pelo menu.
+ */
+import { clear, h } from '../dom';
 import { icon } from '../icons';
-import { UiKit } from '../kit';
-import { marketTab } from './market';
-import { pricesTab } from './prices';
-import { licensesTab } from './licenses';
-import { furnitureTab } from './furniture';
-import { expansionTab } from './expansion';
-import { staffTab } from './staff';
-import { decorTab } from './decor';
-import { financeTab } from './finance';
+import type { UiKit } from '../kit';
+import { markSeen, unseenTabs } from '../unlocks';
 import { autoTab } from './auto';
+import { decorTab } from './decor';
+import { expansionTab } from './expansion';
+import { financeTab } from './finance';
+import { licensesTab } from './licenses';
+import { marketTab, setMarketSub } from './market';
+import { pricesTab } from './prices';
+import { servicesTab } from './services';
+import { staffTab } from './staff';
 import { upgradesTab } from './upgrades';
 
 export interface TabApi {
   refresh(): void;
   close(): void;
   goto(id: string): void;
-  /** Congela o re-render automático (ex.: enquanto um tooltip de gráfico está visível). Solta sozinho após alguns segundos. */
+  /** Congela o re-render automático (ex.: tooltip de gráfico visível). Solta sozinho após alguns segundos. */
   hold(v: boolean): void;
+  /** productId a destacar nesta renderização (vindo de `ui:openTablet {productId}`). */
+  focus: string | null;
 }
 export interface TabDef {
   id: string;
   label: string;
+  title?: string;
   icon: string;
   /** Re-renderiza a cada ~1 s (ex.: finanças com o dia em andamento). */
   live?: boolean;
+  /** A aba controla a própria rolagem (layout de altura total). */
+  fill?: boolean;
   render(body: HTMLElement, kit: UiKit, api: TabApi): void;
 }
 
-const TABS: TabDef[] = [
-  { id: 'market', label: 'Mercado', icon: 'cart', render: marketTab },
+export const TABS: TabDef[] = [
+  { id: 'market', label: 'Mercado', icon: 'cart', fill: true, render: marketTab },
   { id: 'prices', label: 'Preços', icon: 'tag', render: pricesTab },
+  { id: 'auto', label: 'Automático', title: 'Pedido automático', icon: 'clock', render: autoTab },
   { id: 'licenses', label: 'Licenças', icon: 'badge', render: licensesTab },
-  { id: 'furniture', label: 'Móveis', icon: 'sofa', render: furnitureTab },
-  { id: 'expansion', label: 'Expansão', icon: 'expand', render: expansionTab },
-  { id: 'auto', label: 'Automático', icon: 'clock', render: autoTab },
-  { id: 'staff', label: 'Equipe', icon: 'users', render: staffTab },
+  { id: 'expansion', label: 'Expansão', title: 'Expansão da loja', icon: 'expand', render: expansionTab },
+  { id: 'services', label: 'Serviços', icon: 'wrench', render: servicesTab },
+  { id: 'staff', label: 'Equipe', title: 'Funcionários', icon: 'users', render: staffTab },
   { id: 'upgrades', label: 'Melhorias', icon: 'star', render: upgradesTab },
+  { id: 'finance', label: 'Finanças', title: 'Finanças e banco', icon: 'bank', live: true, render: financeTab },
   { id: 'decor', label: 'Decoração', icon: 'brush', render: decorTab },
-  { id: 'finance', label: 'Finanças', icon: 'chart', live: true, render: financeTab },
 ];
+const ALIAS: Record<string, string> = {
+  storage: 'services', deposito: 'services', employees: 'staff', funcionarios: 'staff', bank: 'finance', banco: 'finance',
+  upgrade: 'upgrades', license: 'licenses', expansao: 'expansion', products: 'market', mercado: 'market',
+};
 
 export class Tablet {
   private overlay: HTMLElement | null = null;
   private body!: HTMLElement;
-  private cash!: HTMLElement;
+  private title!: HTMLElement;
   private tabBtns = new Map<string, HTMLButtonElement>();
   private current = 'market';
   private liveT = 0;
@@ -53,34 +67,53 @@ export class Tablet {
   onOpen: (() => void) | null = null;
   /** Retorna true para impedir a abertura (ex.: tela de falência). */
   guard: (() => boolean) | null = null;
+  /** Avisado quando a aba atual muda (marca novidades vistas). */
+  onSeen: (() => void) | null = null;
   private heldUntil = 0;
 
   constructor(private kit: UiKit, private layer: HTMLElement) {
-    this.api = { refresh: () => this.refresh(), close: () => this.close(), goto: (id) => this.show(id), hold: (v) => { this.heldUntil = v ? performance.now() + 6000 : 0; } };
+    this.api = {
+      refresh: () => this.refresh(), close: () => this.close(), goto: (id) => this.show(id),
+      hold: (v) => { this.heldUntil = v ? performance.now() + 6000 : 0; }, focus: null,
+    };
     kit.ctx.bus.on('stateChanged', () => this.refresh());
   }
 
   get isOpen(): boolean { return this.overlay !== null; }
+  get tab(): string { return this.current; }
 
-  open(tab?: string): void {
-    if (this.overlay) { if (tab) this.show(tab); return; }
+  private resolve(tab?: string): string | undefined {
+    if (!tab) return undefined;
+    if (tab === 'furniture' || tab === 'moveis') { setMarketSub('furniture'); return 'market'; }
+    const id = ALIAS[tab] ?? tab;
+    return TABS.some((t) => t.id === id) ? id : undefined;
+  }
+
+  open(tab?: string, opts: { productId?: string } = {}): void {
+    const id = this.resolve(tab);
+    if (tab === 'market' || tab === 'products') setMarketSub('products');
+    this.api.focus = opts.productId ?? null;
+    if (this.overlay) { this.show(id ?? this.current); return; }
     if (this.kit.isModalOpen()) return;
     if (this.guard?.()) return;
-    if (tab) this.current = tab;
-    this.cash = h('span', { class: 'cash' });
-    this.body = h('div', { class: 'tb-body' });
-    const tabs = h('nav', { class: 'tb-tabs', role: 'tablist' });
+    this.current = id ?? 'market';
+    this.body = h('div', { class: 't3-body' });
+    this.title = h('h2');
+    const rail = h('nav', { class: 't3-rail', role: 'tablist', 'aria-label': 'Seções do computador' });
     for (const t of TABS) {
-      const b = h('button', { class: 'tab-btn', role: 'tab', html: `${icon(t.icon, 22)}<span>${t.label}</span>`, on: { click: () => this.show(t.id) } });
+      const b = h('button', { class: 'rail-btn', role: 'tab', 'aria-label': t.title ?? t.label, title: t.title ?? t.label, 'data-tab': t.id,
+        html: `${icon(t.icon, 24)}<span>${t.label}</span>`, on: { click: () => this.show(t.id) } });
       this.tabBtns.set(t.id, b);
-      tabs.appendChild(b);
+      rail.appendChild(b);
     }
-    this.overlay = h('div', { class: 'mx-modal mx-dim', role: 'dialog', 'aria-label': 'Tablet de gestão' },
-      h('section', { class: 'tablet' },
-        h('header', { class: 'tb-head' }, h('span', { html: icon('tablet', 24) }), h('h2', null, 'Tablet de gestão'), this.cash, UiKit.closeButton(() => this.close())),
-        tabs, this.body));
+    this.overlay = h('div', { class: 'mx-modal mx-dim tb-wrap', role: 'dialog', 'aria-label': 'Computador da loja' },
+      h('section', { class: 'tablet t3' }, rail,
+        h('div', { class: 't3-panel' },
+          h('header', { class: 't3-head' }, this.title, h('button', { class: 't3-x', 'aria-label': 'Fechar', html: icon('close', 30), on: { click: () => this.close() } })),
+          this.body)));
     this.overlay.addEventListener('pointerdown', (e) => { if (e.target === this.overlay) this.close(); });
     this.layer.appendChild(this.overlay);
+    this.layer.classList.add('hud-over');
     this.kit.modalOpen('tablet', { onEsc: () => this.close() });
     this.kit.sfx('pop');
     this.show(this.current);
@@ -92,17 +125,26 @@ export class Tablet {
     this.overlay.remove();
     this.overlay = null;
     this.tabBtns.clear();
+    this.layer.classList.remove('hud-over');
     this.kit.modalClose('tablet');
   }
 
   show(id: string): void {
-    this.current = id;
+    const rid = this.resolve(id) ?? this.current;
+    this.current = rid;
     this.heldUntil = 0;
-    for (const [k, b] of this.tabBtns) { b.classList.toggle('on', k === id); b.setAttribute('aria-selected', String(k === id)); }
+    markSeen(this.kit.ctx.state, rid);
+    this.onSeen?.();
+    const dots = unseenTabs(this.kit.ctx.state);
+    for (const [k, b] of this.tabBtns) {
+      b.classList.toggle('on', k === rid);
+      b.setAttribute('aria-selected', String(k === rid));
+      b.querySelector('.dot')?.remove();
+      if (dots.has(k)) b.appendChild(h('i', { class: 'dot', 'aria-label': 'Novidade' }));
+    }
     this.body.scrollTop = 0;
     this.refresh();
-    const btn = this.tabBtns.get(id);
-    btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    this.tabBtns.get(rid)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   refresh(): void {
@@ -112,11 +154,12 @@ export class Tablet {
     if (!def) return;
     // não destrói um campo de texto em edição
     if (document.activeElement instanceof HTMLInputElement && this.body.contains(document.activeElement)) return;
-    this.cash.textContent = money(this.kit.ctx.state.money);
+    this.title.textContent = def.title ?? def.label;
     const top = this.body.scrollTop;
     clear(this.body);
+    this.body.classList.toggle('fill', !!def.fill);
     const hint = this.kit.tutorialHint;
-    if (hint && hint.tab === this.current) this.body.appendChild(h('div', { class: 'banner warn', html: `${icon('bulb', 22)}<span>${hint.text}</span>` }));
+    if (hint && hint.tab === this.current && !def.fill) this.body.appendChild(h('div', { class: 'banner warn', html: `${icon('bulb', 22)}<span>${hint.text}</span>` }));
     try {
       def.render(this.body, this.kit, this.api);
     } catch (e) {
@@ -124,6 +167,12 @@ export class Tablet {
       console.error(e);
     }
     this.body.scrollTop = top;
+    const f = this.api.focus;
+    if (f) {
+      this.api.focus = null;
+      const el = this.body.querySelector<HTMLElement>(`[data-product="${CSS.escape(f)}"]`);
+      if (el) { el.classList.add('focus-hl'); el.scrollIntoView({ block: 'center', inline: 'nearest' }); }
+    }
   }
 
   update(dt: number): void {
@@ -131,7 +180,6 @@ export class Tablet {
     this.liveT += dt;
     if (this.liveT >= 1) {
       this.liveT = 0;
-      this.cash.textContent = money(this.kit.ctx.state.money);
       if (TABS.find((t) => t.id === this.current)?.live) this.refresh();
     }
   }

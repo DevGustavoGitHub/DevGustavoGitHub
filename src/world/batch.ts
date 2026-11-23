@@ -6,8 +6,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { boxGeo } from './kit';
 import { signMaterial } from './atlas';
+import { decalMaterial } from './tex';
 
-export type Kind = 'matte' | 'flat' | 'metal' | 'glass' | 'glow' | 'sign';
+export type Kind = 'matte' | 'flat' | 'metal' | 'glass' | 'glow' | 'sign' | 'decal';
 export type Spec = readonly [Kind, number];
 
 const mats = new Map<Kind, THREE.Material>();
@@ -21,6 +22,7 @@ export function kindMaterial(k: Kind): THREE.Material {
     case 'metal': m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.55 }); break;
     case 'glass': m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.1, metalness: 0.1, transparent: true, opacity: 0.22, depthWrite: false }); break;
     case 'glow': m = new THREE.MeshBasicMaterial({ vertexColors: true }); break;
+    case 'decal': m = decalMaterial(); break;
     default: m = signMaterial();
   }
   mats.set(k, m);
@@ -54,7 +56,7 @@ export class Batch {
   }
   /** Adiciona geometria (copiada) transformada por posição/rotação/escala, com cor de vértice. */
   add(geo: THREE.BufferGeometry, spec: Spec, x = 0, y = 0, z = 0, o: PartOpts = {}): this {
-    const g = prepare(geo, spec[0] === 'sign' ? 0xffffff : spec[1]);
+    const g = prepare(geo, spec[0] === 'sign' || spec[0] === 'decal' ? 0xffffff : spec[1]);
     E.set(o.rx ?? 0, o.ry ?? 0, o.rz ?? 0); Q.setFromEuler(E);
     S.set(o.sx ?? 1, o.sy ?? 1, o.sz ?? 1); P.set(x, y, z);
     g.applyMatrix4(M.compose(P, Q, S));
@@ -64,6 +66,11 @@ export class Batch {
   /** Caixa com a BASE em y (como `bx` do kit). */
   box(w: number, h: number, d: number, spec: Spec, x: number, y: number, z: number, o: PartOpts = {}): this {
     return this.add(boxGeo(w, h, d), spec, x, y, z, o);
+  }
+  /** Acrescenta um conjunto já construído (build) transformado por `matrix` (geometrias de entrada intactas). */
+  merge(geos: Map<Kind, THREE.BufferGeometry>, matrix: THREE.Matrix4): this {
+    for (const [k, g] of geos) { const c = g.clone(); c.applyMatrix4(matrix); this.push(k, c); }
+    return this;
   }
   /** Funde cada tipo em uma única geometria (as partes são descartadas). */
   build(): Map<Kind, THREE.BufferGeometry> {
@@ -98,13 +105,14 @@ export function combine(items: { geos: Map<Kind, THREE.BufferGeometry>; matrix: 
 }
 
 /** Cria os Mesh de um conjunto fundido dentro de `parent`. Shadow: só tipos opacos (não vidro/brilho/placa). */
-export function meshesOf(geos: Map<Kind, THREE.BufferGeometry>, parent: THREE.Object3D, o: { cast?: boolean; recv?: boolean } = {}): THREE.Mesh[] {
+export function meshesOf(geos: Map<Kind, THREE.BufferGeometry>, parent: THREE.Object3D, o: { cast?: boolean; recv?: boolean; order?: number } = {}): THREE.Mesh[] {
   const out: THREE.Mesh[] = [];
   for (const [k, g] of geos) {
     const m = new THREE.Mesh(g, kindMaterial(k));
     m.castShadow = (o.cast ?? true) && (k === 'matte' || k === 'flat' || k === 'metal');
     m.receiveShadow = (o.recv ?? true) && k !== 'glow';
     m.frustumCulled = true;
+    if (o.order !== undefined) m.renderOrder = o.order;
     parent.add(m); out.push(m);
   }
   return out;

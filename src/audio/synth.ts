@@ -46,6 +46,7 @@ export function tone(rig: Rig, o: ToneOpts): void {
   const { ctx } = rig;
   const osc = ctx.createOscillator();
   const g = ctx.createGain();
+  g.gain.value = 0; // envelope fechado antes do 1º evento (o padrão seria 1)
   osc.type = o.type ?? 'sine';
   osc.frequency.setValueAtTime(o.f, o.t);
   if (o.fEnd) osc.frequency.exponentialRampToValueAtTime(o.fEnd, o.t + o.dur);
@@ -93,6 +94,7 @@ export function noiseBurst(rig: Rig, r: Rng, o: NoiseOpts): void {
   if (o.fEnd) filt.frequency.exponentialRampToValueAtTime(o.fEnd, o.t + o.dur);
   filt.Q.value = o.q ?? 1;
   const g = ctx.createGain();
+  g.gain.value = 0; // envelope fechado antes do 1º evento (o padrão seria 1)
   const a = Math.min(Math.max(o.attack ?? 0.003, MIN_ATTACK), o.dur * 0.6);
   g.gain.setValueAtTime(0, o.t);
   g.gain.linearRampToValueAtTime(o.gain, o.t + a);
@@ -127,6 +129,7 @@ export function crackle(rig: Rig, r: Rng, o: CrackleOpts): void {
   filt.frequency.setValueAtTime(o.f, o.t);
   if (o.fEnd) filt.frequency.exponentialRampToValueAtTime(o.fEnd, o.t + o.dur);
   const g = ctx.createGain();
+  g.gain.value = 0; // envelope fechado antes do 1º evento (o padrão seria 1)
   const floor = o.gain * (o.floor ?? 0.25);
   const end = o.t + o.dur;
   g.gain.setValueAtTime(0, o.t);
@@ -164,6 +167,7 @@ export function creak(rig: Rig, r: Rng, o: CreakOpts): void {
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass'; bp.frequency.value = o.f; bp.Q.value = o.q ?? 6;
   const g = ctx.createGain();
+  g.gain.value = 0; // envelope fechado antes do 1º evento (o padrão seria 1)
   g.gain.setValueAtTime(0, o.t);
   g.gain.linearRampToValueAtTime(o.gain, o.t + Math.min(0.02, o.dur * 0.3));
   g.gain.setValueAtTime(o.gain, o.t + o.dur * 0.55);
@@ -185,6 +189,7 @@ export function brass(rig: Rig, t: number, f: number, dur: number, gain: number)
   lp.frequency.exponentialRampToValueAtTime(Math.min(f * 7, 9000), t + 0.045);
   lp.frequency.exponentialRampToValueAtTime(sus, t + Math.max(0.06, Math.min(0.2, dur * 0.8)));
   const g = ctx.createGain();
+  g.gain.value = 0; // envelope fechado antes do 1º evento (o padrão seria 1)
   const rel = Math.min(0.12, dur * 0.4);
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(gain, t + 0.022);
@@ -355,9 +360,190 @@ export const RECIPES: Record<SfxName, Recipe> = {
     tone(rig, { t, f: 110 * p, fEnd: 83 * p, dur: 0.38, gain: 0.15, lp: 500, attack: 0.04 });
     return 0.45;
   },
+
+  // ------------------------------------------------------------ Fase 3
+  throw(rig, t, r) {
+    const p = jit(r, 0.1);
+    // mãos soltando o papelão
+    noiseBurst(rig, r, { t, dur: 0.07, gain: 0.45, type: 'bandpass', f: 700 * p, q: 1.1, attack: 0.004 });
+    tone(rig, { t, f: 150 * p, fEnd: 110 * p, dur: 0.06, gain: 0.12, attack: 0.004 });
+    // whoosh: faixa que sobe (passagem) + corpo grave
+    noiseBurst(rig, r, { t: t + 0.02, dur: 0.4, gain: 0.8, type: 'bandpass', f: 420 * p, fEnd: 1500 * p, q: 1.3, attack: 0.13 });
+    noiseBurst(rig, r, { t: t + 0.02, dur: 0.34, gain: 0.4, type: 'lowpass', f: 320 * p, fEnd: 180 * p, q: 0.7, attack: 0.1 });
+    // caixa girando no ar: "fu-fu-fu"
+    let at = t + 0.1;
+    for (let i = 0; i < 3; i++) {
+      noiseBurst(rig, r, { t: at, dur: 0.08, gain: 0.18 * (1 - i * 0.25), type: 'bandpass', f: (950 + i * 120) * p, q: 1.6, attack: 0.03 });
+      at += 0.085 + r() * 0.02;
+    }
+    return 0.5;
+  },
+  mop(rig, t, r) {
+    const p = jit(r, 0.08);
+    let at = t;
+    for (let i = 0; i < 3; i++) {
+      const fwd = i % 2 === 0;
+      const s = p * jit(r, 0.06);
+      // atrito molhado (vai e volta) + água espremida + bolhinhas
+      noiseBurst(rig, r, { t: at, dur: 0.27, gain: 0.65, type: 'bandpass', f: (fwd ? 1000 : 1650) * s, fEnd: (fwd ? 1700 : 950) * s, q: 0.9, attack: 0.08 });
+      crackle(rig, r, { t: at + 0.02, dur: 0.22, gain: 0.45, f: 620 * s, fEnd: 480 * s, q: 1.3, rate: 55, floor: 0.35 });
+      noiseBurst(rig, r, { t: at, dur: 0.16, gain: 0.32, type: 'lowpass', f: 420 * s, q: 1.4, attack: 0.03 });
+      for (let k = 0; k < 2; k++) {
+        const bf = (650 + r() * 500) * p;
+        tone(rig, { t: at + 0.04 + r() * 0.18, f: bf, fEnd: bf * 1.7, dur: 0.035, gain: 0.05, attack: 0.004 });
+      }
+      at += 0.29 + (r() - 0.5) * 0.03;
+    }
+    tone(rig, { t: t + 0.86, f: 1250 * p, fEnd: 2100 * p, dur: 0.045, gain: 0.06, attack: 0.004 }); // pingo
+    return 0.95;
+  },
+  sit(rig, t, r) {
+    const p = jit(r, 0.06);
+    // rodinhas: puxa a cadeira
+    noiseBurst(rig, r, { t, dur: 0.3, gain: 0.14, type: 'lowpass', f: 260 * p, fEnd: 170 * p, q: 0.8, attack: 0.05 });
+    casters(rig, r, t + 0.02, 4, 0.055, 1.25, 0.05, p);
+    // corpo no assento + pistão a gás descendo + rangido
+    const s = t + 0.17 + r() * 0.03;
+    tone(rig, { t: s, f: 125 * p, fEnd: 62 * p, dur: 0.17, gain: 0.32, attack: 0.006 });
+    noiseBurst(rig, r, { t: s, dur: 0.13, gain: 0.2, type: 'lowpass', f: 420 * p, q: 0.7, attack: 0.006 });
+    noiseBurst(rig, r, { t: s + 0.02, dur: 0.26, gain: 0.07, type: 'bandpass', f: 4200 * p, fEnd: 2300 * p, q: 0.8, attack: 0.02 });
+    creak(rig, r, { t: s + 0.03, dur: 0.24, rate: 58 * p, rateEnd: 86 * p, f: 1150 * p, q: 6, gain: 0.9 });
+    return s - t + 0.3;
+  },
+  stand(rig, t, r) {
+    const p = jit(r, 0.06);
+    // rangido ao tirar o peso + tecido
+    creak(rig, r, { t, dur: 0.2, rate: 92 * p, rateEnd: 60 * p, f: 1350 * p, q: 6, gain: 1.0 });
+    noiseBurst(rig, r, { t: t + 0.03, dur: 0.09, gain: 0.12, type: 'lowpass', f: 600 * p, q: 0.7, attack: 0.01 });
+    // pistão subindo + cadeira rolando para trás (tics acelerando)
+    noiseBurst(rig, r, { t: t + 0.06, dur: 0.24, gain: 0.08, type: 'bandpass', f: 2200 * p, fEnd: 4500 * p, q: 0.9, attack: 0.05 });
+    noiseBurst(rig, r, { t: t + 0.12, dur: 0.42, gain: 0.22, type: 'lowpass', f: 190 * p, fEnd: 280 * p, q: 0.8, attack: 0.05 });
+    casters(rig, r, t + 0.14, 5, 0.1, 0.8, 0.07, p);
+    return 0.62;
+  },
+  place(rig, t, r) {
+    const p = jit(r, 0.08);
+    // primeiro apoio: baque + batida de madeira/papelão + contato
+    tone(rig, { t, f: 108 * p, fEnd: 50 * p, dur: 0.2, gain: 0.42, attack: 0.004 });
+    noiseBurst(rig, r, { t, dur: 0.1, gain: 0.3, type: 'bandpass', f: 280 * p, q: 1.1 });
+    noiseBurst(rig, r, { t, dur: 0.025, gain: 0.06, type: 'highpass', f: 2800 * p });
+    tone(rig, { t, f: 196 * p, dur: 0.14, gain: 0.07, type: 'triangle', lp: 900 });
+    // o outro lado assenta
+    const s = t + 0.065 + r() * 0.035;
+    tone(rig, { t: s, f: 140 * p, fEnd: 72 * p, dur: 0.12, gain: 0.2, attack: 0.004 });
+    noiseBurst(rig, r, { t: s, dur: 0.06, gain: 0.13, type: 'bandpass', f: 430 * p, q: 1.3 });
+    return 0.36;
+  },
+  sign(rig, t, r) {
+    const p = jit(r, 0.03);
+    // placa girando no cordão + batidinhas no vidro (o balanço assenta)
+    noiseBurst(rig, r, { t, dur: 0.13, gain: 0.3, type: 'bandpass', f: 1300 * p, fEnd: 2600 * p, q: 1.2, attack: 0.035 });
+    [1, 0.45, 0.2].forEach((g, i) => {
+      const at = t + 0.09 + [0, 0.1, 0.17][i]! * jit(r, 0.1);
+      noiseBurst(rig, r, { t: at, dur: 0.03, gain: 0.35 * g, type: 'bandpass', f: 2500 * p, q: 3 });
+      tone(rig, { t: at, f: 920 * p, dur: 0.05, gain: 0.06 * g, attack: 0.002 });
+    });
+    // sininho pequeno da porta
+    const f = 2637 * p;
+    bell(rig, t + 0.12, f, 0.26, 0.75);
+    bell(rig, t + 0.24, f * 1.335, 0.17, 0.65);
+    bell(rig, t + 0.34, f, 0.09, 0.55);
+    return 1.0;
+  },
+  night(rig, t, r) {
+    // vinheta de fim de expediente em Fá: cadência plagal IV → I ("amém") + celesta descendente
+    const k = jit(r, 0.006);
+    const hz = (m: number): number => midi(m) * k;
+    for (const m of [58, 62, 65, 69]) tone(rig, { t, f: hz(m), dur: 1.15, gain: 0.034, type: 'triangle', lp: 1100, attack: 0.25, release: 0.5 });
+    tone(rig, { t, f: hz(46), dur: 1.1, gain: 0.1, lp: 400, attack: 0.05, release: 0.45 });
+    const t2 = t + 0.95;
+    for (const m of [53, 57, 60, 67]) tone(rig, { t: t2, f: hz(m), dur: 1.5, gain: 0.04, type: 'triangle', lp: 1000, attack: 0.3, release: 0.9 });
+    tone(rig, { t: t2, f: hz(41), dur: 1.45, gain: 0.11, lp: 400, attack: 0.06, release: 0.85 });
+    const mel: [number, number, number][] = [[0.05, 86, 0.6], [0.3, 84, 0.6], [0.55, 81, 0.7], [0.97, 77, 1.1], [1.38, 81, 0.9]];
+    mel.forEach(([dt, m, d], i) => celesta(rig, t + dt, hz(m), i === 4 ? 0.05 : 0.09, d));
+    return 2.5;
+  },
+  celebrate(rig, t, r) {
+    // fanfarra: ta-ta-ta | TAAM — ta | TAAAAM (Sol Sol Sol | Dó — Sol | Dó) + tímpano, prato e brilhos
+    const k = jit(r, 0.008);
+    const hz = (m: number): number => midi(m) * k;
+    for (let i = 0; i < 3; i++) {
+      const at = t + i * 0.1;
+      brass(rig, at, hz(67), 0.085, 0.11);
+      brass(rig, at, hz(74), 0.085, 0.05);
+    }
+    const c1 = t + 0.3;
+    for (const m of [72, 76, 79]) brass(rig, c1, hz(m), 0.36, 0.075);
+    boom(rig, c1, 0.26, 0.38, k);
+    for (const m of [71, 74, 79]) brass(rig, t + 0.7, hz(m), 0.11, 0.065);
+    const c2 = t + 0.84;
+    for (const m of [72, 76, 79, 84]) brass(rig, c2, hz(m), 0.95, 0.07);
+    boom(rig, c2, 0.3, 0.6, k);
+    noiseBurst(rig, r, { t: c2, dur: 1.05, gain: 0.09, type: 'highpass', f: 5200, q: 0.7, attack: 0.006 });
+    [96, 100, 103, 108].forEach((m, i) => bell(rig, c2 + 0.06 + i * 0.075, hz(m), 0.085, 0.5));
+    return 0.84 + 1.05 + 0.1;
+  },
+  boxOpen(rig, t, r) {
+    const p = jit(r, 0.08);
+    noiseBurst(rig, r, { t, dur: 0.03, gain: 0.12, type: 'highpass', f: 3200 * p, q: 0.8 }); // vinco do papelão
+    // duas abas virando para fora: "fwip" + batida oca no fim do giro
+    let at = t + 0.02;
+    for (let i = 0; i < 2; i++) {
+      const s = p * (i ? 1.12 : 1);
+      noiseBurst(rig, r, { t: at, dur: 0.09, gain: 0.32, type: 'bandpass', f: 1000 * s, fEnd: 620 * s, q: 1.1, attack: 0.02 });
+      noiseBurst(rig, r, { t: at + 0.075, dur: 0.05, gain: 0.3, type: 'bandpass', f: 430 * s, q: 2.2 });
+      tone(rig, { t: at + 0.075, f: 210 * s, fEnd: 140 * s, dur: 0.07, gain: 0.16, attack: 0.004 });
+      at += 0.12 + r() * 0.03;
+    }
+    return 0.38;
+  },
+  boxClose(rig, t, r) {
+    const p = jit(r, 0.08);
+    // abas dobrando para dentro (batida mais firme)
+    let at = t;
+    for (let i = 0; i < 2; i++) {
+      const s = p * (i ? 0.92 : 1);
+      noiseBurst(rig, r, { t: at, dur: 0.07, gain: 0.26, type: 'bandpass', f: 640 * s, fEnd: 1000 * s, q: 1.1, attack: 0.018 });
+      noiseBurst(rig, r, { t: at + 0.06, dur: 0.05, gain: 0.34, type: 'bandpass', f: 380 * s, q: 2.4 });
+      tone(rig, { t: at + 0.06, f: 185 * s, fEnd: 118 * s, dur: 0.08, gain: 0.2, attack: 0.004 });
+      at += 0.1 + r() * 0.025;
+    }
+    // fita adesiva: puxa ("zíííp") e a mão alisa
+    const ft = t + 0.24;
+    crackle(rig, r, { t: ft, dur: 0.22, gain: 0.3, f: 2100 * p, fEnd: 3400 * p, q: 2.2, rate: 110, floor: 0.3 });
+    noiseBurst(rig, r, { t: ft, dur: 0.22, gain: 0.09, type: 'bandpass', f: 1500 * p, fEnd: 2600 * p, q: 3, attack: 0.03 });
+    noiseBurst(rig, r, { t: ft + 0.23, dur: 0.06, gain: 0.18, type: 'lowpass', f: 700 * p, q: 0.7, attack: 0.008 });
+    return 0.58;
+  },
+  register(rig, t, r, level) {
+    // checkout:done — "ka-ching" da registradora; com gorjeta (level > 0): moedas no pote de vidro + brilho
+    const p = jit(r, 0.015);
+    noiseBurst(rig, r, { t, dur: 0.025, gain: 0.22, type: 'bandpass', f: 3000 * p, q: 2 }); // tecla/alavanca
+    tone(rig, { t, f: 330 * p, fEnd: 240 * p, dur: 0.04, gain: 0.06, type: 'square', lp: 2200 });
+    noiseBurst(rig, r, { t: t + 0.035, dur: 0.03, gain: 0.12, type: 'bandpass', f: 1800 * p, q: 2.5 }); // trava
+    // Mi7 + Sol7: forma acorde maior com o Dó7 do sino da gaveta ('cash') quando tocam juntos
+    bell(rig, t + 0.06, 2637 * p, 0.24, 1.0);
+    bell(rig, t + 0.072, 3136 * p, 0.15, 0.85);
+    let end = t + 1.07;
+    if (level > 0) {
+      const n = 2 + Math.round(Math.min(1, level) * 4);
+      let at = t + 0.28;
+      for (let i = 0; i < n; i++) {
+        const f = (3100 + r() * 1500) * (i % 2 ? 1.09 : 1);
+        tone(rig, { t: at, f, dur: 0.14 + r() * 0.08, gain: 0.09, attack: 0.002 });
+        tone(rig, { t: at, f: f * 2.41, dur: 0.06, gain: 0.035, attack: 0.002 });
+        tone(rig, { t: at, f: 1480 * p * jit(r, 0.03), dur: 0.22, gain: 0.03, attack: 0.003 }); // ressonância do pote
+        at += 0.045 + r() * 0.045;
+      }
+      const sparkle = level >= 0.6 ? [96, 100, 103, 108] : [96, 100, 103];
+      sparkle.forEach((m, i) => bell(rig, at + 0.02 + i * 0.065, midi(m) * p, 0.075, 0.45));
+      end = Math.max(end, at + 0.02 + (sparkle.length - 1) * 0.065 + 0.46, at + 0.23);
+    }
+    return end - t + 0.04;
+  },
 };
 
-/** Duração máxima conhecida (s), usada para liberar nós/voz e para os testes offline. */
-export function playRecipe(name: SfxName, rig: Rig, t: number, r: Rng): number {
-  return RECIPES[name](rig, t, r);
+/** Toca a receita em `t` e devolve a duração (s), usada para liberar nós/voz e nos testes offline. */
+export function playRecipe(name: SfxName, rig: Rig, t: number, r: Rng, level = 0): number {
+  return RECIPES[name](rig, t, r, level);
 }

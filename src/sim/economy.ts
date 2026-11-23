@@ -11,12 +11,13 @@ import { emptyLedger, type Ledger, type StoreState } from './state';
 
 /**
  * XP acumulado necessário para ALCANÇAR o nível n (n>=2): XP_BASE·(n−1)^XP_EXP·(1 + XP_LATE_SLOPE·max(0, n−15)).
- * Fase 3: nível 2 custa só 100 XP (sobe no dia 1 mesmo com a loja pobre); do nível 6 em diante fica ≈ a curva antiga.
+ * Fase 3: nível 2 custa só 60 XP (sobe no dia 1 mesmo com a loja pobre); os primeiros níveis vêm mais rápido e do
+ * nível ~12 em diante a curva fica ≈ a antiga (nível 15: 14.500 XP; nível 30: 115 mil).
  */
 export const xpForLevel = (n: number): number =>
   n <= 1 ? 0 : Math.round(XP_BASE * Math.pow(n - 1, XP_EXP) * (1 + XP_LATE_SLOPE * Math.max(0, n - XP_LATE_FROM)));
-export const XP_BASE = 100;
-export const XP_EXP = 1.9;
+export const XP_BASE = 60;
+export const XP_EXP = 2.08;
 /** Depois do nível 15 a curva fica mais íngreme (fim de jogo: nível ~30 por volta do dia 90-100 com o bot). */
 export const XP_LATE_FROM = 15;
 export const XP_LATE_SLOPE = 0.05;

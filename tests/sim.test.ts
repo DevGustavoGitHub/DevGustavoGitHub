@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DENOMS, customerCashPayment, isChangeCorrect, optimalChange, roundPrice } from '../src/sim/money';
+import { DENOMS, DRAWER_DENOMS, MAX_PAY_STEP, customerCashPayment, isChangeCorrect, optimalChange, roundPrice } from '../src/sim/money';
 import { makeRng } from '../src/sim/rng';
 import { buyProbability } from '../src/sim/demand';
 import { advanceMarket, MARKET_MAX, MARKET_MIN } from '../src/sim/market';
@@ -20,6 +20,31 @@ describe('troco', () => {
     expect(isChangeCorrect([1000, 100, 50], 1150)).toBe(true);
     expect(isChangeCorrect([1000, 100], 1150)).toBe(false);
     expect(isChangeCorrect([777], 777)).toBe(false);
+  });
+  it('gaveta de 10 denominações: para QUALQUER total o troco ótimo usa só R$ 50/20/10/5/2 e moedas (nunca R$ 100/200)', () => {
+    expect([...DRAWER_DENOMS].sort((a, b) => b - a)).toEqual([5000, 2000, 1000, 500, 200, 100, 50, 25, 10, 5]);
+    // todos os totais até R$ 1.000 (múltiplos de R$ 0,05) × sorteios que cobrem cada passo e o "paga exato"
+    const seq = [0.05, 0.3, 0.55, 0.8];
+    const drawer = new Set(DRAWER_DENOMS);
+    const bad: string[] = [];
+    for (let total = 5; total <= 100000; total += 5) {
+      for (const a of seq) for (const b of seq) {
+        const vals = [a, b];
+        let k = 0;
+        const paid = customerCashPayment(total, () => vals[k++ % 2]!);
+        const change = paid - total;
+        // paga no máximo um passo acima do total => troco < R$ 100 e só com notas/moedas da gaveta
+        if (change < 0 || change >= MAX_PAY_STEP || optimalChange(change).some((d) => !drawer.has(d))) bad.push(`${total}:${paid}`);
+      }
+    }
+    expect(bad).toEqual([]);
+    // e o guloso só com a gaveta é ótimo (DP) para todo troco possível (< R$ 100)
+    const dp = new Array<number>(MAX_PAY_STEP).fill(Infinity);
+    dp[0] = 0;
+    for (let a = 5; a < MAX_PAY_STEP; a += 5) for (const d of DRAWER_DENOMS) if (a >= d) dp[a] = Math.min(dp[a]!, dp[a - d]! + 1);
+    for (let a = 0; a < MAX_PAY_STEP; a += 5) expect(optimalChange(a).length).toBe(dp[a]);
+    // compra pequena não é paga com nota de R$ 100
+    for (let i = 0; i < 50; i++) expect(customerCashPayment(350, makeRng(i))).toBeLessThanOrEqual(5000);
   });
   it('pagamento do cliente nunca é menor que o total e é pagável', () => {
     const r = makeRng(3);
@@ -58,6 +83,8 @@ describe('economia', () => {
   it('compra exige licença e dinheiro; custo médio é ponderado', () => {
     const s = newGame();
     expect(() => buyBoxes(s, 'leite', 1)).toThrow();
+    expect(() => buyBoxes(s, 'arroz', 2)).toThrow('Dinheiro insuficiente'); // R$ 150 no início
+    s.money = 100_000;
     const before = s.money;
     const cost = buyBoxes(s, 'arroz', 2);
     expect(s.money).toBe(before - cost);
@@ -65,10 +92,11 @@ describe('economia', () => {
   });
   it('prateleira respeita capacidade e caixas esvaziadas somem', () => {
     const s = newGame();
-    buyBoxes(s, 'arroz', 5); // 30 un, capacidade 2 slots * 8 = 16
-    expect(putOnShelf(s, 'arroz')).toBe(16);
-    expect(s.shelf.arroz).toBe(16);
-    expect(s.sidewalk.reduce((a, b) => a + b.units, 0)).toBe(14);
+    s.money = 100_000;
+    buyBoxes(s, 'feijao', 3); // 36 un, capacidade 2 slots * 12 = 24
+    expect(putOnShelf(s, 'feijao')).toBe(24);
+    expect(s.shelf.feijao).toBe(24);
+    expect(s.sidewalk.reduce((a, b) => a + b.units, 0)).toBe(12);
   });
   it('balanceamento: preço justo dá lucro; preço abusivo (+60%) rende bem menos', () => {
     const run = (mult: number) => {
@@ -103,7 +131,7 @@ describe('save', () => {
     const mem = new Map<string, string>();
     const kv: KV = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) };
     const s = newGame(42);
-    buyBoxes(s, 'feijao', 3);
+    buyBoxes(s, 'feijao', 2);
     putOnShelf(s, 'feijao');
     save(kv, s);
     expect(load(kv)).toEqual(s);

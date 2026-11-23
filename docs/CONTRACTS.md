@@ -65,7 +65,7 @@ Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, 
 ## Seção `sim` (api.ts) — notas para os outros módulos
 - **Level up:** a sim é pura e não emite eventos. Após `completeSale` (ou qualquer ganho de XP) chame `consumeLevelUps(state): number[]` — devolve cada nível novo uma única vez (ex.: `[3,4]`); emita `levelUp` e `sfx:levelup` a partir daí. Saves antigos não disparam avisos retroativos.
 - **Móveis:** `FurnitureSpec.slots` = slots de produto (shelf/fridge/freezer) ou nº de caixas (rack). `buyFurniture(..., productId)` atribui o produto; para `decor` o 5º argumento vira `variant`. `state.slots` é recalculado a cada compra/venda/atribuição (nunca edite à mão). Vender/reatribuir móvel move o excedente exposto para o depósito (se couber) ou para caixas na calçada (`state.sidewalk` sem x/z).
-- **Layout:** móveis só em tiles inteiros. Antessala da porta 2×2 (x = porta−1..porta, z = depth−2..depth−1) e, com depósito, a passagem x = porta−1..porta em z = −1 e 0 ficam sempre livres. O depósito é contíguo ao salão por essa passagem; só `rack`/`decor` entram nele. Layout inicial: balcão em (8,6) e 4 prateleiras em z=2 (`initialFurniture()`).
+- **Layout:** móveis só em tiles inteiros. Antessala da porta 2×2 (x = porta−1..porta, z = depth−2..depth−1) e, com depósito, a passagem x = porta−1..porta em z = −1 e 0 ficam sempre livres. O depósito é contíguo ao salão por essa passagem; só `rack`/`decor` entram nele. Layout inicial: balcão em (8,6) e 2 prateleiras em z=2 — feijão e macarrão (Fase 3; `initialFurniture()`).
 - **Depósito:** `storageCapacity/storageUsed` (em caixas); `storeBox` recusa se cheio. `takeFromStorage(state, id, carry)` cria Box em `state.sidewalk` (carried=true se `carry`) e devolve as unidades.
 - **Clientes:** `makeShoppingList` só devolve produtos licenciados **com móvel atribuído** e pode devolver `[]` (cliente deve ir embora: `recordLostCustomer`). Fluxo: lista → `acceptsPrice` → `takeFromShelf` → `completeSale`/`returnToShelf`. `arrivalSchedule(state)` dá os minutos das chegadas do dia (almoço e fim de tarde); `plannedArrivals` é determinístico por (seed, dia): chame uma vez ao abrir.
 - **Sujeira:** `addDirt` ignora acima de 12; `cleanDirt` com índice inválido é no-op. `dirtPenalty` já entra na reputação.
@@ -224,3 +224,35 @@ campos opcionais de WorldService/PlayerService), `src/core/outline.ts` (contorno
   móvel exigido (`api.furnitureForProduct`).
 - **npc** repositor: abre a caixa (visual) antes de repor e fecha/descarta depois.
 - `sfx` novos: `'boxOpen'`, `'boxClose'`.
+
+## Fase 3 — sim (estado novo, regras e números; detalhes em docs/GDD.md §3–4)
+- **Campos novos** (defaults em `newGame`, migração em `deserialize`; saves antigos carregam): `StoreState.furnitureStock: {type, variant?}[]`
+  (móveis comprados e não montados; ausente/inválido → `[]`); `Box.open?: boolean` (`false` = fechada, como chega de
+  `orderBoxes/checkoutCart/runAutoOrders/buyMissing/takeFromStorage` e das sobras de `reconcile`; ausente em saves antigos = fechada);
+  `Ledger.happy/angry` (venda com satisfação ≥ 3 → feliz; venda < 3 e perdido/desistente → irritado; ledger antigo: atendidos = felizes,
+  perdidos = irritados). `DayReport` ganhou (opcionais só por causa do histórico antigo; sempre presentes em relatórios novos):
+  `happy`, `angry` (happy + angry = served + lost = "total"), `rent`, `wages`, `income` (= receita + gorjetas, "rendimento"),
+  `expenses` (= COGS + fixas, "despesa"; `income − expenses = netProfit`, "lucro").
+- **`state.rent`** agora é o aluguel que será cobrado no fechamento de HOJE (`src/sim/rent.ts`): 0 até o nível 2 e o dia 3; rampa
+  1/3 → 2/3 → integral a partir do nível 3 OU do dia 4 (integral no nível 5 ou dia 6); cheio = R$ 80 + R$ 40/expansão. É recalculado em
+  `closeDay` (para o dia seguinte), `buyExpansion`, recomeço e migração. **ui:** use `DayReport.rent/wages` no relatório (não `fixed − state.rent`).
+- **API Fase 3 implementada:** `cartTotal`, `checkoutCart` (atômica; recusa licença/nível/dinheiro, carrinho vazio, calçada > 48 caixas e estante
+  sem depósito; mensagens pt-BR), `furnitureStock` (cópia), `placeFromStock` (valida `canPlace` e o produto; não cobra; decor mantém a variante
+  comprada), `storeFurniture` (mesmas regras de `sellFurniture`: último balcão e estante com depósito cheio são recusados), `dropBox`
+  (x/z em metros = tiles; `rot` em radianos normalizado para [0, 2π); `carried=false`), `customerCapacity`, `furnitureForProduct`.
+  **Adições:** `canDropBox(state, x, z)` (mesma validação do `dropBox`: salão, vão da porta, calçada z ∈ [depth+0,15; depth+2,85] e até 14 m
+  para os lados, depósito/passagem só desbloqueados, 0,15 m das paredes; móveis não são checados) e `setBoxOpen(state, boxIndex, open)`.
+  `placeUnits` não exige caixa aberta (quem exige é o player). `assignProduct` aceita móvel sem produto e troca o produto de um móvel
+  esgotado quando a categoria é aceita (com estoque exposto, o excedente vai ao depósito/calçada; o player desabilita esse caso).
+- **Avisos:** **player/world** — clampem o ponto de queda do arremesso à calçada (a rua da navegação do world não é aceita) e usem
+  `api.canDropBox` para a prévia ciano/vermelha. **npc** — use `Math.min(api.customerCapacity(state), limite de desempenho)` no lugar de
+  `10 + expansion` (6 + 2/expansão, +4 com a melhoria 'capacity'). **ui** — gaveta do troco: `DRAWER_BILLS`/`DRAWER_COINS`/`DRAWER_DENOMS`
+  (`src/sim/money.ts`; R$ 50, 20, 10, 5, 2 e R$ 1; 0,50; 0,25; 0,10; 0,05): `customerCashPayment` paga no máximo um passo acima do total
+  (R$ 100 só acima de R$ 25), então o troco é sempre < R$ 100; `upgradeCatalog` agora tem 3 itens em ordem de nível (`tipjar` 2, `capacity` 4,
+  `dolly` 6); `restartAfterBankruptcy` também zera `furnitureStock`.
+- **Números (tuning.ts):** dinheiro inicial R$ 150; layout inicial = balcão (8,6) + prateleiras de feijão (1,2) e macarrão (4,2)
+  (`nextFurnitureId` 4); paleta padrão `#bfe1f2`/`#c48a55`/`#d8342c` (saves mantêm a escolha). Liberações: bebidas + geladeira + pote de gorjeta 2;
+  expansões 3/5/6/7/15/28 (R$ 1.500/4.500/11.000/26.000/75.000/180.000); caixa, laticínios, capacidade e 2º balcão 4; depósito (R$ 2.500) 5;
+  limpador e carrinho de carga (R$ 5.000) 6; repositor 8. Pote de gorjeta R$ 150 (gorjeta ×1,5); capacidade R$ 1.500 (+4). XP: nível n =
+  60·(n−1)^2,08·(1 + 0,05·max(0, n−15)) (nível 2 = 60 XP). Empréstimo R$ 200 + R$ 400 × nível; recomeço com R$ 300. Bot: nível 2 no dia 1,
+  bebidas dia 7–8, expansão 1 dia 10–14, caixa contratado dia 11–16, nível 30 dia 95–98, nunca no vermelho no começo.

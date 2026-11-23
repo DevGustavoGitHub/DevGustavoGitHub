@@ -1,19 +1,35 @@
 /** Widgets reutilizáveis (steppers, tiles de produto, linhas chave/valor). */
-import type { Category } from '../sim/catalog';
-import { h } from './dom';
+import type { Category, Product } from '../sim/catalog';
+import { CATEGORY_COLOR, productSvg } from './art';
+import { h, money } from './dom';
 import { icon } from './icons';
 
-export const CATEGORY_COLOR: Record<Category, string> = {
-  mercearia: '#d9a441', bebidas: '#3b7fd4', laticinios: '#5fb4d6', congelados: '#7b8ff0', padaria: '#c9803f', limpeza: '#35a891',
-  hortifruti: '#5aa33a', higiene: '#d86fa1', frios: '#c8543f', eletronicos: '#6b6f80',
-};
+export { CATEGORY_COLOR };
 export const CATEGORY_NAME: Record<Category, string> = {
   mercearia: 'Mercearia', bebidas: 'Bebidas', laticinios: 'Laticínios', congelados: 'Congelados', padaria: 'Padaria', limpeza: 'Limpeza',
   hortifruti: 'Hortifrúti', higiene: 'Higiene e Beleza', frios: 'Açougue e Frios', eletronicos: 'Eletrônicos',
 };
 
-export function productTile(name: string, cat: Category): HTMLElement {
-  return h('div', { class: 'ptile', style: `--tc:${CATEGORY_COLOR[cat]}` }, name.slice(0, 1).toUpperCase());
+/** Ícone procedural do produto (cor/forma do catálogo). */
+export function productTile(p: Product): HTMLElement {
+  return h('div', { class: 'ptile pt3', style: `--tc:${CATEGORY_COLOR[p.category]}`, html: productSvg(p, 40), title: p.name });
+}
+
+/** Botão de compra no estilo da referência: azul (comprar), vermelho (nível da loja N), cinza (possuído/sem dinheiro). */
+export type BuyState =
+  | { kind: 'buy'; label: string; onClick: () => void; id?: string }
+  | { kind: 'lock'; level: number }
+  | { kind: 'owned'; label?: string }
+  | { kind: 'poor'; cost: number; have: number }
+  | { kind: 'off'; label: string };
+export function actionBtn(s: BuyState): HTMLButtonElement {
+  switch (s.kind) {
+    case 'buy': return h('button', { class: 'abtn buy', id: s.id, on: { click: s.onClick } }, s.label);
+    case 'lock': return h('button', { class: 'abtn lock', disabled: true, 'aria-label': `Libera no nível ${s.level} da loja` }, `Nível da loja ${s.level}`);
+    case 'owned': return h('button', { class: 'abtn owned', disabled: true }, s.label ?? 'Possuído');
+    case 'poor': return h('button', { class: 'abtn poor', disabled: true, title: `Faltam ${money(s.cost - s.have)}` }, `Faltam ${money(s.cost - s.have)}`);
+    default: return h('button', { class: 'abtn off', disabled: true }, s.label);
+  }
 }
 
 export function stepper(value: string, onMinus: () => void, onPlus: () => void, opts: { minusOff?: boolean; plusOff?: boolean } = {}): HTMLElement {

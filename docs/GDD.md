@@ -27,42 +27,44 @@ Uso as mecânicas como loop de gameplay. Nome, arte, sons e textos do jogo de re
 
 ## 3. Progressão
 
-- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `130·(n−1)^1,8 · (1 + 0,05·max(0, n−15))` XP acumulado: igual à curva original até o nível 15 (n=5: 1.585, n=10: 6.900, n=15: 15.000) e mais íngreme depois (n=20: 32.600, n=25: 59.500, n=30: 97.600), para o nível ~30 chegar por volta do dia 95 com o bot.
-- **Licenças** (nível mínimo / custo): Mercearia 1 / grátis · Bebidas 3 / R$ 1.500 · Laticínios 5 / R$ 4.000 · Padaria 7 / R$ 8.000 · Limpeza 9 / R$ 12.000 · Congelados 11 / R$ 20.000 · **Hortifrúti 13 / R$ 25.000 · Higiene e Beleza 16 / R$ 35.000 · Açougue e Frios 20 / R$ 55.000 · Eletrônicos e Utilidades 25 / R$ 90.000**.
+- **XP:** por venda: 1 por unidade + 2 por cliente + bônus de velocidade (até 0,5 por unidade). Nível n exige `60·(n−1)^2,08 · (1 + 0,05·max(0, n−15))` XP acumulado (Fase 3): n=2: 60 (sobe no 1º dia mesmo com a loja pobre), n=3: 254, n=5: 1.073, n=10: 5.794, n=15: 14.524, n=20: 34.266, n=25: 66.847, n=30: 115.605 — primeiros níveis rápidos, nível ~30 por volta do dia 95 com o bot.
+- **Licenças** (nível mínimo / custo): Mercearia 1 / grátis · **Bebidas 2 / R$ 400** (2ª licença no nível 2, como no original) · Laticínios 4 / R$ 1.500 · Padaria 6 / R$ 3.500 · Limpeza 8 / R$ 7.000 · Congelados 10 / R$ 13.000 · Hortifrúti 13 / R$ 22.000 · Higiene e Beleza 16 / R$ 34.000 · Açougue e Frios 20 / R$ 52.000 · Eletrônicos e Utilidades 25 / R$ 85.000.
 - **Móveis, expansão, depósito, funcionários, melhorias e personalização:** implementados em `src/sim/furniture.ts`, `api.ts` e `tuning.ts` (tabelas abaixo).
-- **Marcos de desbloqueio** (nenhuma lacuna maior que 3 níveis até o 28; `tests/phase2.test.ts` valida): 3 depósito/bebidas/geladeira/caixa · 4 expansão 1 · 5 laticínios/repositor · 6 carrinho de carga · 7 padaria · 8 expansão 2 · 9 limpeza · 10 freezer · 11 congelados · 13 hortifrúti/expansão 3 · 16 higiene · 19 expansão 4 · 20 açougue e frios · 24 expansão 5 · 25 eletrônicos · 26 estátua · 29 expansão 6.
+- **Marcos de desbloqueio** (alinhados ao original; nenhuma lacuna maior que 3 níveis até o 28; `tests/phase2.test.ts` e `tests/phase3.test.ts` validam): 2 bebidas/geladeira/pote de gorjeta · 3 expansão 1 · 4 laticínios/caixa contratado/capacidade de clientes/caixa registradora extra · 5 depósito/expansão 2 · 6 limpador/padaria/carrinho de carga/expansão 3 · 7 expansão 4 · 8 repositor/limpeza · 10 congelados/freezer · 13 hortifrúti · 15 expansão 5 · 16 higiene · 20 açougue e frios · 25 eletrônicos · 27 estátua · 28 expansão 6. Níveis 2–5 dos funcionários espalham-se até o 22.
 
-## 4. Números do jogo (balanceamento v1, bot `src/sim/bot.ts`, validado em `tests/balance.test.ts`)
+## 4. Números do jogo (balanceamento Fase 3, bot `src/sim/bot.ts`, validado em `tests/balance.test.ts`)
 
-Todos os números ficam em `src/sim/tuning.ts` (+ `furniture.ts`, `catalog.ts`, `demand.ts`). Dinheiro em R$.
+Todos os números ficam em `src/sim/tuning.ts` (+ `furniture.ts`, `catalog.ts`, `demand.ts`, `rent.ts`). Dinheiro em R$.
 
 ### 4.1 Móveis (footprint em tiles; `slots`: shelf/fridge/freezer = slots de produto × `slotCapacity` do produto; rack = caixas)
 
 | Móvel | Custo | Nível | Slots | Categorias | Footprint |
 |---|---|---|---|---|---|
-| Prateleira | 350 | 1 | 2 | mercearia, limpeza, padaria, hortifrúti, higiene, eletrônicos | 2×1 |
-| Geladeira | 900 | 3 | 3 | bebidas, laticínios, hortifrúti, açougue e frios | 2×1 |
-| Freezer | 1.800 | 10 | 3 | congelados | 2×1 |
-| Caixa registradora | 1.200 | 3 | – | – | 2×2 |
-| Estante do depósito | 600 | 3 | 8 caixas | – | 2×1 |
+| Prateleira | 300 | 1 | 2 | mercearia, limpeza, padaria, hortifrúti, higiene, eletrônicos | 2×1 |
+| Geladeira | 500 | 2 | 3 | bebidas, laticínios, hortifrúti, açougue e frios | 2×1 |
+| Freezer | 1.500 | 10 | 3 | congelados | 2×1 |
+| Caixa registradora | 1.000 | 4 | – | – | 2×2 |
+| Estante do depósito | 500 | 5 | 8 caixas | – | 2×1 |
 | Decoração | 80 (base) | 1 | – | – | 1×1 |
 
-**Decoração** (`decorCatalog()`; o id vai como 5º argumento de `buyFurniture`, vira `Furniture.variant`): planta R$ 80 (nív. 1) · faixa R$ 80 (1) · cartaz R$ 100 (5) · tapete R$ 150 (6) · luminária R$ 120 (4) · árvore R$ 200 (8) · fonte R$ 600 (18) · estátua R$ 1.200 (26). O world reconhece `plant|tree|banner|lamp`; as demais caem no visual padrão até o world desenhá-las.
+**Decoração** (`decorCatalog()`; o id vai como 5º argumento de `buyFurniture`, vira `Furniture.variant`): planta R$ 80 (nív. 1) · faixa R$ 80 (1) · cartaz R$ 100 (5) · tapete R$ 150 (6) · luminária R$ 120 (4) · árvore R$ 200 (8) · fonte R$ 600 (18) · estátua R$ 1.200 (27). O world reconhece `plant|tree|banner|lamp`; as demais caem no visual padrão até o world desenhá-las.
 
-Venda de móvel devolve 50% (do preço da variante, no caso de decoração). Início: 1 caixa em (8,6) + 4 prateleiras em z=2 (arroz, feijão, macarrão, café) = 16/24/32/20 unidades de capacidade. Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta (móveis que já estavam inalcançáveis antes da compra não bloqueiam compras novas). Como a porta muda de lugar a cada expansão, `buyExpansion` realoca para o ponto válido mais próximo qualquer móvel que caia na nova antessala/passagem (`relocateBlocking`).
+**Compra pelo carrinho (Fase 3):** `checkoutCart` cobra tudo de uma vez (tudo ou nada); produtos viram caixas FECHADAS na calçada, móveis vão para `state.furnitureStock` e são montados em 1ª pessoa com `placeFromStock` (sem cobrar de novo); `storeFurniture` desmonta de volta para o estoque (alternativa a vender). Venda de móvel devolve 50% (do preço da variante, no caso de decoração). **Início (Fase 3):** balcão em (8,6) + 2 prateleiras em z=2 (feijão em x=1 e macarrão em x=4: 24 e 32 unidades); a fileira tem lugar para mais 2 prateleiras (x=7 e x=10). Regras de colocação: dentro do salão (rack só no depósito; decor em qualquer um), sem colisão, antessala 2×2 da porta livre, passagem de 2 tiles do depósito livre (x = porta−1..porta, z = −1 e 0), e todo móvel (exceto decor) precisa de um vizinho livre alcançável a partir da porta (móveis que já estavam inalcançáveis antes da compra não bloqueiam compras novas). Como a porta muda de lugar a cada expansão, `buyExpansion` realoca para o ponto válido mais próximo qualquer móvel que caia na nova antessala/passagem (`relocateBlocking`).
 
 ### 4.2 Loja
 
 | Item | Valor |
 |---|---|
-| Dinheiro inicial / aluguel | R$ 5.000 / R$ 120 por dia (+R$ 50 por expansão) |
-| Expansão 1 / 2 / 3 / 4 / 5 / 6 | R$ 4.500 (nív. 4) / R$ 16.000 (nív. 8) / R$ 35.000 (nív. 13) / R$ 70.000 (nív. 19) / R$ 140.000 (nív. 24) / R$ 260.000 (nív. 29) — salão 12×10 → 16×12 → 20×14 → 24×16 → 28×18 → 32×20 → 36×22 (`core/layout.MAX_EXPANSION = 6`) |
-| Depósito | R$ 4.000 (nív. 3); 6 caixas base + 8 por estante |
-| Calçada | máx. 48 caixas |
-| Personalização | renomear grátis (≤24 letras); cada cor alterada R$ 10 |
-| Empréstimo | limite = R$ 1.000 + R$ 1.200 × nível (nív. 1: R$ 2.200; nív. 30: R$ 37.000); juros de 0,4% do saldo por dia (múltiplo de R$ 0,05, arredondado para cima), cobrados em `closeDay` e somados a `fixed`/`netProfit` (campo `DayReport.interest`) |
-| Falência | `isBankrupt`: caixa < 0 e rombo > crédito disponível + 50% do custo do estoque. `restartAfterBankruptcy`: mantém nível/XP/licenças/melhorias/decoração/nome/histórico; zera dívida, estoque, funcionários, expansões, depósito e volta ao layout inicial; caixa R$ 3.000 |
-| Carrinho de carga (dolly) | R$ 6.000, nível 6; `carryCapacity` 1 → 3 caixas |
+| Dinheiro inicial | **R$ 150** (dá para 2 caixas dos produtos mais baratos: macarrão R$ 70 + feijão R$ 72; 3 não cabem) |
+| Aluguel | cheio = R$ 80 + R$ 40 por expansão; **grátis até o nível 2 e o dia 3**; começa no nível 3 OU no dia 4 (o que vier primeiro) com rampa de 3 passos: 1/3 → 2/3 → integral (nível 5 ou dia 6). `state.rent` = aluguel que será cobrado no fechamento de hoje (recalculado em `closeDay`, `buyExpansion`, recomeço e migração) |
+| Expansão 1 / 2 / 3 / 4 / 5 / 6 | R$ 1.500 (nív. 3) / R$ 4.500 (nív. 5) / R$ 11.000 (nív. 6) / R$ 26.000 (nív. 7) / R$ 75.000 (nív. 15) / R$ 180.000 (nív. 28) — salão 12×10 → 16×12 → 20×14 → 24×16 → 28×18 → 32×20 → 36×22 (`core/layout.MAX_EXPANSION = 6`) |
+| Depósito | R$ 2.500 (nív. 5); 6 caixas base + 8 por estante |
+| Clientes simultâneos (`customerCapacity`) | 6 + 2 por expansão (+4 com a melhoria "Capacidade de clientes"): 6 → 18 (22 com a melhoria). O npc pode limitar mais por desempenho |
+| Calçada | máx. 48 caixas (todas as caixas físicas, também as largadas no salão/depósito); `dropBox` aceita salão, vão da porta, calçada (até 14 m para os lados da fachada) e depósito/passagem desbloqueados, a 0,15 m das paredes |
+| Personalização | renomear grátis (≤24 letras); cada cor alterada R$ 10; paleta de jogo novo: paredes azul-claro `#bfe1f2`, piso de madeira `#c48a55`, letreiro vermelho `#d8342c` (saves mantêm a escolha do jogador) |
+| Empréstimo | limite = R$ 200 + R$ 400 × nível (nív. 1: R$ 600; nív. 30: R$ 12.200); juros de 0,4% do saldo por dia (múltiplo de R$ 0,05, arredondado para cima), cobrados em `closeDay` e somados a `fixed`/`netProfit` (campo `DayReport.interest`) |
+| Falência | `isBankrupt`: caixa < 0 e rombo > crédito disponível + 50% do custo do estoque. `restartAfterBankruptcy`: mantém nível/XP/licenças/melhorias/decoração/nome/histórico; zera dívida, estoque, funcionários, expansões, depósito, móveis por montar e volta ao layout inicial; caixa R$ 300 |
+| Melhorias (compra única) | Pote de gorjeta R$ 150 (nív. 2; gorjetas ×1,5, teto 12%) · Capacidade de clientes R$ 1.500 (nív. 4; +4 clientes simultâneos) · Carrinho de carga R$ 5.000 (nív. 6; `carryCapacity` 1 → 3 caixas) |
 | Pedido automático | `setAutoOrder(produto, {minUnits, boxes})`: `runAutoOrders` compra `boxes` caixas quando prateleira+depósito+calçada < `minUnits`, só com dinheiro (tudo ou nada) e calçada com espaço; `buyMissing(fillRatio)` enche as prateleiras com caixas inteiras, comprando o que o caixa permitir (mais populares primeiro) |
 | Histórico | `state.history` guarda 30 `DayReport`; `state.stats` guarda unidades/receita/lucro por produto dos últimos 30 dias (`topProducts(state, dias)`). Save com 45+ dias de bot ≈ 30 KB |
 | Sujeira | máx. 12 manchas; > 3 manchas tiram 0,06 de satisfação por mancha (máx. 0,5) |
@@ -71,9 +73,9 @@ Venda de móvel devolve 50% (do preço da variante, no caso de decoração). In�
 
 | Papel | Custos | Nível exigido | Salário/dia | Segundos |
 |---|---|---|---|---|
-| Caixa | 250 · 450 · 800 · 1.400 · 2.300 | 4 · 7 · 11 · 15 · 20 | 120 · 150 · 190 · 240 · 300 | 10 · 8 · 6,5 · 5 · 4 |
-| Repositor | 180 · 350 · 650 · 1.100 · 1.800 | 5 · 8 · 12 · 16 · 21 | 100 · 130 · 170 · 220 · 280 | 7 · 5,5 · 4,5 · 3,5 · 2,5 |
-| Faxineiro | 120 · 220 · 400 · 700 · 1.200 | 3 · 6 · 10 · 14 · 19 | 80 · 100 · 130 · 170 · 220 | 9 · 7 · 5,5 · 4,5 · 3,5 |
+| Caixa | 250 · 450 · 800 · 1.400 · 2.300 | **4** · 8 · 12 · 16 · 20 | 100 · 130 · 170 · 220 · 280 | 10 · 8 · 6,5 · 5 · 4 |
+| Limpador (janitor) | 200 · 350 · 600 · 1.000 · 1.600 | **6** · 9 · 13 · 17 · 21 | 80 · 100 · 130 · 170 · 220 | 9 · 7 · 5,5 · 4,5 · 3,5 |
+| Repositor | 300 · 500 · 850 · 1.400 · 2.200 | **8** · 11 · 14 · 18 · 22 | 110 · 140 · 180 · 230 · 290 | 7 · 5,5 · 4,5 · 3,5 · 2,5 |
 
 Capacidade de checkout/dia = 45 (jogador) + `40·(1+0,25·(nível_caixa−1))` (caixa contratado) + 20 por caixa registradora extra.
 
@@ -81,38 +83,45 @@ Capacidade de checkout/dia = 45 (jogador) + `40·(1+0,25·(nível_caixa−1))` (
 
 - Chegadas/dia = `(22 + 4·min(nível,30)) · (1 + 0,4·(1 − razão_preço_média)) · (0,6 + 0,1·reputação) · (1 + 0,12·expansão) · (0,9..1,1)`.
 - Compra: `P = 1 / (1 + e^(8·(r − 1,25)))`, `r = preço/mercado`: r=1,0 → 88%; 1,1 → 77%; 1,15 → 69%; 1,25 → 50%; 1,5 → 12%; 1,6 → 6%.
-- Cesta: 1 a min(produtos expostos, 4+⌊nível/3⌋) produtos distintos (sorteio ponderado por popularidade), quantidade 1 (45%), 2 (36%) ou 3 (19%).
-- Gorjeta = até 8% do total × `speed` × `(satisfação−2)/3`. Reputação: média móvel com peso 0,04 por cliente (atendido ou perdido).
-- COGS pelo custo médio ponderado; lucro líquido = receita + gorjeta − COGS − aluguel − salários.
+- Cesta: 1 a min(produtos expostos, 3+⌊nível/3⌋, 7) produtos distintos (sorteio ponderado por popularidade), quantidade 1 (45%), 2 (36%) ou 3 (19%).
+- Gorjeta = até 8% do total (12% com o pote de gorjeta) × `speed` × `(satisfação−2)/3`. Reputação: média móvel com peso 0,04 por cliente (atendido ou perdido).
+- **Felizes/irritados (Fase 3):** venda com satisfação ≥ 3 conta feliz (`ledger.happy`); venda com satisfação < 3 e cliente perdido/desistente contam irritado (`ledger.angry`); felizes + irritados = atendidos + perdidos = total do resumo do dia.
+- **Resumo do dia:** rendimento = receita + gorjetas (`DayReport.income`); despesa = COGS + aluguel + salários + juros (`expenses`); lucro = `netProfit` = rendimento − despesa. Compras de estoque aparecem à parte (`purchases`, `cashDelta`).
+- **Troco (Fase 3):** o cliente paga em dinheiro arredondando o total para cima até um múltiplo de R$ 10, 20, 50 ou 100 (R$ 100 só acima de R$ 25), nunca mais que um passo acima — o troco é sempre < R$ 100 e a gaveta precisa só de 10 denominações (`DRAWER_DENOMS`: R$ 50, 20, 10, 5, 2 e moedas R$ 1; 0,50; 0,25; 0,10; 0,05). O guloso é ótimo com elas (teste contra programação dinâmica).
+- COGS pelo custo médio ponderado; lucro líquido = receita + gorjeta − COGS − aluguel − salários − juros.
 
-### 4.5 Resultado do balanceamento (bot: repõe 4×/dia, investe, 3 sementes, média de 30 dias)
+### 4.5 Resultado do balanceamento (bot: repõe 4×/dia, investe, 3 sementes, média de 30 dias, começando com R$ 150)
 
 | Preço vs. mercado | Lucro/dia | Atendidos/dia | Perdidos/dia | Reputação | Nível no dia 30 |
 |---|---|---|---|---|---|
-| ×0,8 | R$ 460 | 67 | 2 | 4,42 | 16 |
-| ×0,9 | R$ 1.007 | 68 | 1 | 4,43 | 17 |
-| ×1,0 | R$ 1.314 | 63 | 2 | 4,32 | 16 |
-| **×1,1** | **R$ 1.313** | 56 | 3 | 4,42 | 15 |
-| ×1,15 | R$ 1.124 | 49 | 4 | 4,22 | 13 |
-| ×1,2 | R$ 807 | 40 | 5 | 3,47 | 11 |
-| ×1,3 | R$ 355 | 23 | 9 | 2,34 | 7 |
-| ×1,6 | −R$ 67 | 2 | 15 | 1,79 | 2 |
+| ×0,8 | R$ 333 | 50 | 7 | 4,15 | 14 |
+| ×0,9 | R$ 1.017 | 66 | 3 | 4,28 | 16 |
+| ×1,0 | R$ 1.439 | 67 | 2 | 4,09 | 16 |
+| **×1,1** | **R$ 1.550** | 61 | 3 | 4,31 | 15 |
+| ×1,15 | R$ 1.399 | 55 | 4 | 4,22 | 14 |
+| ×1,2 | R$ 1.011 | 44 | 6 | 3,54 | 12 |
+| ×1,3 | R$ 395 | 23 | 10 | 2,37 | 8 |
+| ×1,6 | −R$ 60 | 1 | 17 | 2,00 | 2 |
 
-Leitura: o ótimo fica entre mercado e +10% (volume compensa a margem); +15% ainda rende ~85%; +30% rende ~27%; +60% quebra a loja (prejuízo e reputação no chão). Preço abaixo do mercado perde margem sem ganhar volume proporcional (checkout e prateleira limitam).
+Leitura: o ótimo fica entre mercado e +10%; +15% ainda rende ~90%; +30% rende ~25%; +60% quebra a loja (prejuízo assim que o aluguel começa, reputação no chão). Preço abaixo do mercado perde margem sem ganhar volume proporcional (checkout e prateleira limitam). Com o início pobre o bot nunca fica com caixa negativo nos primeiros 20 dias (×1,0 a ×1,25, reposição 2× ou 4×/dia).
 
-Linha do tempo do bot (semente 11; as outras ficam ±3 dias): nível 2 no fim do dia 1; bebidas no dia 4; expansão 1 no dia ~10; caixa contratado ~dia 15; depósito logo após laticínios; expansão 2 ~dia 26; repositor ~dia 20-30; carrinho de carga ~dia 35-40; expansão 3 ~dia 55; hortifrúti ~dia 60; higiene ~dia 70; açougue e frios ~dia 85; expansão 4 ~dia 95; nível 30 por volta do dia 95; eletrônicos ~dia 110. O bot usa depósito (repõe a prateleira do depósito antes de comprar e abastece 2 caixas quando o atacado está < 0,9), repositor e carrinho de carga.
+Linha do tempo do bot (sementes 3/11/29, ±3 dias entre elas): dia 1 compra 1 caixa de feijão + 1 de macarrão (sobram R$ 8), vende ~21 clientes, lucra ~R$ 190 e sobe para o **nível 2**; 3ª e 4ª prateleiras (arroz, café) nos dias 3–6; pote de gorjeta dia ~4; nível 3 no dia 2–3 (aluguel começa em 1/3); bebidas + geladeira no dia 7–8; laticínios dia ~11; caixa contratado dia 11–16; expansão 1 dia 10–14; expansão 2 dia ~19; expansão 3 dia ~28; depósito, capacidade de clientes, repositor e carrinho de carga dias 29–34; expansão 4 dia ~53; hortifrúti dia ~45; higiene dia ~63; açougue e frios dia ~75; expansão 5 dia ~88; **nível 30 nos dias 95–98**; eletrônicos dia ~101; a expansão 6 (R$ 180 mil, nív. 28) fica como meta depois do dia 120.
 
-| Dia | Nível | Chegadas | Atendidos | Lucro/dia |
-|---|---|---|---|---|
-| 1 | 2 | 23 | 21 | R$ 471 |
-| 10 | 5 | 47 | 42 | R$ 978 |
-| 30 | 14 | 77 | 75 | R$ 1.905 |
-| 50 | 20 | 132 | 127 | R$ 3.295 |
-| 70 | 25 | 166 | 162 | R$ 4.134 |
-| 90 | 29 | 183 | 174 | R$ 5.118 |
-| 120 | 35 | 207 | 191 | R$ 6.225 |
+| Dia | Nível | Chegadas | Atendidos | Felizes/irritados | Receita | Despesas fixas | Lucro/dia | Caixa |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2 | 23 | 21 | 21/2 | R$ 436 | R$ 0 | R$ 187 | R$ 105 |
+| 2 | 2 | 27 | 23 | 23/4 | R$ 352 | R$ 0 | R$ 153 | R$ 203 |
+| 3 | 3 | 31 | 26 | 26/5 | R$ 421 | R$ 0 | R$ 183 | R$ 448 |
+| 5 | 4 | 31 | 28 | 28/3 | R$ 1.530 | R$ 53 | R$ 616 | R$ 982 |
+| 10 | 6 | 46 | 41 | 41/5 | R$ 2.597 | R$ 80 | R$ 1.032 | R$ 1.443 |
+| 20 | 11 | 81 | 76 | 76/5 | R$ 4.600 | R$ 290 | R$ 1.739 | R$ 5.425 |
+| 30 | 15 | 100 | 97 | 97/3 | R$ 7.007 | R$ 370 | R$ 2.683 | R$ 5.649 |
+| 50 | 20 | 142 | 136 | 136/6 | R$ 9.504 | R$ 590 | R$ 3.898 | R$ 23.861 |
+| 70 | 25 | 180 | 175 | 175/5 | R$ 11.985 | R$ 630 | R$ 5.060 | R$ 44.540 |
+| 90 | 29 | 211 | 201 | 201/10 | R$ 17.084 | R$ 670 | R$ 7.356 | R$ 31.608 |
+| 120 | 33 | 222 | 207 | 206/16 | R$ 19.753 | R$ 670 | R$ 8.688 | R$ 173.519 |
 
-O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30 conta). Depois do dia ~120 ainda restam as expansões 5 e 6 (R$ 400 mil somados) e a licença de eletrônicos como metas; `tests/balance.test.ts` valida 120 dias (nível 30 entre os dias 75 e 120, sempre há algo a comprar até lá, estado válido). Limitação do modelo: repositor/faxineiro poupam tempo do jogador, não mudam a regra de venda.
+(semente 11.) O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30 conta). `tests/balance.test.ts` valida: R$ 150 compram só 2 caixas, dia 1 lucra sem aluguel e chega ao nível 2, 2ª licença/expansão 1/caixa contratado nas janelas acima, nenhum caixa negativo no começo, preço justo lucrativo e abusivo no prejuízo, lucro limitado por nível, nível 30 entre os dias 75 e 120 com sempre algo a comprar, estado válido por 120 dias. Limitação do modelo: repositor/limpador poupam tempo do jogador e a capacidade de clientes simultâneos só limita o npc em tempo real; o bot não modela esses dois efeitos.
 
 ### 4.6 Catálogo de produtos (custo atacado / markup / caixa / unid. por slot / popularidade)
 

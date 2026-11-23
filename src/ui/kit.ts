@@ -5,7 +5,8 @@ import { clear, errText, h } from './dom';
 import { icon } from './icons';
 
 export type ToastKind = 'info' | 'good' | 'bad';
-export type SfxName = 'scan' | 'cash' | 'coin' | 'card' | 'pop' | 'error' | 'levelup' | 'door' | 'step' | 'box' | 'trash' | 'buy';
+export type SfxName = 'scan' | 'cash' | 'coin' | 'card' | 'pop' | 'error' | 'levelup' | 'door' | 'step' | 'box' | 'trash' | 'buy'
+  | 'sign' | 'night' | 'celebrate' | 'place';
 
 export interface ConfirmOpts { title: string; text: string; ok?: string; cancel?: string; danger?: boolean }
 

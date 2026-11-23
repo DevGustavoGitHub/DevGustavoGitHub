@@ -6,7 +6,7 @@ import {
   expansionCost, expansionMinLevel, storageCost,
 } from '../src/sim/api';
 import { LICENSES, PRODUCTS } from '../src/sim/catalog';
-import { addXp, xpForLevel } from '../src/sim/economy';
+import { XP_BASE, XP_EXP, addXp, xpForLevel } from '../src/sim/economy';
 import { keepTiles } from '../src/sim/furniture';
 import { newBot, playDay } from '../src/sim/bot';
 import { deserialize, serialize } from '../src/sim/save';
@@ -44,28 +44,28 @@ describe('empréstimo', () => {
     const s = at(5);
     const rent = s.rent;
     const m0 = s.money;
-    takeLoan(s, 500_000);
+    takeLoan(s, 200_000);
     const r = closeDay(s);
     expect(r.interest).toBe(loanInfo(s).dailyInterest);
     expect(r.interest!).toBeGreaterThan(0);
-    expect(r.interest!).toBeLessThanOrEqual(500_000 * 0.01); // baixo: <= 1% ao dia
+    expect(r.interest!).toBeLessThanOrEqual(200_000 * 0.01); // baixo: <= 1% ao dia
     expect(r.interest! % 5).toBe(0);
     expect(r.fixed).toBe(rent + r.interest!);
-    expect(s.money).toBe(m0 + 500_000 - rent - r.interest!);
+    expect(s.money).toBe(m0 + 200_000 - rent - r.interest!);
     expect(r.netProfit).toBe(-(rent + r.interest!));
-    expect(r.loan).toBe(500_000);
+    expect(r.loan).toBe(200_000);
   });
   it('sem dívida não há juros; pagamento parcial e total', () => {
     const s = at(5);
     expect(closeDay(s).interest).toBe(0);
-    takeLoan(s, 500000);
-    repayLoan(s, 200000);
-    expect(s.loan).toBe(300000);
-    expect(() => repayLoan(s, 300005)).toThrow('maior que a dívida');
+    takeLoan(s, 200000);
+    repayLoan(s, 80000);
+    expect(s.loan).toBe(120000);
+    expect(() => repayLoan(s, 120005)).toThrow('maior que a dívida');
     s.money = 1000;
     expect(() => repayLoan(s, 5000)).toThrow('Dinheiro insuficiente');
     s.money = 400000;
-    repayLoan(s, 300000);
+    repayLoan(s, 120000);
     expect(s.loan).toBe(0);
     expect(loanInfo(s).dailyInterest).toBe(0);
   });
@@ -112,7 +112,8 @@ describe('falência', () => {
     restartAfterBankruptcy(s);
     expect(isBankrupt(s)).toBe(false);
     expect(s.money).toBe(BANKRUPTCY.restartMoney);
-    expect(s.money).toBeLessThan(newGame().money);
+    expect(s.money).toBeLessThanOrEqual(3 * newGame().money); // capital pequeno, como no começo
+    expect(s.furnitureStock).toEqual([]);
     expect(s.loan).toBe(0);
     expect(s.level).toBe(level);
     expect(s.day).toBe(day);
@@ -227,7 +228,7 @@ describe('melhorias (dolly)', () => {
     expect(s.money).toBe(0);
     expect(carryCapacity(s)).toBe(UPGRADES.dolly.carry);
     expect(carryCapacity(s)).toBe(3);
-    expect(upgradeCatalog(s)[0]!.owned).toBe(true);
+    expect(upgradeCatalog(s).find((u) => u.id === 'dolly')!.owned).toBe(true);
     expect(() => buyUpgrade(s, 'dolly')).toThrow('já adquirida');
   });
 });
@@ -378,13 +379,16 @@ describe('conteúdo de fim de jogo', () => {
     expect(sorted[sorted.length - 1]).toBeGreaterThanOrEqual(28);
     expect(sorted[sorted.length - 1]).toBeLessThanOrEqual(30);
     for (let l = 1; l < 28; l++) expect(sorted.some((x) => x > l && x <= l + 3), `nível ${l}`).toBe(true);
-    // expansões 5 e 6 só no fim, custo crescente
-    expect(exp[4]).toBeGreaterThanOrEqual(22);
+    // Fase 3: expansões 1–4 nos níveis 3, 5, 6 e 7 (como no original); 5 e 6 ficam como metas de fim de jogo
+    expect(exp.slice(0, 4)).toEqual([3, 5, 6, 7]);
+    expect(exp[4]).toBeGreaterThan(exp[3]!);
     expect(exp[5]).toBeGreaterThan(exp[4]!);
+    expect(exp[5]).toBeLessThanOrEqual(30);
   });
   it('XP: nível ~30 exige bem mais que o ritmo inicial, e a curva continua crescente', () => {
-    expect(xpForLevel(15)).toBe(Math.round(130 * Math.pow(14, 1.8)));
-    expect(xpForLevel(30)).toBeGreaterThan(Math.round(130 * Math.pow(29, 1.8)) * 1.5);
+    expect(xpForLevel(2)).toBe(60); // Fase 3: nível 2 no 1º dia mesmo com a loja pobre
+    expect(xpForLevel(15)).toBe(Math.round(XP_BASE * Math.pow(14, XP_EXP)));
+    expect(xpForLevel(30)).toBeGreaterThan(Math.round(XP_BASE * Math.pow(29, XP_EXP)) * 1.5);
     for (let n = 2; n < 60; n++) expect(xpForLevel(n + 1)).toBeGreaterThan(xpForLevel(n));
     const s = newGame();
     addXp(s, xpForLevel(30));
@@ -434,6 +438,6 @@ describe('decoração e expansões novas', () => {
     expect(storeBounds(s.expansion)).toEqual({ width: 36, depth: 22 });
   });
   it('contratar nível alto de repositor continua exigindo nível', () => {
-    expect(employeeCost(newGame(), 'stocker')!.minLevel).toBe(5);
+    expect(employeeCost(newGame(), 'stocker')!.minLevel).toBe(8);
   });
 });

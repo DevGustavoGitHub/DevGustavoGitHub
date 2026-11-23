@@ -1,120 +1,141 @@
 /**
- * Humanoides low-poly procedurais (arte 100% original). Geometrias e materiais são compartilhados entre
- * todos os NPCs (caches de módulo); cada pessoa é um grupo de ~10 meshes com articulações simples.
+ * Pessoas 3D procedurais (arte 100% original), estilizadas com proporções humanas realistas.
+ * Cada pessoa: 1 SkinnedMesh (corpo, geometria compartilhada por variante, 4 grupos de material) + cabeça
+ * (pele + rosto em CanvasTexture) + cabelo/chapéu/óculos + cesta (itens num InstancedMesh) + sombra.
+ * ≈ 6–9 objetos e 10–13 draw calls por pessoa; materiais em cache; animação sem alocação.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { clamp, lerp } from './shared';
+import { PRODUCTS } from '../sim/catalog';
+import {
+  type BoneName, FORE_ARM, HEAD_OFFSET, type HairStyle, type HatStyle, type Legs, REST, UPPER_ARM,
+  bodyGeometry, boneInverses, disposeBodies, glassesGeometry, hairGeometry, hatGeometry, headGeometry, makeBones,
+} from './body';
+import { FEMALE_FACES, KIND_OUTFIT, MALE_FACES, OUTFITS, type Outfit, UNIFORMS, disposeLooks, faceMaterial, outfitMaterial } from './looks';
+import { clamp } from './shared';
 
-export type Pose = 'normal' | 'basket' | 'carry' | 'mop' | 'grab' | 'scan';
+export type Pose = 'normal' | 'basket' | 'carry' | 'mop' | 'grab' | 'scan' | 'place' | 'extend' | 'sit' | 'sitScan';
 export type Role = 'customer' | 'cashier' | 'stocker' | 'janitor';
 export type AgeGroup = 'adult' | 'kid' | 'elder';
-/** Tipos de cliente (os especiais são raros e têm visual distinto sem meshes extras). */
+/** Tipos de cliente (os especiais são raros e têm visual distinto). */
 export type CustomerKind = 'normal' | 'bulk' | 'picky' | 'kid';
 
 export interface PersonSpec {
   role: Role;
   age: AgeGroup;
-  skin: number;
-  hair: number;
-  hairStyle: 0 | 1 | 2 | 3; // 0 careca, 1 curto, 2 longo, 3 coque
-  shirt: number;
-  pants: number;
-  height: number; // multiplicador
-  seed: number;
+  sex: 'm' | 'f';
   kind?: CustomerKind;
+  seed: number;
+  /** altura em metros */
+  height: number;
+  skin: string;
+  hair: string;
+  hairStyle: HairStyle;
+  hat: HatStyle | null;
+  hatColor: string;
+  glasses: boolean;
+  outfit: Outfit;
+  legs: Legs;
+  pants: string;
+  shoes: string;
+  face: number;
+  basket: string;
 }
 
-const SKINS = [0xf2c9a0, 0xe0a97d, 0xc68b5e, 0x9a6540, 0x6f4429, 0xffdcbf];
-const HAIRS = [0x1b1410, 0x3a2414, 0x6b4423, 0xb8863b, 0xc4421e, 0x111111, 0xd8c68a];
-const SHIRTS = [0xd94f4f, 0x3f7fd0, 0x4caf6a, 0xe8b93a, 0x8e5cc4, 0xf08a3c, 0x2fa6a6, 0xe46fa0, 0xf0f0f0, 0x455a7a];
-const PANTS = [0x2b3a55, 0x3a3a3a, 0x6b5a45, 0x1f4d63, 0x5a3b3b, 0x7a7f86];
-const ELDER_HAIR = [0xdcdcdc, 0xb8b8b8, 0xf2f2f2];
-const UNIFORM: Record<'cashier' | 'stocker' | 'janitor', number> = { cashier: 0xd33b3b, stocker: 0x2f6fd0, janitor: 0x2f9e5b };
+const SKINS = ['#f3d2b3', '#e6b892', '#d29a6e', '#b07850', '#8a5a3a', '#5e3b26'];
+const HAIRS = ['#1b1410', '#2e1d12', '#5a3a1e', '#8a5a2b', '#c8a05a', '#a8432a', '#111111'];
+const ELDER_HAIR = ['#d8d8d8', '#b9b9b9', '#efefef'];
+const PANTS = ['#2b3a55', '#3d4f7a', '#2a2a2e', '#6b5a45', '#1f4d63', '#4a4f57', '#7a6a55'];
+const SHOES = ['#f2f2f2', '#222222', '#5a3a22', '#c0392b', '#3a3f4a'];
+const SKIRTS = ['#2a2a2e', '#a33a4a', '#3d4f7a', '#d9a63a'];
+const HAT_COLORS = ['#f2c230', '#e67e22', '#2f6fd0', '#c0392b', '#2b2b2b', '#f2f2f2'];
+const BASKETS = ['#d24a3a', '#2f7fd0', '#2f9e5b'];
+const M_HAIR: HairStyle[] = ['short', 'short', 'buzz', 'side', 'side', 'curly', 'balding', 'ponytail'];
+const F_HAIR: HairStyle[] = ['long', 'long', 'ponytail', 'bun', 'bob', 'curly', 'short'];
 
-/* ---------- caches ---------- */
+/* ---------------- caches compartilhados ---------------- */
+const mats = new Map<string, THREE.Material>();
 const geos: THREE.BufferGeometry[] = [];
-const mats = new Map<string, THREE.MeshLambertMaterial>();
-const track = <T extends THREE.BufferGeometry>(g: T): T => { geos.push(g); return g; };
-
-function material(key: string, color: number, vertexColors = false): THREE.MeshLambertMaterial {
-  const k = `${key}:${color}`;
-  let m = mats.get(k);
-  if (!m) {
-    m = new THREE.MeshLambertMaterial({ color, flatShading: true, vertexColors });
-    mats.set(k, m);
-  }
+function lambert(key: string, color: string, extra?: THREE.MeshLambertMaterialParameters): THREE.MeshLambertMaterial {
+  let m = mats.get(key) as THREE.MeshLambertMaterial | undefined;
+  if (!m) { m = new THREE.MeshLambertMaterial({ color, ...extra }); mats.set(key, m); }
   return m;
 }
+const colorCache = new Map<string, THREE.Color>();
+/** Cor do produto (catálogo) como THREE.Color em cache. */
+export function productColor(pid: string): THREE.Color {
+  let c = colorCache.get(pid);
+  if (!c) {
+    const p = PRODUCTS.find((x) => x.id === pid);
+    let hex = p?.color;
+    if (!hex) { let h = 7; for (let i = 0; i < pid.length; i++) h = (h * 31 + pid.charCodeAt(i)) >>> 0; hex = `#${new THREE.Color().setHSL((h % 360) / 360, 0.6, 0.55).getHexString()}`; }
+    c = new THREE.Color(hex);
+    colorCache.set(pid, c);
+  }
+  return c;
+}
 
-function paint(g: THREE.BufferGeometry, v: number): THREE.BufferGeometry {
-  const n = g.attributes.position!.count;
-  const c = new Float32Array(n * 3).fill(v);
-  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+interface Props {
+  basket: THREE.BufferGeometry; bag: THREE.BufferGeometry; item: THREE.BufferGeometry; shadow: THREE.BufferGeometry;
+  box: THREE.BufferGeometry; lid: THREE.BufferGeometry; flaps: THREE.BufferGeometry; fill: THREE.BufferGeometry; mop: THREE.BufferGeometry;
+  shadowMat: THREE.MeshBasicMaterial; itemMat: THREE.MeshLambertMaterial; cardboard: THREE.MeshLambertMaterial; vcol: THREE.MeshLambertMaterial;
+}
+let P: Props | null = null;
+function paint(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const c = new THREE.Color(hex), n = g.attributes.position!.count, a = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(a, 3));
   return g;
 }
-
-interface Shared {
-  leg: THREE.BufferGeometry;
-  torso: THREE.BufferGeometry;
-  arm: THREE.BufferGeometry;
-  head: THREE.BufferGeometry;
-  face: THREE.BufferGeometry;
-  hair: THREE.BufferGeometry[];
-  cap: THREE.BufferGeometry;
-  shadow: THREE.BufferGeometry;
-  box: THREE.BufferGeometry;
-  basket: THREE.BufferGeometry;
-  handle: THREE.BufferGeometry;
-  mopStick: THREE.BufferGeometry;
-  mopHead: THREE.BufferGeometry;
-  item: THREE.BufferGeometry;
-  shadowMat: THREE.MeshBasicMaterial;
-  faceMat: THREE.MeshBasicMaterial;
-  cardboard: THREE.MeshLambertMaterial;
-  basketMat: THREE.MeshLambertMaterial;
-  stickMat: THREE.MeshLambertMaterial;
-  mopMat: THREE.MeshLambertMaterial;
+function merged(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const g = mergeGeometries(list)!;
+  for (const x of list) x.dispose();
+  geos.push(g);
+  return g;
 }
-let S: Shared | null = null;
-
-function shared(): Shared {
-  if (S) return S;
-  const legA = new THREE.BoxGeometry(0.14, 0.74, 0.16).translate(0, -0.37, 0);
-  const shoe = new THREE.BoxGeometry(0.15, 0.08, 0.25).translate(0, -0.76, 0.04);
-  const leg = track(mergeGeometries([paint(legA, 1) , paint(shoe, 0.12)])!);
-  const torso = track(new THREE.BoxGeometry(0.36, 0.52, 0.21).translate(0, 0.26, 0));
-  const arm = track(new THREE.BoxGeometry(0.09, 0.5, 0.09).translate(0, -0.25, 0));
-  const head = track(new THREE.SphereGeometry(0.135, 8, 6).scale(1, 1.1, 1).translate(0, 0.15, 0));
-  const eyeL = new THREE.BoxGeometry(0.03, 0.04, 0.02).translate(-0.05, 0.17, 0.125);
-  const eyeR = new THREE.BoxGeometry(0.03, 0.04, 0.02).translate(0.05, 0.17, 0.125);
-  const face = track(mergeGeometries([eyeL, eyeR])!);
-  const capShape = new THREE.SphereGeometry(0.15, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.52).translate(0, 0.16, -0.005);
-  const short = track(capShape.clone());
-  const longBack = new THREE.BoxGeometry(0.27, 0.3, 0.08).translate(0, 0.07, -0.1);
-  const long = track(mergeGeometries([capShape.clone(), longBack])!);
-  const bun = new THREE.SphereGeometry(0.06, 6, 5).translate(0, 0.3, -0.1);
-  const bunG = track(mergeGeometries([capShape.clone(), bun])!);
-  const visor = new THREE.BoxGeometry(0.2, 0.02, 0.12).translate(0, 0.2, 0.15);
-  const cap = track(mergeGeometries([capShape.clone().scale(1.03, 1.03, 1.03), visor])!);
-  capShape.dispose();
-  const shadow = track(new THREE.CircleGeometry(0.32, 10).rotateX(-Math.PI / 2).translate(0, 0.012, 0));
-  S = {
-    leg, torso, arm, head, face, hair: [short, short, long, bunG], cap, shadow,
-    box: track(new THREE.BoxGeometry(0.38, 0.28, 0.3)),
-    basket: track(new THREE.BoxGeometry(0.3, 0.14, 0.2)),
-    handle: track(new THREE.TorusGeometry(0.1, 0.012, 4, 8, Math.PI).translate(0, 0.07, 0)),
-    mopStick: track(new THREE.CylinderGeometry(0.014, 0.014, 1.3, 5).translate(0, 0.65, 0)),
-    mopHead: track(new THREE.BoxGeometry(0.26, 0.07, 0.12).translate(0, 0.04, 0)),
-    item: track(new THREE.BoxGeometry(0.08, 0.1, 0.08)),
-    shadowMat: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }),
-    faceMat: new THREE.MeshBasicMaterial({ color: 0x1a1210 }),
-    cardboard: material('card', 0xb88a52),
-    basketMat: material('basket', 0xd24a3a),
-    stickMat: material('stick', 0x8a6a45),
-    mopMat: material('mop', 0xe8e4d0),
+function props(): Props {
+  if (P) return P;
+  // cesta: origem na pega (topo da alça); corpo pendurado abaixo
+  const basket = merged([
+    new THREE.BoxGeometry(0.22, 0.012, 0.32).translate(0, -0.27, 0),
+    new THREE.BoxGeometry(0.22, 0.15, 0.012).translate(0, -0.19, 0.16), new THREE.BoxGeometry(0.22, 0.15, 0.012).translate(0, -0.19, -0.16),
+    new THREE.BoxGeometry(0.012, 0.15, 0.32).translate(0.11, -0.19, 0), new THREE.BoxGeometry(0.012, 0.15, 0.32).translate(-0.11, -0.19, 0),
+    new THREE.TorusGeometry(0.12, 0.008, 4, 12, Math.PI).rotateY(Math.PI / 2).translate(0, -0.12, 0),
+  ]);
+  const bag = merged([
+    paint(new THREE.BoxGeometry(0.24, 0.27, 0.13).translate(0, -0.205, 0), 0xc9a06a),
+    paint(new THREE.BoxGeometry(0.245, 0.03, 0.135).translate(0, -0.085, 0), 0xb08850),
+    paint(new THREE.TorusGeometry(0.05, 0.006, 4, 10, Math.PI).translate(0, -0.07, 0.04), 0x8a6a40),
+    paint(new THREE.TorusGeometry(0.05, 0.006, 4, 10, Math.PI).translate(0, -0.07, -0.04), 0x8a6a40),
+  ]);
+  const box = merged([new THREE.BoxGeometry(0.42, 0.28, 0.32)]);
+  const lid = merged([
+    paint(new THREE.BoxGeometry(0.424, 0.012, 0.324).translate(0, 0.146, 0), 0xb88a52),
+    paint(new THREE.BoxGeometry(0.43, 0.014, 0.07).translate(0, 0.148, 0), 0xd8c08a),
+  ]);
+  const flapG = (w: number, d: number): THREE.BufferGeometry => new THREE.BoxGeometry(w, 0.006, d);
+  const flaps = merged([
+    flapG(0.42, 0.15).translate(0, 0, 0.075).rotateX(-0.45).translate(0, 0.14, 0.16).translate(0, 0, 0),
+    flapG(0.42, 0.15).translate(0, 0, -0.075).rotateX(0.45).translate(0, 0.14, -0.16),
+    flapG(0.15, 0.32).translate(0.075, 0, 0).rotateZ(0.45).translate(0.21, 0.14, 0),
+    flapG(0.15, 0.32).translate(-0.075, 0, 0).rotateZ(-0.45).translate(-0.21, 0.14, 0),
+  ]);
+  const fill = merged([new THREE.BoxGeometry(0.38, 0.03, 0.28).translate(0, 0.11, 0)]);
+  const mop = merged([
+    paint(new THREE.CylinderGeometry(0.013, 0.013, 1.25, 6).translate(0, 0.66, 0), 0x8a6a45),
+    paint(new THREE.BoxGeometry(0.3, 0.035, 0.1).translate(0, 0.05, 0), 0x4a6fa5),
+    paint(new THREE.BoxGeometry(0.34, 0.04, 0.14).translate(0, 0.018, 0), 0xe8e4d0),
+  ]);
+  P = {
+    basket, bag, box, lid, flaps, fill, mop,
+    item: (() => { const g = new THREE.BoxGeometry(0.075, 0.11, 0.075); geos.push(g); return g; })(),
+    shadow: (() => { const g = new THREE.CircleGeometry(0.3, 12).rotateX(-Math.PI / 2).translate(0, 0.012, 0); geos.push(g); return g; })(),
+    shadowMat: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.2, depthWrite: false }),
+    itemMat: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+    cardboard: new THREE.MeshLambertMaterial({ color: 0xb88a52 }),
+    vcol: new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }),
   };
-  return S;
+  return P;
 }
 
 export function disposeModels(): void {
@@ -122,25 +143,15 @@ export function disposeModels(): void {
   geos.length = 0;
   for (const m of mats.values()) m.dispose();
   mats.clear();
-  if (S) {
-    S.shadowMat.dispose();
-    S.faceMat.dispose();
-  }
-  S = null;
-}
-
-/** Cor estável por produto (para os itens na cesta/esteira). */
-export function productMaterial(productId: string): THREE.MeshLambertMaterial {
-  let h = 7;
-  for (let i = 0; i < productId.length; i++) h = (h * 31 + productId.charCodeAt(i)) >>> 0;
-  const color = new THREE.Color().setHSL((h % 360) / 360, 0.65, 0.55).getHex();
-  return material('prod', color);
+  if (P) { P.shadowMat.dispose(); P.itemMat.dispose(); P.cardboard.dispose(); P.vcol.dispose(); }
+  P = null;
+  disposeBodies();
+  disposeLooks();
 }
 
 export const MAX_BASKET_ITEMS = 6;
+const ITEM_SPOTS: readonly [number, number][] = [[-0.05, -0.1], [0.05, -0.1], [-0.05, 0], [0.05, 0], [-0.05, 0.1], [0.05, 0.1]];
 
-/** Gera uma especificação aleatória de cliente. */
-const KIND_SHIRT: Record<CustomerKind, number | null> = { normal: null, bulk: 0xff7a00, picky: 0x6a2c91, kid: 0xffe03a };
 /** Sorteia o tipo de cliente: ~5% compra grande, ~6% exigente, ~7% criança. */
 export function pickKind(rand: () => number): CustomerKind {
   const r = rand();
@@ -148,186 +159,307 @@ export function pickKind(rand: () => number): CustomerKind {
 }
 
 export function randomCustomerSpec(rand: () => number, seed: number, kind: CustomerKind = 'normal'): PersonSpec {
-  const r = rand();
-  const age: AgeGroup = kind === 'kid' ? 'kid' : r < 0.2 ? 'elder' : 'adult';
   const pick = <T,>(a: readonly T[]): T => a[Math.floor(rand() * a.length)]!;
+  const age: AgeGroup = kind === 'kid' ? 'kid' : rand() < 0.16 ? 'elder' : 'adult';
+  const sex: 'm' | 'f' = rand() < 0.5 ? 'm' : 'f';
+  const hair = age === 'elder' ? pick(ELDER_HAIR) : pick(HAIRS);
+  let outfit: Outfit = kind === 'bulk' ? KIND_OUTFIT.bulk : kind === 'picky' ? KIND_OUTFIT.picky : kind === 'kid' ? KIND_OUTFIT.kid : pick(OUTFITS);
+  if (sex === 'f' && outfit.style === 'suit' && rand() < 0.5) outfit = pick(OUTFITS);
+  let hat: HatStyle | null = null;
+  if (kind === 'picky') hat = 'hat';
+  else if (age !== 'kid') { const r = rand(); hat = r < 0.07 ? 'helmet' : r < 0.14 ? 'cap' : r < 0.18 ? 'beanie' : null; }
+  const legs: Legs = sex === 'f' && age !== 'kid' && rand() < 0.22 ? 'skirt' : (outfit.style === 'tank' || age === 'kid') && rand() < 0.45 ? 'shorts' : 'pants';
+  const height = age === 'kid' ? 1.12 + rand() * 0.24 : (sex === 'm' ? 1.68 + rand() * 0.22 : 1.56 + rand() * 0.18) - (age === 'elder' ? 0.05 : 0);
+  const face = age === 'kid' ? 13 + Math.floor(rand() * 2) : age === 'elder' ? (sex === 'm' ? 7 : 12) : sex === 'm' ? pick(MALE_FACES) : pick(FEMALE_FACES);
   return {
-    role: 'customer',
-    kind,
-    age,
-    skin: pick(SKINS),
-    hair: age === 'elder' ? pick(ELDER_HAIR) : pick(HAIRS),
-    hairStyle: age === 'elder' && rand() < 0.3 ? 0 : (Math.floor(rand() * 4) as 0 | 1 | 2 | 3),
-    shirt: KIND_SHIRT[kind] ?? pick(SHIRTS),
-    pants: pick(PANTS),
-    height: age === 'kid' ? 0.62 + rand() * 0.14 : age === 'elder' ? 0.9 + rand() * 0.08 : 0.92 + rand() * 0.16,
-    seed,
+    role: 'customer', kind, age, sex, seed, height,
+    skin: pick(SKINS), hair,
+    hairStyle: age === 'elder' && sex === 'm' && rand() < 0.4 ? 'balding' : sex === 'm' ? pick(M_HAIR) : pick(F_HAIR),
+    hat, hatColor: kind === 'picky' ? '#f2c230' : pick(HAT_COLORS), glasses: age !== 'kid' && rand() < 0.16,
+    outfit, legs, pants: legs === 'skirt' ? pick(SKIRTS) : pick(PANTS), shoes: pick(SHOES), face, basket: pick(BASKETS),
   };
 }
 
 export function staffSpec(role: 'cashier' | 'stocker' | 'janitor', rand: () => number, seed: number): PersonSpec {
   const pick = <T,>(a: readonly T[]): T => a[Math.floor(rand() * a.length)]!;
+  const sex: 'm' | 'f' = rand() < 0.5 ? 'm' : 'f';
+  const u = UNIFORMS[role];
   return {
-    role, age: 'adult', skin: pick(SKINS), hair: pick(HAIRS), hairStyle: 1, shirt: UNIFORM[role], pants: 0x2b2f3a,
-    height: 0.98 + rand() * 0.06, seed,
+    role, age: 'adult', sex, seed, height: sex === 'm' ? 1.72 + rand() * 0.12 : 1.6 + rand() * 0.12,
+    skin: pick(SKINS), hair: pick(HAIRS), hairStyle: sex === 'm' ? 'short' : 'ponytail',
+    hat: role === 'cashier' ? null : 'cap', hatColor: u.base, glasses: false,
+    outfit: u, legs: 'pants', pants: role === 'janitor' ? u.base : '#2b2f3a', shoes: '#222222',
+    face: sex === 'm' ? pick(MALE_FACES) : pick(FEMALE_FACES), basket: BASKETS[0]!,
   };
 }
 
-/** Uma pessoa 3D animada. */
+/* ---------------- pessoa ---------------- */
+const tmpM = new THREE.Matrix4();
+
+/** Uma pessoa 3D animada (esqueleto procedural). */
 export class Person {
   readonly root = new THREE.Group();
-  private readonly upper = new THREE.Group();
-  private readonly legL: THREE.Mesh;
-  private readonly legR: THREE.Mesh;
-  private readonly armL = new THREE.Group();
-  private readonly armR = new THREE.Group();
-  private readonly head = new THREE.Group();
-  private readonly basket = new THREE.Group();
-  private readonly basketItems: THREE.Mesh[] = [];
-  private readonly carryBox: THREE.Mesh;
-  private readonly mop = new THREE.Group();
-  private readonly seed: number;
   readonly scale: number;
   readonly eyeHeight: number;
+  readonly body: THREE.SkinnedMesh;
+  readonly skeleton: THREE.Skeleton;
+  private readonly b: Record<BoneName, THREE.Bone>;
+  private readonly basket = new THREE.Group();
+  private readonly basketMesh: THREE.Mesh;
+  private readonly items: THREE.InstancedMesh;
+  private bagMesh: THREE.Mesh | null = null;
+  private carry: THREE.Group | null = null;
+  private carryOpen = false;
+  private mop: THREE.Mesh | null = null;
+  private readonly seed: number;
+  private readonly elder: boolean;
+  private readonly kid: boolean;
   pose: Pose = 'normal';
-  /** Tempo corrido da ação atual (grab/scan/mop) em segundos. */
+  /** Tempo corrido da ação atual (grab/scan/mop/place) em segundos. */
   actionT = 0;
   /** Mostra a "ação em curso" (mexendo) mesmo parado. */
   working = false;
+  /** Altura do assento (m, mundo) para as poses sentadas. */
+  seatY = 0.5;
+  private reachOn = false;
+  private rwx = 0; private rwy = 0; private rwz = 0;
   private phase = 0;
   private time = 0;
+  private walkW = 0;
+  private readonly hipBase: number;
 
   constructor(spec: PersonSpec) {
-    const s = shared();
-    this.seed = spec.seed * 1.7;
-    const kid = spec.age === 'kid';
-    this.scale = spec.height * (kid ? 1 : 1);
-    this.root.scale.setScalar(this.scale);
-    this.eyeHeight = 1.75 * this.scale;
+    const pr = props();
+    this.seed = spec.seed * 1.37;
+    this.kid = spec.age === 'kid';
+    this.elder = spec.age === 'elder';
+    this.scale = spec.height / 1.75;
+    this.b = makeBones();
+    this.hipBase = REST.hips[1];
+    const mats4 = [
+      outfitMaterial(spec.outfit),
+      lambert(`low:${spec.pants}`, spec.pants),
+      lambert(`skin:${spec.skin}`, spec.skin),
+      lambert(`shoe:${spec.shoes}`, spec.shoes),
+    ];
+    this.body = new THREE.SkinnedMesh(bodyGeometry(spec.sex, spec.outfit.sleeves, spec.legs), mats4);
+    this.root.add(this.b.root, this.body);
+    this.skeleton = new THREE.Skeleton(Object.values(this.b), boneInverses());
+    this.body.bind(this.skeleton, new THREE.Matrix4());
+    this.body.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.25);
 
-    const pantsMat = material('pants', spec.pants, true);
-    this.legL = new THREE.Mesh(s.leg, pantsMat);
-    this.legR = new THREE.Mesh(s.leg, pantsMat);
-    this.legL.position.set(-0.095, 0.8, 0);
-    this.legR.position.set(0.095, 0.8, 0);
+    // cabeça + rosto + cabelo/chapéu/óculos
+    const head = new THREE.Mesh(headGeometry(), [mats4[2]!, faceMaterial(spec.face, spec.hair)]);
+    head.position.set(HEAD_OFFSET[0], HEAD_OFFSET[1], HEAD_OFFSET[2]);
+    if (this.kid) head.scale.setScalar(1.2);
+    this.b.head.add(head);
+    const longHair = spec.hairStyle === 'long' || spec.hairStyle === 'ponytail' || spec.hairStyle === 'bob';
+    const hg = spec.hat && !longHair ? null : hairGeometry(spec.hairStyle);
+    if (hg) head.add(new THREE.Mesh(hg, lambert(`hair:${spec.hair}`, spec.hair, { side: THREE.DoubleSide })));
+    if (spec.hat) head.add(new THREE.Mesh(hatGeometry(spec.hat), lambert(`hat:${spec.hatColor}`, spec.hatColor)));
+    if (spec.glasses) head.add(new THREE.Mesh(glassesGeometry(), lambert('glasses', '#15171a')));
 
-    this.upper.position.y = 0.8;
-    const torso = new THREE.Mesh(s.torso, material('shirt', spec.shirt));
-    const skin = material('skin', spec.skin);
-    this.armL.position.set(-0.225, 0.5, 0);
-    this.armR.position.set(0.225, 0.5, 0);
-    this.armL.add(new THREE.Mesh(s.arm, skin));
-    this.armR.add(new THREE.Mesh(s.arm, skin));
-
-    this.head.position.set(0, 0.56, 0);
-    this.head.add(new THREE.Mesh(s.head, skin));
-    this.head.add(new THREE.Mesh(s.face, s.faceMat));
-    if (spec.role === 'customer') {
-      if (spec.kind === 'picky') this.head.add(new THREE.Mesh(s.cap, material('hat', 0xf2c230))); // chapéu dourado no lugar do cabelo
-      else if (spec.hairStyle !== 0) this.head.add(new THREE.Mesh(s.hair[spec.hairStyle]!, material('hair', spec.hair)));
-    } else {
-      this.head.add(new THREE.Mesh(s.cap, material('cap', spec.shirt)));
-    }
-    if (kid) this.head.scale.setScalar(1.28);
-
-    // cesta
-    const bm = new THREE.Mesh(s.basket, s.basketMat);
-    const handle = new THREE.Mesh(s.handle, s.basketMat);
-    handle.position.y = 0.07;
-    this.basket.add(bm, handle);
+    // cesta na mão direita (itens num InstancedMesh)
+    this.basketMesh = new THREE.Mesh(pr.basket, lambert(`basket:${spec.basket}`, spec.basket));
+    this.items = new THREE.InstancedMesh(pr.item, pr.itemMat, MAX_BASKET_ITEMS);
+    this.items.count = 0;
+    this.items.frustumCulled = false;
     for (let i = 0; i < MAX_BASKET_ITEMS; i++) {
-      const it = new THREE.Mesh(s.item, productMaterial('x'));
-      it.position.set(-0.1 + (i % 3) * 0.1, 0.1, i < 3 ? -0.04 : 0.05);
-      it.visible = false;
-      this.basket.add(it);
-      this.basketItems.push(it);
+      const s = ITEM_SPOTS[i]!;
+      tmpM.makeRotationY((i * 0.7) % 0.5).setPosition(s[0], -0.2, s[1]);
+      this.items.setMatrixAt(i, tmpM);
     }
-    if (spec.kind === 'bulk') this.basket.scale.setScalar(1.7); // cesta enorme
-    this.basket.position.set(0.3, -0.12, 0.1);
+    this.basket.add(this.basketMesh, this.items);
+    this.basket.position.set(0, -0.08, 0.01);
+    if (spec.kind === 'bulk') this.basket.scale.setScalar(1.45);
+    else if (this.kid) this.basket.scale.setScalar(0.8);
     this.basket.visible = false;
+    this.b.handR.add(this.basket);
 
-    // caixa carregada
-    this.carryBox = new THREE.Mesh(s.box, s.cardboard);
-    this.carryBox.position.set(0, 0.12, 0.34);
-    this.carryBox.visible = false;
-
-    // esfregão
-    const stick = new THREE.Mesh(s.mopStick, s.stickMat);
-    const mh = new THREE.Mesh(s.mopHead, s.mopMat);
-    this.mop.add(stick, mh);
-    this.mop.position.set(0.26, -0.8, 0.38);
-    this.mop.visible = false;
-
-    this.upper.add(torso, this.armL, this.armR, this.head, this.basket, this.carryBox, this.mop);
-    if (spec.age === 'elder') this.upper.rotation.x = 0.13;
-    const shadow = new THREE.Mesh(s.shadow, s.shadowMat);
-    shadow.scale.setScalar(1);
-    this.root.add(this.legL, this.legR, this.upper, shadow);
-    // sombras só no chão falso; mesh do corpo não projeta
-    this.root.traverse((o) => { o.matrixAutoUpdate = true; });
+    const shadow = new THREE.Mesh(pr.shadow, pr.shadowMat);
+    this.root.add(shadow);
+    this.root.scale.setScalar(this.scale);
+    this.eyeHeight = (REST.head[1] + HEAD_OFFSET[1] * (this.kid ? 1.2 : 1)) * this.scale;
   }
 
-  setBasket(visible: boolean): void { this.basket.visible = visible; }
-  /** Atualiza a visibilidade/cor dos itens da cesta. */
+  setBasket(visible: boolean): void {
+    this.basket.visible = visible;
+    this.basketMesh.visible = true;
+    this.items.visible = true;
+    if (this.bagMesh) this.bagMesh.visible = false;
+  }
+  /** Mostra a sacola de compras no lugar da cesta (cliente saindo depois de pagar). */
+  setBag(visible: boolean): void {
+    if (visible && !this.bagMesh) { const pr = props(); this.bagMesh = new THREE.Mesh(pr.bag, pr.vcol); this.basket.add(this.bagMesh); }
+    if (this.bagMesh) this.bagMesh.visible = visible;
+    this.basketMesh.visible = !visible;
+    this.items.visible = !visible;
+    if (visible) this.basket.visible = true;
+  }
+  /** Itens visíveis na cesta (cor por produto). */
   setBasketItems(productIds: readonly string[]): void {
-    for (let i = 0; i < MAX_BASKET_ITEMS; i++) {
-      const it = this.basketItems[i]!;
-      const pid = productIds[i];
-      it.visible = pid !== undefined;
-      if (pid !== undefined) it.material = productMaterial(pid);
+    const n = Math.min(MAX_BASKET_ITEMS, productIds.length);
+    for (let i = 0; i < n; i++) this.items.setColorAt(i, productColor(productIds[i]!));
+    this.items.count = n;
+    if (this.items.instanceColor) this.items.instanceColor.needsUpdate = true;
+  }
+  /** Caixa de papelão nos braços (repositor). */
+  setCarryBox(v: boolean): void {
+    if (v && !this.carry) {
+      const pr = props();
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(pr.box, pr.cardboard));
+      const lid = new THREE.Mesh(pr.lid, pr.vcol); lid.name = 'lid';
+      const flaps = new THREE.Mesh(pr.flaps, pr.cardboard); flaps.name = 'flaps';
+      const fill = new THREE.Mesh(pr.fill, pr.itemMat); fill.name = 'fill';
+      g.add(lid, flaps, fill);
+      g.position.set(0, -0.06, 0.3);
+      this.b.chest.add(g);
+      this.carry = g;
+      this.setCarryOpen(false);
+    }
+    if (this.carry) this.carry.visible = v;
+  }
+  /** Abas abertas (com os produtos à vista) ou fechadas com fita. */
+  setCarryOpen(open: boolean, productId?: string): void {
+    this.carryOpen = open;
+    const g = this.carry;
+    if (!g) return;
+    const lid = g.getObjectByName('lid'), flaps = g.getObjectByName('flaps'), fill = g.getObjectByName('fill') as THREE.Mesh | undefined;
+    if (lid) lid.visible = !open;
+    if (flaps) flaps.visible = open;
+    if (fill) {
+      fill.visible = open && productId !== undefined;
+      if (productId) fill.material = lambert(`fill:${productId}`, `#${productColor(productId).getHexString()}`);
     }
   }
-  setCarryBox(v: boolean): void { this.carryBox.visible = v; }
-  setMop(v: boolean): void { this.mop.visible = v; }
+  get isCarryOpen(): boolean { return this.carryOpen; }
+  setMop(v: boolean): void {
+    if (v && !this.mop) {
+      const pr = props();
+      this.mop = new THREE.Mesh(pr.mop, pr.vcol);
+      this.mop.position.set(-0.2, 0, 0.42);
+      this.root.add(this.mop);
+    }
+    if (this.mop) this.mop.visible = v;
+  }
+  /** Alvo (mundo) da mão direita nas poses 'extend'/'place'. */
+  setReach(x: number, y: number, z: number): void { this.reachOn = true; this.rwx = x; this.rwy = y; this.rwz = z; }
+  clearReach(): void { this.reachOn = false; }
+
+  private sr(b: THREE.Bone, x: number, y: number, z: number, k: number): void {
+    b.rotation.x += (x - b.rotation.x) * k;
+    b.rotation.y += (y - b.rotation.y) * k;
+    b.rotation.z += (z - b.rotation.z) * k;
+  }
 
   /** speed em m/s reais. Sem alocação. */
   animate(dt: number, speed: number, lookYaw = 0): void {
     this.time += dt;
-    const w = clamp(speed / 1.2, 0, 1);
-    this.phase += speed * dt * 5.4 / this.scale * 0.8;
-    const sw = Math.sin(this.phase) * 0.7 * w;
-    this.legL.rotation.x = sw;
-    this.legR.rotation.x = -sw;
-    const k = Math.min(1, dt * 12);
-    let lx = -sw * 0.8, rx = sw * 0.8, lz = 0, rz = 0;
-    const t = this.time + this.seed;
     this.actionT += dt;
-    switch (this.pose) {
+    const B = this.b;
+    const pose = this.pose;
+    const sitting = pose === 'sit' || pose === 'sitScan';
+    const wTarget = sitting ? 0 : clamp(speed / 1.2, 0, 1);
+    this.walkW += (wTarget - this.walkW) * Math.min(1, dt * 8);
+    const W = this.walkW;
+    this.phase += dt * speed * (this.kid ? 6.2 : 4.6) / this.scale;
+    const s = Math.sin(this.phase), c = Math.cos(this.phase);
+    const t = this.time + this.seed;
+    const k = 1 - Math.exp(-dt * 18);
+    const idle = 1 - W;
+    // pernas
+    const A = 0.55 * W;
+    let thL = -s * A, thR = s * A;
+    let shL = 0.05 + Math.max(0, c) * 1.0 * W, shR = 0.05 + Math.max(0, -c) * 1.0 * W;
+    let ftL = -(thL + shL) * 0.55, ftR = -(thR + shR) * 0.55;
+    let hipY = this.hipBase - 0.022 * W + 0.026 * W * Math.abs(c);
+    // tronco
+    let spX = this.elder ? 0.1 : 0.02, spY = s * 0.07 * W, chX = Math.sin(t * 1.6) * 0.014 * idle, chY = -s * 0.09 * W;
+    let hipZ = c * 0.03 * W + Math.sin(t * 0.4) * 0.02 * idle;
+    // braços (balanço oposto às pernas)
+    let uLx = s * 0.42 * W, uLz = 0.07, fLx = -0.12 - 0.25 * W;
+    let uRx = -s * 0.42 * W, uRz = -0.07, fRx = -0.12 - 0.25 * W;
+    let uRy = 0, hRx = 0;
+    let headY = lookYaw + Math.sin(t * 0.5) * 0.3 * idle * (this.kid ? 1.4 : 1), headX = 0;
+    switch (pose) {
       case 'basket':
-        rx = -0.3; rz = -0.04;
+        uRx = -0.06 - s * 0.12 * W; uRz = -0.2; fRx = -0.3;
         break;
       case 'carry':
-        lx = rx = -1.15; lz = 0.2; rz = -0.2;
+        uLx = uRx = -0.85; uLz = -0.12; uRz = 0.12; fLx = fRx = -0.9;
+        if (this.working) { const w = Math.sin(this.actionT * 6) * 0.12; uRx += w; uLx -= w; spX += 0.12; }
         break;
       case 'mop': {
-        const sway = this.working ? Math.sin(this.actionT * 5) * 0.35 : Math.sin(this.phase) * 0.1 * w;
-        lx = -0.9; rx = -1.0; lz = 0.12; rz = -0.12;
-        this.mop.rotation.z = lerp(this.mop.rotation.z, sway, k);
-        this.mop.position.x = 0.26 + Math.sin(this.actionT * 5) * (this.working ? 0.14 : 0);
+        const sw = this.working ? Math.sin(this.actionT * 4.6) : 0;
+        uRx = -0.5 + sw * 0.08; uRz = -0.05 + sw * 0.18; fRx = -0.65;
+        uLx = -1.0; uLz = 0.42 + sw * 0.12; fLx = -0.75;
+        spY += sw * 0.14; spX += 0.1;
+        if (this.mop) {
+          this.mop.rotation.x = -0.52;
+          this.mop.rotation.y += ((sw * 0.5) - this.mop.rotation.y) * k;
+          this.mop.position.x = -0.2 + sw * 0.1;
+        }
         break;
       }
       case 'grab':
-        rx = -1.3 + Math.sin(this.actionT * 9) * 0.25; rz = -0.1;
+        uRx = -1.35 + Math.sin(this.actionT * 9) * 0.22; uRz = -0.12; fRx = -0.25;
         break;
       case 'scan':
-        rx = -0.9 + Math.sin(this.actionT * 7) * 0.35; lx = -0.3;
+        uRx = -0.9 + Math.sin(this.actionT * 7) * 0.3; fRx = -0.6; uLx = -0.5; fLx = -0.8;
+        break;
+      case 'sit':
+      case 'sitScan':
+        hipY = (this.seatY + 0.075) / this.scale + 0.02;
+        thL = thR = -1.5; shL = shR = 1.5; ftL = ftR = 0;
+        spX = 0.06; uLx = uRx = -0.5; uLz = 0.1; uRz = -0.1; fLx = fRx = -0.85;
+        if (pose === 'sitScan') {
+          const a = Math.sin(this.actionT * 6.5);
+          uRx = -0.8 + a * 0.18; uRz = -0.2 + a * 0.22; fRx = -0.7; spY = a * 0.08; headY = a * 0.15;
+        }
         break;
       default:
         break;
     }
-    if (this.pose !== 'mop') this.mop.rotation.z = lerp(this.mop.rotation.z, 0, k);
-    this.armL.rotation.x += (lx - this.armL.rotation.x) * k;
-    this.armR.rotation.x += (rx - this.armR.rotation.x) * k;
-    this.armL.rotation.z += (lz - this.armL.rotation.z) * k;
-    this.armR.rotation.z += (rz - this.armR.rotation.z) * k;
-    this.upper.position.y = 0.8 + Math.abs(Math.sin(this.phase)) * 0.03 * w + Math.sin(t * 1.8) * 0.004 * (1 - w);
-    this.head.rotation.y = lerp(this.head.rotation.y, lookYaw + Math.sin(t * 0.6) * 0.25 * (1 - w), k);
+    // IK simples de 2 ossos do braço direito até o alvo (pagar / pôr na esteira)
+    if (this.reachOn && (pose === 'extend' || pose === 'place')) {
+      const g = this.root.parent;
+      if (g) {
+        const h = g.rotation.y, ch = Math.cos(h), shh = Math.sin(h);
+        const wx = this.rwx - g.position.x, wz = this.rwz - g.position.z;
+        const lx = (wx * ch - wz * shh) / this.scale, lz = (wx * shh + wz * ch) / this.scale, ly = this.rwy / this.scale;
+        if (pose === 'place') spX += 0.22;
+        const dx = lx - REST.uArmR[0], dy = ly - (REST.uArmR[1] - (pose === 'place' ? 0.05 : 0)), dz = lz - REST.uArmR[2] - (pose === 'place' ? 0.08 : 0);
+        const d = Math.max(0.12, Math.sqrt(dx * dx + dy * dy + dz * dz));
+        const a = UPPER_ARM, bL = FORE_ARM, cc = Math.min(a + bL - 0.002, d);
+        const alpha = Math.acos(clamp((a * a + cc * cc - bL * bL) / (2 * a * cc), -1, 1));
+        const gamma = Math.acos(clamp((a * a + bL * bL - cc * cc) / (2 * a * bL), -1, 1));
+        uRx = Math.atan2(-dz, -dy) + alpha; uRz = Math.asin(clamp(dx / d, -1, 1)); fRx = -(Math.PI - gamma); uRy = 0;
+        if (pose === 'place') { const o = Math.sin(this.actionT * 7) * 0.12; uRx += o; }
+        hRx = -0.3;
+        headX = 0.12;
+      }
+    }
+    // aplica (suavizado)
+    this.sr(B.thighL, thL, 0, 0, k); this.sr(B.thighR, thR, 0, 0, k);
+    this.sr(B.shinL, shL, 0, 0, k); this.sr(B.shinR, shR, 0, 0, k);
+    this.sr(B.footL, ftL, 0, 0, k); this.sr(B.footR, ftR, 0, 0, k);
+    this.sr(B.hips, 0, s * 0.08 * W, hipZ, k);
+    B.hips.position.y += (hipY - B.hips.position.y) * k;
+    this.sr(B.spine, spX, spY, 0, k); this.sr(B.chest, chX, chY, 0, k);
+    this.sr(B.uArmL, uLx, 0, uLz, k); this.sr(B.fArmL, fLx, 0, 0, k);
+    this.sr(B.uArmR, uRx, uRy, uRz, k); this.sr(B.fArmR, fRx, 0, 0, k);
+    this.sr(B.handR, hRx, 0, 0, k);
+    this.sr(B.head, headX, headY - chY - spY, 0, k);
+    // cesta sempre "pendurada" na vertical
+    if (this.basket.visible) {
+      this.basket.rotation.x = -(B.uArmR.rotation.x + B.fArmR.rotation.x + B.handR.rotation.x + B.spine.rotation.x);
+      this.basket.rotation.z = -B.uArmR.rotation.z;
+    }
   }
-}
 
-/** Mesh de item de mercadoria (esteira/balcão), compartilha geometria. */
-export function itemMesh(): THREE.Mesh {
-  const m = new THREE.Mesh(shared().item, productMaterial('x'));
-  m.visible = false;
-  return m;
+  dispose(): void {
+    this.skeleton.dispose();
+    this.items.dispose();
+  }
 }

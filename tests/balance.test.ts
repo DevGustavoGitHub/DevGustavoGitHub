@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { newBot, playDay, playDays, type DayStats } from '../src/sim/bot';
-import { employeeCost, expansionMinLevel, productCapacity, storageCapacity, storageUsed, upgradeCatalog } from '../src/sim/api';
+import { newBot, playDay, playDays, restock, type DayStats } from '../src/sim/bot';
+import { employeeCost, expansionMinLevel, isBankrupt, productCapacity, storageCapacity, storageUsed, upgradeCatalog } from '../src/sim/api';
 import { LICENSES, PRODUCTS } from '../src/sim/catalog';
 import { recomputeSlots } from '../src/sim/furniture';
 import { newGame, type StoreState } from '../src/sim/state';
@@ -54,25 +54,59 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
     expect(high15).toBeGreaterThan(high30);
     expect(fair).toBeGreaterThan(high30 * 1.5);
   });
-  it('progressão: nível 2 em ~1-2 dias, bebidas ~dia 3-5, expansão 1 ~dia 8-12', () => {
+  it('início pobre: R$ 150 compram 1 caixa de cada produto barato; dia 1 lucra sem aluguel e sobe para o nível 2', () => {
+    for (const seed of SEEDS) {
+      const s = newGame(seed);
+      restock(s); // abertura do dia 1: só cabem 2 caixas (feijão + macarrão)
+      expect(s.costBasis.feijao?.units).toBe(12);
+      expect(s.costBasis.macarrao?.units).toBe(20);
+      expect(s.money).toBeGreaterThanOrEqual(0);
+      expect(s.money).toBeLessThan(7000); // não sobra para uma 3ª caixa
+      const d1 = playDay(newGame(seed), newBot());
+      expect(d1.fixed).toBe(0);
+      expect(d1.netProfit).toBeGreaterThan(0);
+      expect(d1.level).toBe(2);
+      expect(d1.happy! + d1.angry!).toBe(d1.served + d1.lost);
+      expect(d1.happy!).toBeGreaterThan(d1.angry!);
+    }
+  });
+  it('progressão: nível 2 no dia 1, 2ª licença ~dia 5-12, expansão 1 ~dia 8-16, caixa contratado até o dia 20', () => {
     for (const seed of SEEDS) {
       const s = newGame(seed);
       const bot = newBot();
       let lvl2 = 0;
       let drinks = 0;
       let exp1 = 0;
+      let cashier = 0;
+      let minMoney = Infinity;
       for (let d = 1; d <= 20; d++) {
         playDay(s, bot);
+        minMoney = Math.min(minMoney, s.money);
         if (!lvl2 && s.level >= 2) lvl2 = d;
         if (!drinks && s.licenses.includes('bebidas')) drinks = d;
         if (!exp1 && s.expansion >= 1) exp1 = d;
+        if (!cashier && s.employees.cashier > 0) cashier = d;
       }
-      expect(lvl2).toBeGreaterThanOrEqual(1);
-      expect(lvl2).toBeLessThanOrEqual(2);
-      expect(drinks).toBeGreaterThanOrEqual(3);
-      expect(drinks).toBeLessThanOrEqual(5);
+      expect(lvl2).toBe(1);
+      expect(drinks).toBeGreaterThanOrEqual(5);
+      expect(drinks).toBeLessThanOrEqual(12);
       expect(exp1).toBeGreaterThanOrEqual(8);
-      expect(exp1).toBeLessThanOrEqual(13);
+      expect(exp1).toBeLessThanOrEqual(16);
+      expect(cashier).toBeGreaterThan(0);
+      expect(minMoney).toBeGreaterThanOrEqual(0);
+    }
+  });
+  it('sem espiral de falência no começo: estratégias razoáveis nunca ficam no vermelho nos primeiros 20 dias', () => {
+    for (const priceMult of [1, 1.12, 1.25]) {
+      for (const restocks of [2, 4]) {
+        const s = newGame(17);
+        const bot = newBot({ priceMult, restocks });
+        for (let d = 0; d < 20; d++) {
+          const r = playDay(s, bot);
+          expect(r.money, `x${priceMult} r${restocks} dia ${d + 1}`).toBeGreaterThanOrEqual(0);
+          expect(isBankrupt(s)).toBe(false);
+        }
+      }
     }
   });
   it('economia não explode: lucro/dia cresce com o tempo, mas limitado por nível', () => {
@@ -156,6 +190,8 @@ describe('ritmo de fim de jogo (dias 1–120)', () => {
       expect(s.storageUnlocked).toBe(true);
       expect(s.employees.stocker).toBeGreaterThan(0);
       expect(s.upgrades).toContain('dolly');
+      expect(s.upgrades).toContain('tipjar');
+      expect(s.upgrades).toContain('capacity');
       // produtos de fim de jogo realmente vendem: há exposição de categorias novas
       expect(PRODUCTS.some((p) => ['hortifruti', 'higiene'].includes(p.category) && productCapacity(s, p.id) > 0)).toBe(true);
       const avg = (a: number, b: number): number => profits.slice(a, b).reduce((x, y) => x + y, 0) / (b - a);
