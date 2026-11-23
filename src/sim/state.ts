@@ -132,7 +132,7 @@ export const INITIAL_NEXT_FURNITURE_ID = 2 + INITIAL_SHELVES.length;
 export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0, happy: 0, angry: 0 });
 
 /** Paleta padrão de jogo novo (parecida com o original): paredes azul-claro, piso de madeira quente, letreiro vermelho. */
-export const DEFAULT_DECOR: Readonly<Decor> = { wallColor: '#bfe1f2', floorColor: '#c48a55', signColor: '#d8342c' };
+export const DEFAULT_DECOR: Readonly<Decor> = { wallColor: '#6cc8f0', floorColor: '#c48a55', signColor: '#d8342c' };
 
 export function newGame(seed = 1): StoreState {
   const market: Record<string, number> = {};

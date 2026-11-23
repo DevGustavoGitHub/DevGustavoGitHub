@@ -86,7 +86,7 @@ function demoView(b: Bounds, storage: boolean): View {
 /** Cores legadas (saves antigos) → paleta da Fase 3 (parede azul-clara, piso de madeira). */
 function effectiveDecor(d: Decor): Decor {
   return {
-    wallColor: d.wallColor === '#f2e8d5' ? DEFAULT_DECOR.wallColor : d.wallColor,
+    wallColor: d.wallColor === '#f2e8d5' || d.wallColor === '#bfe1f2' ? DEFAULT_DECOR.wallColor : d.wallColor,
     floorColor: d.floorColor === '#c9c4b8' ? DEFAULT_DECOR.floorColor : d.floorColor,
     signColor: d.signColor,
   };
