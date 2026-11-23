@@ -187,7 +187,7 @@ export class Stocker extends Staff {
           const b = this.plan.shift()!;
           b.carried = true;
           this.stack.push(b);
-          this.person.setCarryBox(true); this.person.setCarryOpen(!!b.open && b.units > 0, b.productId); this.setPose('carry');
+          this.person.setCarryBox(true); this.boxVisual(b, !!b.open && b.units > 0); this.setPose('carry');
           this.env.sfx('box', this.x, this.z); this.env.changed('sidewalk');
           if (this.plan.length > 0) { this.job = 'toBox'; this.walkToBox(this.plan[0]!); } else this.nextShelf();
         }
@@ -241,7 +241,7 @@ export class Stocker extends Staff {
           }
           this.storePids.length = 0;
           if (this.stack.length > 0) {
-            this.person.setCarryBox(true); this.person.setCarryOpen(false); this.setPose('carry');
+            this.person.setCarryBox(true); this.boxVisual(this.stack[0], false); this.setPose('carry');
             this.env.sfx('box', this.x, this.z); this.env.changed('sidewalk');
             this.nextShelf();
           } else { this.job = 'idle'; this.cooldown = 3; this.storeCool = 10; this.setPose('normal'); }
@@ -297,9 +297,17 @@ export class Stocker extends Staff {
     if (b.units <= 0) this.junk.push(b);
     else { this.setOpen(b, false); this.release(b); }
     // visual: próxima caixa fechada; só vazias = caixa aberta e vazia
-    if (this.stack.length > 0) this.person.setCarryOpen(!!this.stack[0]!.open, this.stack[0]!.productId);
-    else this.person.setCarryOpen(true);
+    if (this.stack.length > 0) this.boxVisual(this.stack[0], !!this.stack[0]!.open);
+    else this.boxVisual(b, true);
     this.nextShelf();
+  }
+
+  /** Visual da caixa nos braços: a do world (makeBoxMesh) quando existir, senão a própria. */
+  private boxVisual(b: Box | undefined, open: boolean): void {
+    this.person.setCarryOpen(open, b && b.units > 0 ? b.productId : undefined);
+    const w = this.env.world();
+    const obj = b && w.makeBoxMesh ? safe('makeBoxMesh', () => w.makeBoxMesh!(b.productId, open, b.units), null) : null;
+    this.person.setCarryObject(obj);
   }
 
   private placeTime(): number { return Math.max(0.8, safe('employeeSpeed', () => api.employeeSpeed('stocker', this.level), 3)); }
@@ -310,7 +318,7 @@ export class Stocker extends Staff {
     const idx = state.sidewalk.indexOf(b);
     if (idx >= 0) safe('setBoxOpen', () => api.setBoxOpen(state, idx, open), undefined);
     this.env.sfx(open ? 'boxOpen' : 'boxClose', this.x, this.z);
-    this.person.setCarryOpen(open, b.productId);
+    this.boxVisual(b, open);
     this.env.changed('sidewalk');
   }
 }

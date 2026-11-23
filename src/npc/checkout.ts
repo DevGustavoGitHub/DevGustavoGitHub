@@ -220,8 +220,10 @@ export class CheckoutManager {
     const a = slots[slots.length - 1]!, b = slots[0]!;
     let dx = a.x - b.x, dz = a.z - b.z;
     const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
-    l.scanPt.set(a.x + dx * 0.2, a.y + 0.07, a.z + dz * 0.2);
-    l.bagPt.set(a.x + dx * 0.5, a.y - 0.03, a.z + dz * 0.5);
+    // item bipado voa até o scanner (counters().scanner, posição nova do world) e some na sacola logo depois
+    if (Math.hypot(l.scanner.x - a.x, l.scanner.z - a.z) < 1) l.scanPt.set(l.scanner.x, a.y + 0.07, l.scanner.z);
+    else l.scanPt.set(a.x + dx * 0.2, a.y + 0.07, a.z + dz * 0.2);
+    l.bagPt.set(l.scanPt.x + dx * 0.3, a.y - 0.03, l.scanPt.z + dz * 0.3);
     const sp = w.seatPose ? safe('seatPose', () => w.seatPose!(id), null) : null;
     if (sp) {
       const sx = sp.look.x - sp.pos.x, sz = sp.look.z - sp.pos.z, sd = Math.hypot(sx, sz) || 1;

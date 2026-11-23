@@ -271,8 +271,16 @@ export class ProductTemplates {
 const ease = (t: number): number => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 const _m = new THREE.Matrix4(), _r = new THREE.Matrix4(), _t = new THREE.Matrix4();
 
+type BoxMaker = (pid: string, open: boolean, units?: number) => THREE.Object3D;
+
+export type { BoxMaker };
+
 export class CartonView {
   readonly root = new THREE.Group();
+  private readonly own = new THREE.Group(); // caixa própria (fallback)
+  private wb: THREE.Group | null = null; // embrulho da caixa do world (userData.setOpen/setUnits)
+  private wbBox: THREE.Object3D | null = null;
+  private wbPid = '';
   private readonly flaps: { pivot: THREE.Group; inner: boolean }[] = [];
   private readonly labelMesh: THREE.Mesh;
   private readonly items = new THREE.Group();
@@ -283,9 +291,10 @@ export class CartonView {
   open01 = 0;
   private target = 0;
 
-  constructor(private readonly kit: CartonKit, private readonly tpls: ProductTemplates) {
+  constructor(private readonly kit: CartonKit, private readonly tpls: ProductTemplates, private readonly boxMaker: () => BoxMaker | undefined = () => undefined) {
     const g = geos();
-    this.root.add(new THREE.Mesh(g.body, kit.body));
+    this.root.add(this.own);
+    this.own.add(new THREE.Mesh(g.body, kit.body));
     const W = BOX_W, H = BOX_H, D = BOX_D;
     const mk = (geo: THREE.BufferGeometry, x: number, y: number, z: number, flipY: boolean, inner: boolean, tape: boolean): void => {
       const pivot = new THREE.Group();
@@ -294,7 +303,7 @@ export class CartonView {
       pivot.rotation.y = flipY ? Math.PI : 0;
       pivot.add(new THREE.Mesh(geo, kit.body));
       if (tape) pivot.add(new THREE.Mesh(g.tape, kit.tape));
-      this.root.add(pivot);
+      this.own.add(pivot);
       this.flaps.push({ pivot, inner });
     };
     mk(g.outer, 0, H / 2, D / 2, false, false, true);
@@ -303,7 +312,7 @@ export class CartonView {
     mk(g.inner, W / 2 - T, H / 2 - FT, 0, true, true, false);
     this.labelMesh = new THREE.Mesh(g.label, kit.body);
     this.labelMesh.position.set(0, -0.025, D / 2 + 0.0015);
-    this.root.add(this.labelMesh, this.items);
+    this.own.add(this.labelMesh, this.items);
     this.applyFlaps();
     if (kit.held) markHeld(this.root);
   }
@@ -311,7 +320,42 @@ export class CartonView {
   get animating(): boolean { return Math.abs(this.open01 - this.target) > 1e-3; }
 
   /** Produtos visíveis dentro (0 se fechada). */
-  itemCount(): number { return this.items.visible ? (this.inst[0]?.count ?? 0) : 0; }
+  itemCount(): number {
+    if (this.wbBox) {
+      if (this.open01 < 0.2) return 0;
+      let n = 0;
+      this.wbBox.traverse((o) => { const im = o as THREE.InstancedMesh; if (im.isInstancedMesh && im.visible) n = Math.max(n, im.count); });
+      return n;
+    }
+    return this.items.visible ? (this.inst[0]?.count ?? 0) : 0;
+  }
+
+  /** Usa a caixa do world (mesmo visual das caixas do chão); centraliza e iguala a largura à da caixa própria. */
+  private useWorldBox(mk: BoxMaker, pid: string, units: number): boolean {
+    if (this.wb) { this.root.remove(this.wb); this.wb = null; this.wbBox = null; }
+    let b: THREE.Object3D | null = null;
+    try { b = mk(pid, false, units); } catch { b = null; }
+    const ud = b?.userData as { setOpen?: unknown } | undefined;
+    if (!b || typeof ud?.setOpen !== 'function') { this.wbPid = ''; this.own.visible = true; return false; }
+    b.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(b);
+    const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+    const wrap = new THREE.Group();
+    wrap.scale.setScalar(BOX_W / Math.max(0.05, size.x));
+    b.position.sub(c);
+    wrap.add(b);
+    if (this.kit.held) {
+      b.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.material = Array.isArray(m.material) ? m.material.map((x) => this.kit.item(x)) : this.kit.item(m.material);
+      });
+      markHeld(wrap);
+    }
+    this.root.add(wrap);
+    this.wb = wrap; this.wbBox = b; this.wbPid = pid;
+    this.own.visible = false;
+    return true;
+  }
 
   /** Atualiza produto/unidades/abertura. Mesma caixa (`ref`) e `open` mudou → anima; caixa nova → sem animação. */
   set(ref: object, pid: string, units: number, open: boolean): void {
@@ -319,10 +363,16 @@ export class CartonView {
     this.ref = ref;
     this.target = open ? 1 : 0;
     if (fresh) this.open01 = this.target;
-    if (pid !== this.pid) {
+    const mk = this.boxMaker();
+    if (pid !== this.pid || (!!mk !== !!this.wb)) {
       this.pid = pid;
-      this.labelMesh.material = this.kit.label(pid);
-      this.rebuildItems();
+      if (!(mk && this.useWorldBox(mk, pid, units))) {
+        if (this.wb) { this.root.remove(this.wb); this.wb = null; this.wbBox = null; this.own.visible = true; }
+        this.labelMesh.material = this.kit.label(pid);
+        this.rebuildItems();
+      }
+      this.shown = -1;
+      if (!fresh) this.applyFlaps();
     }
     if (units !== this.shown) this.placeItems(units);
     if (fresh) this.applyFlaps();
@@ -350,6 +400,7 @@ export class CartonView {
   private placeItems(units: number): void {
     this.shown = units;
     if (!this.pid) return;
+    if (this.wbBox) { (this.wbBox.userData as { setUnits?: (n: number) => void }).setUnits?.(units); return; }
     const tpl = this.tpls.get(this.pid);
     let size = 12;
     try { size = productById(this.pid).boxSize; } catch { /* */ }
@@ -374,6 +425,7 @@ export class CartonView {
 
   private applyFlaps(): void {
     const o = this.open01;
+    if (this.wbBox) { (this.wbBox.userData as { setOpen: (t: number) => void }).setOpen(o); return; }
     const a = OPEN_OUTER * ease(o / 0.65), b = OPEN_INNER * ease((o - 0.35) / 0.65);
     for (const f of this.flaps) {
       if (f.inner) f.pivot.rotation.z = b; else f.pivot.rotation.x = a;
@@ -433,7 +485,7 @@ export class HeldView {
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly dir = new THREE.Vector3();
 
-  constructor(scene: THREE.Scene, private readonly tpls: ProductTemplates) {
+  constructor(scene: THREE.Scene, private readonly tpls: ProductTemplates, private readonly boxMaker: () => BoxMaker | undefined = () => undefined) {
     this.rig.name = 'player-hands';
     this.rig.renderOrder = 1000;
     this.hold.position.set(0, -0.45, -0.64);
@@ -478,7 +530,7 @@ export class HeldView {
   update(cam: THREE.Camera, dt: number, s: HeldState): void {
     this.t += dt;
     const n = s.boxes.length;
-    while (this.cartons.length < n) this.cartons.push(new CartonView(this.kit, this.tpls));
+    while (this.cartons.length < n) this.cartons.push(new CartonView(this.kit, this.tpls, this.boxMaker));
     for (let i = 0; i < this.cartons.length; i++) {
       const c = this.cartons[i]!;
       const b = s.boxes[i];

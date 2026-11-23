@@ -47,6 +47,7 @@ export default function create(): GameModule {
   let tpls!: ProductTemplates;
   let held!: HeldView;
   let worldKit!: CartonKit;
+  let boxMk: () => ((pid: string, open: boolean, units?: number) => THREE.Object3D) | undefined = () => undefined;
   let fbPicks!: FallbackPicks;
   let fbHL!: FallbackHighlight;
   const offs: (() => void)[] = [];
@@ -549,13 +550,13 @@ export default function create(): GameModule {
     if (carried.length) return false;
     const sp = seatPoseOf(id);
     if (!sp) return false;
+    setTarget(null); // antes de sentar: nada de world.highlight enquanto sentado
     startTrans(0.55);
     seat = sp; seatYaw = 0; seatPitch = 0;
     svc.mode = 'seated'; svc.seatedAt = id; svc.atCounter = id;
     svc.position.set(sp.pos.x, 0, sp.pos.z);
     vel.set(0, 0); holding = null; pressed = false;
     input.seated = true; input.reset();
-    setTarget(null);
     sfx('sit'); haptic(12);
     act('sit', { furnitureId: id }); changed('player');
     return true;
@@ -649,7 +650,7 @@ export default function create(): GameModule {
       v.set(dx / T, (dy + 0.5 * GRAV * T * T) / T, dz / T);
     } else v.copy(fwd).multiplyScalar(6.5).setY(fwd.y * 6.5 + 2);
     removeCarried(b); // no estado continua carried=true durante o voo: ninguém mexe nela
-    const view = new CartonView(worldKit, tpls);
+    const view = new CartonView(worldKit, tpls, boxMk);
     view.set(b, b.productId, b.units, isOpen(b));
     view.root.position.copy(o);
     view.root.quaternion.copy(cam.quaternion);
@@ -743,12 +744,12 @@ export default function create(): GameModule {
     if (building && pendingBox) { placingBox = b; pendingBox = null; } // o world respondeu na hora
     haptic(8);
   };
-  const endBuild = (): void => {
+  const endBuild = (placed?: boolean): void => {
     building = false;
     const b = placingBox;
     placingBox = null;
     if (b) {
-      if (!b.carried && st().sidewalk.includes(b)) {
+      if (placed !== false && !b.carried && st().sidewalk.includes(b)) {
         removeCarried(b);
         act('dropBox', { productId: b.productId }); changed('sidewalk');
       } else if (b.carried && st().sidewalk.includes(b) && !carried.includes(b)) { carried.push(b); syncTop(); } // cancelado
@@ -790,7 +791,12 @@ export default function create(): GameModule {
         const w = ctx.services.world;
         return w?.makeProductMesh ? (pid: string) => w.makeProductMesh!(pid) : undefined;
       });
-      held = new HeldView(ctx.scene, tpls);
+      const boxMaker = (): ((pid: string, open: boolean, units?: number) => THREE.Object3D) | undefined => {
+        const w = ctx.services.world;
+        return w?.makeBoxMesh ? (pid, open, units) => w.makeBoxMesh!(pid, open, units) : undefined;
+      };
+      boxMk = boxMaker; // caixa arremessada = mesmo visual das caixas do chão
+      held = new HeldView(ctx.scene, tpls); // na mão: caixa própria (abas dobram para fora e não tapam a vista)
       worldKit = new CartonKit(false);
       fbPicks = new FallbackPicks();
       fbHL = new FallbackHighlight(ctx.scene);
@@ -857,16 +863,16 @@ export default function create(): GameModule {
         input.setLocked(a || locked);
         if (!a) startTrans(0.6);
       });
-      on('build:state', (e?: { active?: boolean; kind?: string }) => {
+      on('build:state', (e?: { active?: boolean; kind?: string; placed?: boolean }) => {
         if (e?.active) {
           building = true;
           if (pendingBox && (e.kind === 'box' || e.kind === undefined)) { placingBox = pendingBox.box; pendingBox = null; }
           holding = null;
           setTarget(null);
           if (!seat) svc.mode = 'build';
-        } else endBuild();
+        } else endBuild(e?.placed);
       });
-      on('build:end', () => { if (building || placingBox) endBuild(); });
+      on('build:end', (e?: { placed?: boolean }) => { if (building || placingBox) endBuild(e?.placed); });
       on('settings:changed', (p?: { reduceMotion?: unknown; haptics?: unknown; fontSize?: unknown; colorblind?: unknown }) => applyPrefs(p));
 
       const w = window as unknown as { __player?: unknown };

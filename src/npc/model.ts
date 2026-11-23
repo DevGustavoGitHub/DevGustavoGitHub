@@ -334,6 +334,19 @@ export class Person {
     }
   }
   get isCarryOpen(): boolean { return this.carryOpen; }
+  /** Caixa desenhada pelo world (world.makeBoxMesh, mesmo visual do chão); null volta à caixa própria. */
+  setCarryObject(obj: THREE.Object3D | null): void {
+    const g = this.carry;
+    if (!g) return;
+    const old = g.getObjectByName('ext');
+    if (old) {
+      g.remove(old);
+      // só os buffers de instância; geometria/material são do world (compartilhados)
+      old.traverse((o) => { if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose(); });
+    }
+    for (const c of g.children) c.visible = obj ? false : (c.name === 'lid' ? !this.carryOpen : c.name === 'flaps' ? this.carryOpen : c.name === 'fill' ? c.visible && this.carryOpen : true);
+    if (obj) { obj.name = 'ext'; obj.position.set(0, -0.16, 0); g.add(obj); }
+  }
   setMop(v: boolean): void {
     if (v && !this.mop) {
       const pr = props();

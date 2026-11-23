@@ -115,7 +115,7 @@ export const phase3Css = `
 
 /* ---------------- pagamento (troco / maquininha) ---------------- */
 .pay{position:absolute;right:calc(var(--sa-r) + 8px);top:calc(var(--hud-b,52px) + 6px);bottom:calc(var(--sa-b) + 8px);z-index:62;width:min(390px,47vw);display:flex;flex-direction:column;gap:6px;
-  padding:8px;border-radius:16px;background:#263548;box-shadow:var(--sh-2);pointer-events:auto;animation:mx-slide-r .22s ease-out}
+  padding:8px;border-radius:16px;background:#263548;box-shadow:var(--sh-2);pointer-events:auto;animation:mx-slide-r .22s ease-out;overflow-y:auto;overscroll-behavior:contain}
 @keyframes mx-slide-r{from{transform:translateX(30px);opacity:0}}
 .pay-h{display:flex;align-items:center;gap:6px}
 .pay-h h3{flex:1;margin:0;text-align:center;color:#9ec3ea;font-weight:900;font-size:22px;text-transform:uppercase;letter-spacing:.02em}
@@ -147,6 +147,7 @@ export const phase3Css = `
 .pay-screen{background:#e9eef3;border-radius:10px;display:flex;justify-content:space-between;align-items:center;padding:4px 12px;font-weight:900;color:#6b7785;font-size:17px;min-height:44px}
 .pay-screen b{font-size:28px;color:#1d2a3c;white-space:nowrap}
 .pay-due{font-size:12.5px;font-weight:800;color:#5f6b78;text-align:center}
+.pay-screen .due-in{display:none;font-size:11px;font-weight:800;color:#6b7785;margin-left:6px}
 .pay-pad{flex:1 1 0;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:minmax(44px,1fr);gap:6px}
 .pay-pad .pk{min-height:44px;font-size:28px}.pay-pad .pk.ok{grid-column:span 2}
 .pay-done{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#fff;font-weight:900;font-size:22px;animation:mx-pop .25s}
@@ -158,6 +159,12 @@ export const phase3Css = `
   .pay-den small{display:none}.pay-info b{font-size:13px}.pk{min-height:46px;font-size:23px}
   .pay-pad{grid-template-columns:repeat(4,1fr);grid-auto-rows:minmax(46px,1fr)}.pay-pad .pk{font-size:24px;min-height:46px}.pay-pad .pk.ok{grid-column:span 3}
   .pay-screen{min-height:38px}.pay-screen b{font-size:24px}
+}
+
+@media (max-height:400px){
+  .pay{top:calc(var(--hud-b,48px) + 4px);bottom:calc(var(--sa-b) + 6px)}
+  .pay.card .pay-speed,.pay.card .pay-due{display:none}.pay-screen .due-in{display:inline}
+  .pay-screen{min-height:36px}.pay-screen b{font-size:22px}.pay-pad{gap:5px;grid-auto-rows:minmax(44px,1fr)}.pay-pad .pk{min-height:44px}
 }
 
 /* ---------------- aviso de orientação ---------------- */

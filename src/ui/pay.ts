@@ -142,7 +142,7 @@ export class PayPanel {
       h('button', { class: `pk ${cls}`, 'data-key': label, 'aria-label': aria ?? label, html: htmlLabel, on: { click: () => { fn(); this.kit.sfx('pop'); this.kit.settings.buzz(6); this.changed(); } } }, htmlLabel ? null : label);
     const digit = (n: number): HTMLElement => key(String(n), () => this.typeChar(String(n)));
     this.body.append(
-      h('div', { class: 'pay-screen' }, h('span', null, 'Total'), screen),
+      h('div', { class: 'pay-screen' }, h('span', null, 'Total', h('small', { class: 'due-in' }, `cobrar ${money(this.req?.total ?? 0)}`)), screen),
       h('div', { class: 'pay-due' }, `Valor da compra: ${money(this.req?.total ?? 0)}`),
       h('div', { class: 'pay-pad' },
         [1, 2, 3].map(digit), key('⌫', () => { this.typed = this.typed.slice(0, -1); }, 'blue', 'Apagar', icon('backspace', 26)),
