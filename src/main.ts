@@ -71,7 +71,7 @@ renderer.setAnimationLoop((now) => {
 (window as any).__game = ctx;
 
 // PWA: service worker só em produção (em dev atrapalha o hot reload).
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+if ('serviceWorker' in navigator && import.meta.env.PROD && !(window as any).Capacitor) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => { /* sem HTTPS/privado: segue sem offline */ });
   });

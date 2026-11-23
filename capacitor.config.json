@@ -1,0 +1,6 @@
+{
+  "appId": "com.mercadinho3d.app",
+  "appName": "Mercadinho 3D",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#000000" }
+}

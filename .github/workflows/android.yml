@@ -1,0 +1,35 @@
+name: Android APK
+on:
+  push:
+    branches: [main, master, ccr-75f39498-7x28f4]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+jobs:
+  apk:
+    # Só gera APK em commits marcados com [apk] (ou disparo manual), para os instantâneos de trabalho
+    # em andamento não consumirem minutos do Actions.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[apk]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - run: npm ci
+      - run: npm test
+      - run: npm run apk
+      - name: Publicar na Release apk-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view apk-latest >/dev/null 2>&1 || gh release create apk-latest --target "$GITHUB_SHA" \
+            --title "APK mais recente" --notes "APK de depuração (uso pessoal). Baixe e instale no celular."
+          gh release upload apk-latest dist-apk/mercadinho3d-debug.apk --clobber
+          gh release edit apk-latest --notes "APK de depuração (uso pessoal), commit ${GITHUB_SHA::7}."

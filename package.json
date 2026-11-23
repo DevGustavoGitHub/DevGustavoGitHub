@@ -9,7 +9,8 @@
     "preview": "vite preview --host",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build:single": "vite build && node scripts/build-single.mjs dist-single/index.html"
+    "build:single": "vite build && node scripts/build-single.mjs dist-single/index.html",
+    "apk": "node scripts/build-apk.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.10",

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Mercadinho 3D</string>
+    <string name="title_activity_main">Mercadinho 3D</string>
+    <string name="package_name">com.mercadinho3d.app</string>
+    <string name="custom_url_scheme">com.mercadinho3d.app</string>
+</resources>
