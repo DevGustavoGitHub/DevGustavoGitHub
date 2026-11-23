@@ -11,6 +11,8 @@ export interface PickInfo {
   kind: 'furniture' | 'box' | 'dirt' | 'trash' | 'sign' | 'computer' | 'seat' | 'storageDoor';
   /** furnitureId (furniture/seat), índice em state.sidewalk (box), índice em state.dirt (dirt). */
   id?: number;
+  /** FASE 4: nível (prateleira) mirado do móvel, calculado pelo player com world.levelAt. */
+  level?: number;
 }
 
 /** Publicado pelo módulo `world`. Usado por npc/player. */
@@ -46,6 +48,8 @@ export interface WorldService {
   makeProductMesh?(productId: string): THREE.Object3D;
   /** FASE 3 (adendo): caixa de papelão animável igual às do chão. `userData.setOpen(t 0..1)`, `userData.setUnits(n)`. Geometria/material compartilhados. */
   makeBoxMesh?(productId: string, open: boolean, units?: number): THREE.Object3D;
+  /** FASE 4: qual nível (prateleira) do móvel contém o ponto de mundo `point` (hit do raycast); null se nenhum. */
+  levelAt?(furnitureId: number, point: THREE.Vector3): number | null;
   /** Pontos de interesse para setas do tutorial (mundo). */
   poi?(kind: 'computer' | 'sign' | 'delivery' | 'trash' | 'storageDoor' | 'counter' | 'furniture', id?: number): THREE.Vector3 | null;
 }

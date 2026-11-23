@@ -42,6 +42,13 @@ export interface Employees {
   janitor: number;
 }
 
+/** FASE 4 — um nível (prateleira) de uma estante/geladeira/freezer: produto próprio e quantidade própria. */
+export interface ShelfLevel {
+  /** Produto do nível (etiqueta). Pode continuar definido com units = 0 (etiqueta "--"). */
+  productId?: string;
+  units: number;
+}
+
 export interface Furniture {
   id: number;
   type: FurnitureType;
@@ -52,6 +59,8 @@ export interface Furniture {
   productId?: string;
   /** Variante visual (decor / cores). */
   variant?: string;
+  /** FASE 4: níveis independentes (shelf/fridge/freezer). Fonte da verdade do estoque exposto. */
+  levels?: ShelfLevel[];
 }
 
 export interface Decor {

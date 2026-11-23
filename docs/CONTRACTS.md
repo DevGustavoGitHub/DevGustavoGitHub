@@ -320,3 +320,49 @@ campos opcionais de WorldService/PlayerService), `src/core/outline.ts` (contorno
 - **Largar:** `build:box {boxIndex}` (a caixa some da mão durante a prévia); sem `build:state {active:true}` em 0,3 s solta à frente com `dropBox`. Fim com `placed !== false` e a caixa no chão → `player:action dropBox`; cancelado → volta para a mão.
 - **Sentado:** `world.seatPose` (fallback: operador + frente do balcão), yaw ±60°, pitch −0,6..+0,5 em torno da pose; `mode='seated'`, `seatedAt = atCounter = counterId`. `services.pick` (PickService): toque/clique curto no canvas → raycast nos objetos registrados (visíveis e na cena; tolerância de 34 px para itens pequenos) → `onTap`; ignorado com `ui:modal` aberto. "Sair do caixa" levanta no tile do operador.
 - **Debug:** `window.__player` (`cam pos teleport look lookAt target actions forceTarget press actionDown actionUp throwBox dropBox toggleBox secondary sit stand capacity forceCap held flying mopping tap picks tapProbe tapProbeHits removeTapProbe usingFallback dropAll`). E2E: `tests/e2e/player-fp.e2e.mjs` (`npx vite build && npx vite preview --port 5192`; `PLAYER_URL`, prints em `PLAYER_SHOTS`).
+
+---
+
+# Fase 4 — níveis por móvel, APK e ajustes de toque (PROTOCOLO OBRIGATÓRIO)
+Plano: `docs/PHASE4.md`. Tipos: `ShelfLevel` e `Furniture.levels` (src/sim/state.ts), `PickInfo.level` e
+`WorldService.levelAt` (src/core/services.ts), API "FASE 4" no fim de src/sim/api.ts.
+
+## Modelo de níveis (sim é o dono)
+- shelf/fridge/freezer têm `levels: ShelfLevel[]` (quantidade de níveis = `FurnitureSpec.slots` do tipo). Cada nível tem
+  produto próprio (etiqueta) e `units` (capacidade = `slotCapacity` do produto). Etiqueta pode ficar com 0 unidades ("--").
+- `state.shelf[produto]` e `state.slots[produto]` passam a ser DERIVADOS (soma dos níveis), recalculados pelo sim após
+  cada mutação; leitura continua valendo. `Furniture.productId` fica obsoleto (migração: níveis recebem o produto antigo e
+  o estoque é distribuído).
+- Funções antigas continuam funcionando com a regra nova: `placeUnits` (repositor npc: enche níveis do produto, depois
+  níveis vazios sem etiqueta compatíveis), `takeFromShelf`/`returnToShelf` (por níveis), `assignProduct` (etiqueta os níveis
+  vazios), `productCapacity` (soma dos níveis com a etiqueta).
+- Preço sugerido (`suggestedPrice`) = **média de mercado** (×1,00), não +12%. Curva de aceitação mais tolerante:
+  ~95% em 1,00, ~85–90% em 1,10, 50% por volta de 1,30, quase zero acima de 1,6. Balão "Caro!" só quando rejeita com
+  razão > 1,05. Exigentes (picky) continuam rejeitando > 1,10.
+
+## Interação por nível (player)
+O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(furnitureId, hitPoint)` e preenche `pick.level`.
+| Situação | Ação |
+|---|---|
+| caixa aberta com unidades; `canStockLevel` = ok | **Repor** (segurar, 1 un. a cada ~0,12 s) → `placeUnitsInLevel` |
+| caixa fechada | **Abrir caixa** |
+| caixa aberta **vazia**, nível com unidades | **Retirar** (segurar) → `pullUnitsFromLevel` (a caixa passa a ser do produto do nível) |
+| other-product / not-accepted / full | desabilitado: "Outro produto" / "Não cabe aqui" / "Nível cheio" |
+| sem caixa | Preço → `ui:openTablet {tab:'prices', productId do nível}`; secundário: Mover |
+- O world desenha produtos e etiqueta de preço POR NÍVEL e destaca só o nível mirado quando `pick.level` vem preenchido.
+- npc: cliente escolhe um nível com `locateProduct` (com unidades), vai ao `furnitureAccess` do móvel e usa `takeFromLevel`.
+
+## Toque e configurações
+- Botões de jogo agem no `pointerdown` (sem esperar `click`), cada ponteiro rastreado por `pointerId`; joystick e olhar
+  não bloqueiam outros dedos. Nenhum `preventDefault` global que suprima eventos de outros alvos.
+- `mercadinho:settings` ganha `lookSensitivity` (0,4–2,0; padrão 1,0) e `settings:changed` passa a levar esse campo.
+- Telas do jogo (troco, maquininha, Mercado/tablet, resumo) **não podem ter barra de rolagem** em 844×390, 800×360,
+  740×360 e 720×330; no celular o tablet ocupa a tela inteira (respeitando safe-area).
+
+## APK (agente apk)
+- Capacitor (Android). App em tela cheia imersiva (barras do sistema ocultas, reaparecem com gesto), orientação
+  `sensorLandscape` (trava em paisagem e vira para o outro lado horizontal), tela sempre ligada, nome "Mercadinho 3D".
+- Service worker desligado dentro do app nativo (`window.Capacitor`).
+- `npm run apk` gera o APK de depuração; assinatura com keystore de depuração FIXA versionada (credenciais públicas
+  padrão de debug) para que atualizações instalem por cima sem perder o save.
+- Navegador: no primeiro toque, tentar tela cheia + `screen.orientation.lock('landscape')`; se falhar, manter o aviso.

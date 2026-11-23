@@ -19,7 +19,7 @@ import { marketAverage, sellPrice, wholesale } from './market';
 import { roundPrice, type Cents } from './money';
 import { rentFor } from './rent';
 import { makeRng } from './rng';
-import { INITIAL_NEXT_FURNITURE_ID, emptyLedger, initialFurniture, type AutoOrderRule, type Decor, type Furniture, type StoreState } from './state';
+import { INITIAL_NEXT_FURNITURE_ID, emptyLedger, initialFurniture, type AutoOrderRule, type Decor, type Furniture, type ShelfLevel, type StoreState } from './state';
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
   BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS,
@@ -741,3 +741,26 @@ export function customerCapacity(state: StoreState): number {
 }
 /** Tipo de móvel que expõe o produto (para o ícone "móvel exigido" no Mercado). */
 export function furnitureForProduct(productId: string): FurnitureType { return displayTypeFor(productById(productId).category); }
+
+/* =====================================================================
+ * FASE 4 — níveis independentes por móvel; preço sugerido. Assinaturas CONGELADAS (o agente `sim` implementa).
+ * Fonte da verdade do estoque exposto: Furniture.levels. state.shelf[produto] e state.slots viram DERIVADOS
+ * (o sim recalcula após cada mutação) e continuam válidos para leitura por ui/npc/world.
+ * ===================================================================== */
+const p4 = (n: string): never => { throw new Error(`NOT_IMPLEMENTED: ${n}`); };
+export type LevelCheck = 'ok' | 'other-product' | 'not-accepted' | 'full' | 'box-empty' | 'box-closed';
+/** Níveis do móvel (cópia somente leitura; vazio para tipos sem níveis). */
+export function furnitureLevels(state: StoreState, furnitureId: number): ShelfLevel[] { return p4('furnitureLevels'); }
+/** Unidades que cabem no nível para o produto (o do nível, ou `productId` se informado). */
+export function levelCapacity(state: StoreState, furnitureId: number, level: number, productId?: string): number { return p4('levelCapacity'); }
+/** Pode repor a caixa `boxIndex` no nível? (categoria aceita, nível vazio/sem etiqueta/mesmo produto, espaço, caixa aberta e com unidades). */
+export function canStockLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number): LevelCheck { return p4('canStockLevel'); }
+/** Move até n unidades da caixa para o nível. Nível sem produto (ou com outro produto e 0 un.) passa a ser do produto da caixa. Retorna movidas. */
+export function placeUnitsInLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number, n: number): number { return p4('placeUnitsInLevel'); }
+/** Puxa até n unidades do nível para a caixa: caixa vazia passa a ser do produto do nível; caixa do mesmo produto recebe até boxSize. Retorna movidas. */
+export function pullUnitsFromLevel(state: StoreState, boxIndex: number, furnitureId: number, level: number, n: number): number { return p4('pullUnitsFromLevel'); }
+/** Cliente retira do nível (retorna qtd retirada). */
+export function takeFromLevel(state: StoreState, furnitureId: number, level: number, qty: number): number { return p4('takeFromLevel'); }
+/** Onde o produto está exposto (níveis com etiqueta do produto, com ou sem unidades). */
+export function locateProduct(state: StoreState, productId: string): { furnitureId: number; level: number; units: number }[] { return p4('locateProduct'); }
+// suggestedPrice já existe (acima, seção de preços): na FASE 4 passa a ser a MÉDIA DE MERCADO (×1,00), não +12%.
