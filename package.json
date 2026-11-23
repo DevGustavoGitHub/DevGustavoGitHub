@@ -12,12 +12,15 @@
     "build:single": "vite build && node scripts/build-single.mjs dist-single/index.html"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.10",
     "@types/three": "^0.187.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.1"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/core": "^7.6.10",
     "three": "^0.187.0"
   }
 }
