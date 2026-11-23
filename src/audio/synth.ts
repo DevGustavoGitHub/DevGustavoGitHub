@@ -50,7 +50,7 @@ export function tone(rig: Rig, o: ToneOpts): void {
   osc.frequency.setValueAtTime(o.f, o.t);
   if (o.fEnd) osc.frequency.exponentialRampToValueAtTime(o.fEnd, o.t + o.dur);
   if (o.detune) osc.detune.value = o.detune;
-  const a = Math.max(o.attack ?? MIN_ATTACK, MIN_ATTACK);
+  const a = Math.min(Math.max(o.attack ?? MIN_ATTACK, MIN_ATTACK), o.dur * 0.5);
   g.gain.setValueAtTime(0, o.t);
   g.gain.linearRampToValueAtTime(o.gain, o.t + a);
   if (o.release !== undefined) {
@@ -93,7 +93,7 @@ export function noiseBurst(rig: Rig, r: Rng, o: NoiseOpts): void {
   if (o.fEnd) filt.frequency.exponentialRampToValueAtTime(o.fEnd, o.t + o.dur);
   filt.Q.value = o.q ?? 1;
   const g = ctx.createGain();
-  const a = Math.max(o.attack ?? 0.003, MIN_ATTACK);
+  const a = Math.min(Math.max(o.attack ?? 0.003, MIN_ATTACK), o.dur * 0.6);
   g.gain.setValueAtTime(0, o.t);
   g.gain.linearRampToValueAtTime(o.gain, o.t + a);
   g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
@@ -114,7 +114,125 @@ export function bell(rig: Rig, t: number, f: number, gain: number, decay: number
   }
 }
 
-type Recipe = (rig: Rig, t: number, r: Rng) => number;
+export interface CrackleOpts { t: number; dur: number; gain: number; f: number; fEnd?: number; q?: number; rate: number; floor?: number }
+
+/** Ruído crepitante (fita adesiva, água): grãos curtos irregulares sobre um chiado de fundo, num só nó de ganho. */
+export function crackle(rig: Rig, r: Rng, o: CrackleOpts): void {
+  const { ctx } = rig;
+  const src = ctx.createBufferSource();
+  src.buffer = rig.noise;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.Q.value = o.q ?? 1.5;
+  filt.frequency.setValueAtTime(o.f, o.t);
+  if (o.fEnd) filt.frequency.exponentialRampToValueAtTime(o.fEnd, o.t + o.dur);
+  const g = ctx.createGain();
+  const floor = o.gain * (o.floor ?? 0.25);
+  const end = o.t + o.dur;
+  g.gain.setValueAtTime(0, o.t);
+  g.gain.linearRampToValueAtTime(floor, o.t + 0.012);
+  let at = o.t + 0.012;
+  for (;;) {
+    at += (0.4 + r() * 1.2) / o.rate;
+    const len = 0.003 + r() * 0.005;
+    if (at + 0.002 + len > end - 0.03) break;
+    g.gain.setValueAtTime(floor, at);
+    g.gain.linearRampToValueAtTime(o.gain * (0.45 + r() * 0.55), at + 0.002);
+    g.gain.linearRampToValueAtTime(floor, at + 0.002 + len);
+    at += 0.002 + len;
+  }
+  g.gain.setValueAtTime(floor, end - 0.03);
+  g.gain.linearRampToValueAtTime(0, end);
+  src.connect(filt); filt.connect(g); g.connect(rig.out);
+  src.onended = () => { src.disconnect(); filt.disconnect(); g.disconnect(); };
+  src.start(o.t, r() * Math.max(0, rig.noise.duration - o.dur - 0.05));
+  src.stop(end + 0.03);
+}
+
+export interface CreakOpts { t: number; dur: number; rate: number; rateEnd: number; f: number; q?: number; gain: number }
+
+/** Rangido (atrito "stick-slip"): dente de serra lento num passa-faixa estreito, com a taxa oscilando irregular. */
+export function creak(rig: Rig, r: Rng, o: CreakOpts): void {
+  const { ctx } = rig;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(o.rate, o.t);
+  for (let i = 1; i <= 3; i++) {
+    const k = i / 3;
+    osc.frequency.linearRampToValueAtTime((o.rate + (o.rateEnd - o.rate) * k) * (0.85 + r() * 0.3), o.t + o.dur * k);
+  }
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = o.f; bp.Q.value = o.q ?? 6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, o.t);
+  g.gain.linearRampToValueAtTime(o.gain, o.t + Math.min(0.02, o.dur * 0.3));
+  g.gain.setValueAtTime(o.gain, o.t + o.dur * 0.55);
+  g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  g.gain.linearRampToValueAtTime(0, o.t + o.dur + 0.01);
+  osc.connect(bp); bp.connect(g); g.connect(rig.out);
+  osc.onended = () => { osc.disconnect(); bp.disconnect(); g.disconnect(); };
+  osc.start(o.t);
+  osc.stop(o.t + o.dur + 0.03);
+}
+
+/** Metal (fanfarra): dois dentes de serra desafinados, "escorregada" de afinação e filtro que abre no ataque. */
+export function brass(rig: Rig, t: number, f: number, dur: number, gain: number): void {
+  const { ctx } = rig;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.Q.value = 0.8;
+  const sus = Math.min(f * 3.5, 6000);
+  lp.frequency.setValueAtTime(Math.min(f * 1.2, 3000), t);
+  lp.frequency.exponentialRampToValueAtTime(Math.min(f * 7, 9000), t + 0.045);
+  lp.frequency.exponentialRampToValueAtTime(sus, t + Math.max(0.06, Math.min(0.2, dur * 0.8)));
+  const g = ctx.createGain();
+  const rel = Math.min(0.12, dur * 0.4);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.022);
+  g.gain.linearRampToValueAtTime(gain * 0.72, t + Math.max(0.03, Math.min(0.16, dur - rel)));
+  g.gain.setValueAtTime(gain * 0.72, t + dur - rel);
+  g.gain.linearRampToValueAtTime(0, t + dur);
+  const oscs = [-7, 7].map((cents) => {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.detune.value = cents;
+    o.frequency.setValueAtTime(f * 0.985, t);
+    o.frequency.linearRampToValueAtTime(f, t + 0.04);
+    o.connect(lp);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+    return o;
+  });
+  lp.connect(g); g.connect(rig.out);
+  oscs[1]!.onended = () => { for (const o of oscs) o.disconnect(); lp.disconnect(); g.disconnect(); };
+}
+
+/** Rodinhas de cadeira: "tic"s leves; o espaçamento é multiplicado por `accel` a cada tic. */
+function casters(rig: Rig, r: Rng, t: number, n: number, gap: number, accel: number, gain: number, p: number): void {
+  let at = t, g = gap;
+  for (let i = 0; i < n; i++) {
+    noiseBurst(rig, r, { t: at, dur: 0.014, gain: gain * (0.7 + r() * 0.3), type: 'bandpass', f: 2300 * p * jit(r, 0.1), q: 2.5 });
+    at += g * jit(r, 0.15);
+    g *= accel;
+  }
+}
+
+/** Celesta/caixinha de música: fundamental + oitava + brilho curto. */
+function celesta(rig: Rig, t: number, f: number, gain: number, decay: number): void {
+  tone(rig, { t, f, dur: decay, gain, attack: 0.005 });
+  tone(rig, { t, f: f * 2, dur: decay * 0.45, gain: gain * 0.3, attack: 0.004 });
+  if (f * 4 < 11000) tone(rig, { t, f: f * 4.02, dur: 0.12, gain: gain * 0.08, attack: 0.003 });
+}
+
+/** Tímpano: queda de afinação grave. */
+function boom(rig: Rig, t: number, gain: number, dur: number, k: number): void {
+  tone(rig, { t, f: 98 * k, fEnd: 52 * k, dur, gain, attack: 0.005 });
+  tone(rig, { t, f: 196 * k, fEnd: 120 * k, dur: dur * 0.4, gain: gain * 0.25, attack: 0.005 });
+}
+
+const midi = (m: number): number => 440 * Math.pow(2, (m - 69) / 12);
+
+/** `level` 0..1: intensidade opcional (ex.: gorjeta em 'register'); receitas sem variação ignoram. */
+type Recipe = (rig: Rig, t: number, r: Rng, level: number) => number;
 const jit = (r: Rng, amt = 0.05): number => 1 + (r() - 0.5) * 2 * amt;
 
 export const RECIPES: Record<SfxName, Recipe> = {
@@ -184,10 +302,12 @@ export const RECIPES: Record<SfxName, Recipe> = {
     return 1.5;
   },
   step(rig, t, r) {
-    const p = jit(r, 0.2);
-    noiseBurst(rig, r, { t, dur: 0.07, gain: 0.35, type: 'lowpass', f: 650 * p, q: 0.7, attack: 0.006 });
-    tone(rig, { t, f: 95 * p, fEnd: 60 * p, dur: 0.07, gain: 0.18, attack: 0.006 });
-    return 0.12;
+    // 1ª pessoa: o passo é do próprio jogador e soa o tempo todo → baixo, abafado, sem transiente
+    const p = jit(r, 0.15);
+    noiseBurst(rig, r, { t, dur: 0.065, gain: 0.13, type: 'lowpass', f: 430 * p, q: 0.6, attack: 0.008 });
+    tone(rig, { t, f: 82 * p, fEnd: 56 * p, dur: 0.06, gain: 0.07, attack: 0.008 });
+    noiseBurst(rig, r, { t: t + 0.008, dur: 0.04, gain: 0.02, type: 'bandpass', f: 1900 * p, q: 0.8, attack: 0.01 }); // sola
+    return 0.1;
   },
   box(rig, t, r) {
     const p = jit(r, 0.1);

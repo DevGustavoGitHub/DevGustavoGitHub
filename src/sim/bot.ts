@@ -106,14 +106,14 @@ export function restock(state: StoreState): void {
   }
 }
 
-/** Dinheiro que o bot não gasta em investimentos: despesas fixas do dia + metade do custo de encher as prateleiras. */
+/** Dinheiro que o bot não gasta em investimentos: despesas fixas do dia + ~1/3 do custo de encher as prateleiras. */
 export function reserve(state: StoreState): number {
   let fill = 0;
   for (const p of PRODUCTS) {
     const cap = productCapacity(state, p.id);
     if (cap > 0) fill += cap * priceInfo(state, p.id).wholesale;
   }
-  return state.rent + wagesPerDay(state) + loanInfo(state).dailyInterest + Math.round(fill * 0.5) + 3000;
+  return state.rent + wagesPerDay(state) + loanInfo(state).dailyInterest + Math.round(fill * 0.35) + 2000;
 }
 
 /** Compra um móvel pelo carrinho e monta do estoque (como o jogador na Fase 3). */
@@ -142,31 +142,34 @@ export function investMorning(state: StoreState, mem: BotMemory): void {
     if (!u.owned && state.level >= u.minLevel && can(u.cost)) buyUpgrade(state, id);
   };
 
-  // 1. pote de gorjeta: barato e permanente
-  upgrade('tipjar');
-  // 2. todo produto licenciado precisa de pelo menos 1 móvel (no começo: arroz e café ainda sem prateleira)
+  // 1. todo produto licenciado precisa de pelo menos 1 móvel (no começo: arroz e café ainda sem prateleira)
   for (const p of BY_POPULARITY) if (state.licenses.includes(p.category) && productCapacity(state, p.id) === 0) buyFor(p.id);
-  // 3. expansão liberada tem prioridade; se faltar pouco (≤ 6 dias de lucro), poupa para ela
+  // 2. pote de gorjeta: barato e permanente
+  upgrade('tipjar');
+  // 3. licenças (mais baratas primeiro), só quando também cabe o móvel do produto mais popular da categoria
+  for (const l of LICENSES) {
+    if (state.licenses.includes(l.id) || state.level < l.minLevel) continue;
+    const first = BY_POPULARITY.find((p) => p.category === l.id);
+    const fcost = first ? spec(furnitureForProduct(first.id)).cost : 0;
+    if (!can(l.cost + fcost)) continue;
+    buyLicense(state, l.id);
+    for (const p of BY_POPULARITY) if (p.category === l.id && productCapacity(state, p.id) === 0) buyFor(p.id);
+  }
+  // 4. expansão liberada; se faltar pouco (≤ 6 dias de lucro), poupa para ela (adia os itens opcionais abaixo)
   const ec = expansionCost(state);
   const em = expansionMinLevel(state);
   if (ec !== null && em !== null && state.level >= em && can(ec)) buyExpansion(state);
   const ec2 = expansionCost(state);
   const em2 = expansionMinLevel(state);
   const saving = ec2 !== null && state.level >= (em2 ?? 99) && ec2 + reserve(state) - state.money <= 6 * Math.max(0, mem.lastNet);
-  // 4. licenças (mais baratas primeiro)
-  for (const l of LICENSES) {
-    if (saving || state.licenses.includes(l.id) || state.level < l.minLevel || !can(l.cost)) continue;
-    buyLicense(state, l.id);
-    for (const p of BY_POPULARITY) if (p.category === l.id && productCapacity(state, p.id) === 0) buyFor(p.id);
-  }
-  // 5. mais capacidade onde houve ruptura (no máx. 1 por dia)
-  const worst = Object.entries(mem.stockouts).sort((a, b) => b[1] - a[1])[0];
-  if (!saving && worst && worst[1] >= 4) buyFor(worst[0]);
-  // 6. caixa contratado quando o checkout é o gargalo
+  // 5. caixa contratado quando o checkout é o gargalo
   const cc = employeeCost(state, 'cashier');
-  if (!saving && cc && state.level >= cc.minLevel && (mem.lostByCapacity > 0 || mem.arrivals > 0.85 * checkoutCapacity(state)) && can(cc.cost + cc.dailyWage * 10)) {
+  if (cc && state.level >= cc.minLevel && (mem.lostByCapacity > 0 || mem.arrivals > 0.85 * checkoutCapacity(state)) && can(cc.cost + cc.dailyWage * 10)) {
     hireOrUpgrade(state, 'cashier');
   }
+  // 6. mais capacidade onde houve ruptura (no máx. 1 por dia)
+  const worst = Object.entries(mem.stockouts).sort((a, b) => b[1] - a[1])[0];
+  if (!saving && worst && worst[1] >= 4) buyFor(worst[0]);
   // 7. caixa registradora extra quando o checkout transborda
   if (mem.lostByCapacity > 3) {
     const c = spec('counter');
