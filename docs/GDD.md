@@ -109,19 +109,19 @@ Linha do tempo do bot (×1,1; sementes 3/11/29, ±2 dias entre elas): dia 1 comp
 
 | Dia | Nível | Chegadas | Atendidos | Felizes/irritados | Receita | Despesas fixas | Lucro/dia | Caixa |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 2 | 23 | 21 | 21/2 | R$ 436 | R$ 0 | R$ 187 | R$ 105 |
-| 2 | 2 | 27 | 23 | 23/4 | R$ 352 | R$ 0 | R$ 153 | R$ 203 |
-| 3 | 3 | 31 | 26 | 26/5 | R$ 421 | R$ 0 | R$ 183 | R$ 448 |
-| 5 | 4 | 31 | 28 | 28/3 | R$ 1.530 | R$ 53 | R$ 616 | R$ 982 |
-| 10 | 6 | 46 | 41 | 41/5 | R$ 2.597 | R$ 80 | R$ 1.032 | R$ 1.443 |
-| 20 | 11 | 81 | 76 | 76/5 | R$ 4.600 | R$ 290 | R$ 1.739 | R$ 5.425 |
-| 30 | 15 | 100 | 97 | 97/3 | R$ 7.007 | R$ 370 | R$ 2.683 | R$ 5.649 |
-| 50 | 20 | 142 | 136 | 136/6 | R$ 9.504 | R$ 590 | R$ 3.898 | R$ 23.861 |
-| 70 | 25 | 180 | 175 | 175/5 | R$ 11.985 | R$ 630 | R$ 5.060 | R$ 44.540 |
-| 90 | 29 | 211 | 201 | 201/10 | R$ 17.084 | R$ 670 | R$ 7.356 | R$ 31.608 |
-| 120 | 33 | 222 | 207 | 206/16 | R$ 19.753 | R$ 670 | R$ 8.688 | R$ 173.519 |
+| 1 | 2 | 24 | 22 | 22/2 | R$ 454 | R$ 0 | R$ 191 | R$ 125 |
+| 2 | 3 | 28 | 28 | 28/0 | R$ 542 | R$ 0 | R$ 232 | R$ 153 |
+| 3 | 3 | 36 | 34 | 34/2 | R$ 623 | R$ 27 | R$ 245 | R$ 326 |
+| 5 | 4 | 35 | 34 | 34/1 | R$ 1.883 | R$ 53 | R$ 715 | R$ 380 |
+| 10 | 7 | 47 | 45 | 45/2 | R$ 2.971 | R$ 80 | R$ 1.147 | R$ 1.789 |
+| 20 | 12 | 87 | 83 | 83/4 | R$ 6.822 | R$ 260 | R$ 2.665 | R$ 10.609 |
+| 30 | 16 | 107 | 104 | 104/3 | R$ 10.016 | R$ 420 | R$ 3.901 | R$ 6.006 |
+| 50 | 22 | 162 | 158 | 158/4 | R$ 12.420 | R$ 630 | R$ 5.109 | R$ 33.437 |
+| 70 | 27 | 192 | 188 | 188/4 | R$ 15.880 | R$ 630 | R$ 6.706 | R$ 60.840 |
+| 90 | 31 | 221 | 217 | 211/10 | R$ 23.892 | R$ 670 | R$ 10.517 | R$ 37.959 |
+| 120 | 36 | 233 | 226 | 213/20 | R$ 22.635 | R$ 710 | R$ 9.777 | R$ 131.324 |
 
-(semente 11.) O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30 conta). `tests/balance.test.ts` valida: R$ 150 compram só 2 caixas, dia 1 lucra sem aluguel e chega ao nível 2, 2ª licença/expansão 1/caixa contratado nas janelas acima, nenhum caixa negativo no começo, preço justo lucrativo e abusivo no prejuízo, lucro limitado por nível, nível 30 entre os dias 75 e 120 com sempre algo a comprar, estado válido por 120 dias. Limitação do modelo: repositor/limpador poupam tempo do jogador e a capacidade de clientes simultâneos só limita o npc em tempo real; o bot não modela esses dois efeitos.
+(semente 11, bot ×1,1, Fase 4.) O lucro cresce com nível e expansão, mas é limitado pelo checkout (45 + caixa + registradoras) e pela chegada (nível ≤ 30 conta). `tests/balance.test.ts` valida: R$ 150 compram só 2 caixas, dia 1 lucra sem aluguel e chega ao nível 2, 2ª licença/expansão 1/caixa contratado nas janelas acima, nenhum caixa negativo no começo, preço justo lucrativo e abusivo no prejuízo, lucro limitado por nível, nível 30 entre os dias 75 e 120 com sempre algo a comprar, estado válido por 120 dias. Limitação do modelo: repositor/limpador poupam tempo do jogador e a capacidade de clientes simultâneos só limita o npc em tempo real; o bot não modela esses dois efeitos.
 
 ### 4.6 Catálogo de produtos (custo atacado / markup / caixa / unid. por slot / popularidade)
 

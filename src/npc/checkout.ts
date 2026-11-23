@@ -31,10 +31,10 @@ const BELT_SPEED = 0.6;
 /** Folga entre itens na esteira (m). Cada item ocupa o próprio comprimento (caixa envolvente) ao longo da esteira. */
 const BELT_GAP = 0.03;
 /** Jogador sentado: notas/cartão vêm até PAY_PULL m mais perto da câmera (nunca a menos de PAY_MIN_DIST) e maiores. */
-const PAY_PULL = 0.42;
+const PAY_PULL = 0.5;
 const PAY_MIN_DIST = 1.3;
-const CARD_NEAR_SCALE = 2.1;
-const BILL_NEAR_SCALE = 1.3;
+const CARD_NEAR_SCALE = 2.5;
+const BILL_NEAR_SCALE = 1.4;
 type Op = 'player' | 'staff' | null;
 
 interface BeltItem {
@@ -617,7 +617,7 @@ export class CheckoutManager {
 
   /**
    * Posição/escala das notas ou do cartão. Jogador sentado: o cliente estende o pagamento por cima do balcão, até
-   * PAY_PULL m mais perto da câmera, e o objeto fica maior (cartão ×2,1, notas ×1,3) para ser legível da cadeira.
+   * PAY_PULL m mais perto da câmera, e o objeto fica maior (cartão ×2,5, notas ×1,4) para ser legível da cadeira.
    */
   private placeProp(l: Lane, s: Service): void {
     const prop = l.prop;

@@ -283,7 +283,8 @@ export function arrivalSchedule(state: StoreState): number[] {
 }
 
 /**
- * Lista de compras (produtos distintos, só categorias licenciadas e com prateleira atribuída), sem checar preço/estoque.
+ * Lista de compras (produtos distintos, só categorias licenciadas e com algum nível etiquetado — `state.slots` > 0),
+ * sem checar preço/estoque.
  * Pode devolver [] se não houver nada exposto. Nº de itens: 1..(4 + nível/3), até 7 produtos distintos.
  */
 export function makeShoppingList(state: StoreState, rand: () => number): { productId: string; qty: number }[] {

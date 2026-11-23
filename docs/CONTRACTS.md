@@ -386,3 +386,35 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   `tagLevels()` (`{id, level, pid, text}`); `tags()` agrega por produto (`-` se todos os níveis dele esgotaram).
 - **Desempenho (perf.e2e, mesma cena):** draw calls 68–82 dentro (igual à Fase 3), low 54, texturas 16, sem vazamentos;
   triângulos ≈ 117k (low ≈ 110k).
+
+## Fase 4 — sim (implementado; números em docs/GDD.md §4.1, §4.4 e §4.5)
+- **Níveis:** prateleira 4, geladeira 4, freezer 3 (`FurnitureSpec.slots`). `Furniture.levels: ShelfLevel[]` é a fonte da verdade
+  (nível sem etiqueta = `{units: 0}`; regras em `src/sim/levels.ts`). **Derivados** (recalculados pelo sim após toda mutação; escrever neles
+  não tem efeito): `state.shelf[p]` (soma da loja inteira), `state.slots[p]` (nº de níveis com a etiqueta) e `Furniture.productId`
+  (etiqueta do 1º nível etiquetado; só compatibilidade). Nível livre (sem etiqueta) ou com etiqueta e 0 un. aceita qualquer produto de
+  categoria aceita; com unidades, só o mesmo produto; a etiqueta fica com 0 un. ("--"). Móvel novo (`buyFurniture`/`placeFromStock` sem
+  `productId`) nasce sem etiquetas; com `productId`, todos os níveis etiquetados. Vender/desmontar devolve as unidades de cada nível
+  (depósito se couber, senão caixas fechadas na calçada). Layout inicial: 4 níveis de feijão (48 un.) e 4 de macarrão (64 un.).
+- **API Fase 4:** `furnitureLevels` (cópia; `[]` sem níveis; móvel inexistente lança) · `levelCapacity` (capacidade TOTAL do nível; 0 sem
+  etiqueta e sem `productId`, ou categoria recusada) · `canStockLevel` com precedência **box-empty → not-accepted → other-product → full →
+  box-closed → ok** (balcão/estante/decor = not-accepted; caixa/móvel/nível inexistentes lançam) · `placeUnitsInLevel` (0 = caixa vazia ou
+  nível cheio; lança "… não cabe em …", "Este nível tem outro produto", "Quantidade inválida"; não exige caixa aberta) · `pullUnitsFromLevel`
+  (caixa vazia vira do produto do nível; mesma caixa até boxSize; 0 = nível vazio/caixa cheia; lança "A caixa tem outro produto") ·
+  `takeFromLevel` (unidades do produto ATUAL do nível; 0 para qtd inválida ou móvel/nível que sumiu, sem lançar) · `locateProduct` (ordem
+  dos móveis e níveis; inclui níveis com 0 un.). `costBasis` não muda ao mover entre caixa e nível (testado: `costBasis.units = unitsOwned`).
+- **Funções antigas com a regra nova:** `placeUnits` enche níveis do produto (em QUALQUER móvel, na ordem de `state.furniture`) e depois
+  níveis livres compatíveis; lança "Nenhuma prateleira exibe este produto" sem nenhum dos dois. `takeFromShelf` tira do nível mais cheio;
+  `returnToShelf` volta aos níveis do produto/livres e o resto vai ao depósito/calçada. `assignProduct` etiqueta só os níveis VAZIOS
+  (`undefined` tira a etiqueta deles; níveis com unidades ficam; nada vai para a calçada). `productCapacity` = níveis etiquetados × slotCapacity.
+- **Saves:** sem níveis (Fase 3 ou anterior) → níveis recebem o `productId` antigo e o estoque somado é distribuído enchendo nível a nível
+  (sobra → depósito/calçada); níveis inválidos são saneados (etiqueta recusada/desconhecida, excesso, tamanho errado).
+- **Preço:** `suggestedPrice` = média de mercado. Aceitação `1/(1+e^(k·(r−1,30)))`, k = 10 abaixo e 13 acima: 99% (0,8) · 95% (1,0) ·
+  88% (1,1) · 73% (1,2) · 50% (1,3) · 21% (1,4) · 2% (1,6). Bot padrão ×1,1 (ótimo de lucro; o sugerido rende ~83% dele); nível 30 no dia ~83.
+- **Avisos:** **world** — desenhe e etiquete por `f.levels[i]` (`levels.length` dá o nº de níveis; capacidade = `levelCapacity`); nunca use
+  `state.shelf[f.productId]` para desenhar um móvel (é a soma da loja: era a causa do "duplicou nas duas"). **player** — Repor =
+  `canStockLevel` + `placeUnitsInLevel`; com caixa vazia `canStockLevel` dá `box-empty` antes de tudo (ofereça Retirar se o nível tem
+  unidades → `pullUnitsFromLevel`); não use mais `assignProduct`+`placeUnits` para o jogador (põe no 1º nível do produto da loja, não no
+  mirado); Preço = `furnitureLevels(...)[level].productId`. **npc** — cliente: `locateProduct` (units > 0) → andar até o móvel →
+  `takeFromLevel` (confira o `productId` do nível; 0 = móvel sumiu/esvaziou); desistência segue com `returnToShelf`. Repositor: `placeUnits`
+  vale, mas para repor o móvel até onde andou use `locateProduct` + `placeUnitsInLevel`. **ui** — preço sugerido = mercado (sem +12%);
+  `productCapacity`/`state.slots` contam níveis (4 por prateleira); `economy.shelfCapacity`/`unitsOwned` seguem válidos.
