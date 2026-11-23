@@ -42,7 +42,7 @@ export class Agent implements AgentLike {
 
   constructor(readonly env: Env, readonly person: Person) {
     this.group.add(person.root);
-    this.bubble = new Bubble(person.eyeHeight + 0.15);
+    this.bubble = new Bubble(person.eyeHeight + 0.32);
     this.group.add(this.bubble.sprite);
     env.ctx.scene.add(this.group);
     env.agents.push(this);
@@ -162,5 +162,6 @@ export class Agent implements AgentLike {
     const i = this.env.agents.indexOf(this);
     if (i >= 0) this.env.agents.splice(i, 1);
     this.env.ctx.scene.remove(this.group);
+    this.person.dispose();
   }
 }

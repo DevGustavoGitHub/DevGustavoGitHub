@@ -1,48 +1,40 @@
-/** Aba Funcionários: contratação permanente e evolução até o nível 5. */
+/** Aba Funcionários (como na referência): caixa, faxineiro e repositor com salário diário, níveis e liberação. */
 import * as api from '../../sim/api';
-import { errText, h, isNotImplemented, money } from '../dom';
+import { personSvg } from '../art';
+import { h, money } from '../dom';
 import { icon } from '../icons';
 import type { UiKit } from '../kit';
-import { badge, kv, pips } from '../widgets';
+import { safe } from '../safe';
+import { actionBtn, kv, pips } from '../widgets';
+import { bigCard, buyState } from './services';
 import type { TabApi } from './index';
 
-const ROLES: { role: api.Role; name: string; desc: string; color: string; ic: string }[] = [
-  { role: 'cashier', name: 'Caixa', desc: 'Atende os clientes na fila sozinho.', color: '#3b7fd4', ic: 'coin' },
-  { role: 'stocker', name: 'Repositor', desc: 'Leva caixas e abastece as prateleiras.', color: '#d9a441', ic: 'box' },
-  { role: 'janitor', name: 'Faxineiro', desc: 'Limpa sujeira e joga o lixo fora.', color: '#35a891', ic: 'brush' },
+const ROLES: { role: api.Role; name: string; desc: string }[] = [
+  { role: 'cashier', name: 'Caixa', desc: 'Senta no caixa e atende a fila sozinho.' },
+  { role: 'janitor', name: 'Faxineiro', desc: 'Limpa a sujeira e joga o lixo fora.' },
+  { role: 'stocker', name: 'Repositor', desc: 'Leva as caixas e abastece as prateleiras.' },
 ];
 
-function speed(role: api.Role, level: number): string {
-  if (level <= 0) return '—';
-  try { return `${api.employeeSpeed(role, level).toFixed(1).replace('.', ',')} s por ação`; } catch { return '—'; }
-}
+const speed = (role: api.Role, level: number): string =>
+  level <= 0 ? '—' : safe(() => `${api.employeeSpeed(role, level).toFixed(1).replace('.', ',')} s por ação`, '—').v;
 
 export function staffTab(body: HTMLElement, kit: UiKit, _tab: TabApi): void {
   const s = kit.ctx.state;
   body.appendChild(h('div', { class: 'banner', html: `${icon('users', 22)}<span>Funcionários são contratados <b>para sempre</b> e recebem salário todo dia. Evolua até o nível 5 para ganhar velocidade.</span>` }));
-  const grid = h('div', { class: 'cards' });
+  const grid = h('div', { class: 'bigs' });
   for (const r of ROLES) {
     const lvl = s.employees[r.role];
-    let next: ReturnType<typeof api.employeeCost> = null;
-    let err = '';
-    try { next = api.employeeCost(s, r.role); } catch (e) { err = isNotImplemented(e) ? 'Em desenvolvimento' : errText(e); }
-    const maxed = !err && next === null;
-    const low = next ? s.level < next.minLevel : false;
-    const poor = next ? s.money < next.cost : false;
-    grid.appendChild(h('div', { class: `card ${lvl > 0 ? 'owned' : ''}` },
-      h('div', { class: 'card-head' }, h('div', { class: 'ptile', style: `--tc:${r.color}`, html: icon(r.ic, 24) }),
-        h('div', { class: 'grow' }, h('h5', null, r.name), h('small', null, r.desc)),
-        lvl > 0 ? badge(`Nível ${lvl}`, 'good') : badge('Vago', 'mute')),
-      h('div', null, pips(lvl, 5)),
-      kv('Velocidade agora', speed(r.role, lvl)),
-      next ? kv(lvl === 0 ? 'Salário diário' : 'Salário no próximo nível', `${money(next.dailyWage)}/dia`) : null,
-      next && lvl > 0 ? kv('Velocidade no próximo nível', speed(r.role, lvl + 1)) : null,
-      err ? kv('Custo', err) : null,
-      maxed ? h('div', { class: 'banner' }, 'Nível máximo alcançado.') : next ? h('div', { class: 'card-actions' },
-        h('b', { style: 'font-size:18px' }, money(next.cost)),
-        h('button', { class: 'btn primary', disabled: low || poor,
-          on: { click: () => kit.act('employee', () => api.hireOrUpgrade(s, r.role), lvl === 0 ? `${r.name} contratado!` : `${r.name} evoluiu para o nível ${lvl + 1}!`) } },
-        low ? `Requer nível ${next.minLevel}` : poor ? 'Dinheiro insuficiente' : lvl === 0 ? 'Contratar' : 'Evoluir')) : null));
+    const next = safe(() => api.employeeCost(s, r.role), null);
+    const n = next.v;
+    const btn = next.err ? actionBtn({ kind: 'off', label: next.err })
+      : !n ? actionBtn({ kind: 'owned', label: 'Nível máximo' })
+        : actionBtn(buyState(s, { owned: false, minLevel: n.minLevel, cost: n.cost, label: `${lvl === 0 ? 'Contratar' : 'Evoluir'} ${money(n.cost)}`, id: `hire-${r.role}`,
+          onClick: () => kit.act('employee', () => api.hireOrUpgrade(s, r.role), lvl === 0 ? `${r.name} contratado!` : `${r.name} evoluiu para o nível ${lvl + 1}!`) }));
+    const extra = h('div', null,
+      h('div', { class: 'meta' }, h('span', null, 'Salário diário'), h('b', null, n ? money(n.dailyWage) : '—')),
+      h('div', { class: 'meta' }, h('span', null, `Nível ${lvl} » ${Math.min(5, lvl + 1)}`), pips(lvl, 5)),
+      kv('Velocidade', speed(r.role, lvl || 1)));
+    grid.appendChild(bigCard(r.name, personSvg(r.role, 76), r.desc, btn, extra, lvl > 0 ? 'owned' : ''));
   }
   body.appendChild(grid);
 }

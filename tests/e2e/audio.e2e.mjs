@@ -24,6 +24,11 @@ try {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error' && !(m.location().url ?? '').endsWith('/favicon.ico')) errors.push(m.text() + ' ' + (m.location().url ?? '')); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  // sem HMR: outros agentes salvando arquivos não podem recarregar a página no meio do teste
+  await page.route('**/@vite/client', (route) => route.fulfill({ contentType: 'application/javascript', body:
+    'const h={accept(){},acceptExports(){},dispose(){},prune(){},invalidate(){},decline(){},on(){},off(){},send(){},data:{}};' +
+    'export const createHotContext=()=>h;export const injectQuery=(u)=>u;export const removeStyle=()=>{};export class ErrorOverlay{}' +
+    'export const updateStyle=(id,css)=>{const s=document.createElement("style");s.textContent=css;document.head.appendChild(s);};' }));
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1500);
   const booted = await page.waitForFunction(() => window.__game, null, { timeout: 20000 }).then(() => true, () => false);

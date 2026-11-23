@@ -1,7 +1,8 @@
 /**
  * Módulo NPC: clientes, funcionários, filas e checkout.
  * Publica ctx.services.npc. Escuta: storeOpened/storeClosing/dayStarted/checkoutResult.
- * Emite: storeEmpty, checkoutRequest, checkoutAvailable, customerComplaint, stateChanged, sfx.
+ * Emite: storeEmpty, checkoutRequest {stage:'pay'}, checkout:display, checkout:done, checkoutAvailable,
+ * customerComplaint, stateChanged, sfx. Fase 3: caixa sentado (ver checkout.ts) e itens tocáveis via services.pick.
  * Debug/testes: window.__npc (spawnNow, timeScale, stats...).
  */
 import type { GameContext, GameModule } from '../core/module';
@@ -97,11 +98,6 @@ export default function create(): GameModule {
     runAuto();
   }
 
-  const onAttendClick = (e: Event): void => {
-    const t = e.target as Element | null;
-    if (t && t.closest && t.closest('.attend-btn')) mgr.retryCheckout();
-  };
-
   const env: Env = {
     get ctx() { return ctx; },
     world: () => ctx.services.world ?? (fallback ??= createFallbackWorld(ctx)),
@@ -127,7 +123,12 @@ export default function create(): GameModule {
     },
   };
 
-  const maxCustomers = (): number => Math.min(14, 10 + ctx.state.expansion, 16 - staff.length);
+  /** Limite de clientes simultâneos: min(api.customerCapacity, limite de desempenho ~18 pessoas na cena). */
+  const maxCustomers = (): number => {
+    const perf = 18 - staff.length;
+    const cap = safe('customerCapacity', () => api.customerCapacity(ctx.state), 6 + 2 * ctx.state.expansion);
+    return Math.max(1, Math.min(perf, Number.isFinite(cap) ? cap : 6));
+  };
 
   function spawnCustomer(kind?: CustomerKind): boolean {
     if (customers.length >= maxCustomers()) return false;
@@ -164,12 +165,12 @@ export default function create(): GameModule {
         staff.push(s);
         if (role === 'cashier') mgr.cashier = s as Cashier;
         mgr.refresh();
-        const lane = role === 'cashier' ? mgr.lanes[0] : undefined;
         const home = h[role];
         s.setHome(home.x, home.z);
-        const px = lane ? lane.operator.x : home.x, pz = lane ? lane.operator.z : home.z;
-        // aparece coerente: no posto (ao carregar) ou entrando pela porta (contratado em jogo)
-        if (initial || lane) s.place(px, pz, 0); else { const sp = env.world().spawnPoint(); s.place(sp.x, sp.z, 0); s.moveTo(home.x, home.z); }
+        // aparece coerente: sentado no posto (ao carregar) ou entrando pela porta (contratado em jogo)
+        if (role === 'cashier' && initial && (s as Cashier).lane) (s as Cashier).snapToSeat();
+        else if (initial) s.place(home.x, home.z, 0);
+        else { const sp = env.world().spawnPoint(); s.place(sp.x, sp.z, 0); s.moveTo(home.x, home.z); }
       } else if (lvl <= 0 && has) {
         has.remove(); staff.splice(staff.indexOf(has), 1);
         if (role === 'cashier') mgr.cashier = null;
@@ -222,7 +223,6 @@ export default function create(): GameModule {
         lastAutoHour = Math.floor(ctx.clock.minute / 60);
         runAuto();
       }));
-      document.addEventListener('click', onAttendClick, true);
       unsub.push(ctx.bus.on('dayStarted', () => {
         for (const cu of customers) { cu.abort(); cu.remove(); }
         lastAutoHour = -1;
@@ -237,6 +237,10 @@ export default function create(): GameModule {
         runAutoOrders: () => runAuto(),
         setAutoImpl: (f: typeof autoImpl) => { autoImpl = f; autoBroken = false; },
         retryCheckout: () => mgr.retryCheckout(),
+        /** Fase 3: estado das esteiras/pagamento, nº de tocáveis registrados e toque simulado. */
+        tappables: () => mgr.tappables(),
+        tap: () => mgr.debugTap(),
+        capacity: () => maxCustomers(),
         /** Estado interno de um cliente para testes. */
         customerInfo: (id: number) => { const c = customers.find((x) => x.id === id); return c ? { kind: c.kind, state: c.state, patience: c.patience, waited: c.waited, cancels: c.cancels, units: c.units, items: c.items.map((i) => ({ ...i })) } : null; },
         get timeScale() { return timeScale; },
@@ -244,7 +248,7 @@ export default function create(): GameModule {
         customers: () => customers.map((x) => ({ id: x.id, kind: x.kind, state: x.state, items: x.items.length, bubble: x.bubble.active, x: +x.x.toFixed(1), z: +x.z.toFixed(1) })),
         staff: () => staff.map((s) => ({ role: s.role, x: +s.x.toFixed(1), z: +s.z.toFixed(1), job: (s as { job?: string }).job ?? '' })),
         stats,
-        lanes: () => mgr.lanes.map((l) => ({ id: l.furnitureId, line: l.line.length, staffed: l.staffed })),
+        lanes: () => mgr.debug(),
         sync: () => syncStaff(false),
       };
     },
@@ -261,7 +265,6 @@ export default function create(): GameModule {
     dispose() {
       for (const u of unsub) u();
       unsub.length = 0;
-      document.removeEventListener('click', onAttendClick, true);
       for (const cu of customers) cu.remove();
       for (const s of staff) s.remove();
       customers.length = 0; staff.length = 0;

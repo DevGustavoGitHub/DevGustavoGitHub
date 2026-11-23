@@ -103,7 +103,14 @@ export class Customer extends Agent {
   }
 
   private waiting(): boolean {
-    return (this.state === 'queue' || this.state === 'front') && !(this.lane && this.lane.pending === this);
+    return this.state === 'queue' || this.state === 'front';
+  }
+
+  /** Paciência corre (fila, ou no balcão sem ninguém atendendo). true = esgotou. */
+  tickPatience(dt: number): boolean {
+    this.waited += dt;
+    if (!this.warned && this.waited > this.patience * 0.6) { this.warned = true; this.env.say(this, 'neutral', 2); }
+    return this.waited > this.patience;
   }
 
   private stepState(dt: number): void {
@@ -182,13 +189,21 @@ export class Customer extends Agent {
     else if (this.kind === 'kid') this.env.say(this, 'kid', 2.4);
   }
 
-  /** O minigame foi cancelado: feedback, menos paciência; desiste após 3 cancelamentos. */
-  onCheckoutCancel(): void {
+  /** O pagamento foi cancelado na UI: feedback e menos paciência. true = 3º cancelamento (o caixa o despacha). */
+  onCheckoutCancel(): boolean {
     this.cancels++;
     this.patience = Math.max(12, this.patience * 0.85);
     this.waited += 4;
-    if (this.cancels >= 3) { this.mgr.remove(this.lane!, this); this.giveUp('cancelamentos'); return; }
+    if (this.cancels >= 3) return true;
     this.env.say(this, this.cancels === 1 ? 'oops' : 'angry', 2.2);
+    return false;
+  }
+
+  /** Cesta mostra o que ainda não foi posto na esteira. */
+  refreshBasketFrom(taps: readonly { pid: string }[], from: number): void {
+    this.basketIds.length = 0;
+    for (let i = from; i < taps.length && this.basketIds.length < MAX_BASKET_ITEMS; i++) this.basketIds.push(taps[i]!.pid);
+    this.person.setBasketItems(this.basketIds);
   }
 
   private pickNext(): void {
@@ -298,13 +313,9 @@ export class Customer extends Agent {
       const o = lane.operator;
       this.faceTowards(o.x, o.z);
     }
-    if (this.waiting()) {
-      this.waited += dt;
-      if (!this.warned && this.waited > this.patience * 0.6) { this.warned = true; this.env.say(this, 'neutral', 2); }
-      if (this.waited > this.patience) {
-        this.mgr.remove(lane, this);
-        this.giveUp('espera');
-      }
+    if (this.waiting() && this.tickPatience(dt)) {
+      this.mgr.remove(lane, this);
+      this.giveUp('espera');
     }
   }
 
@@ -316,6 +327,7 @@ export class Customer extends Agent {
     this.items.length = 0; this.units = 0;
     this.person.setBasketItems([]);
     this.person.setBasket(false);
+    this.person.clearReach();
     this.lane = null;
     this.angry = true;
     this.env.say(this, this.ctx_rand() < 0.5 ? 'demora' : 'angry', 2.2);
@@ -342,6 +354,7 @@ export class Customer extends Agent {
   }
 
   private depart(): void {
+    this.person.clearReach();
     this.setPose('normal');
     this.lane = null;
     const d = this.env.world().door();
@@ -349,8 +362,8 @@ export class Customer extends Agent {
     this.moveTo(d.x, d.z - 1.2);
   }
 
-  /** Pagamento concluído (funcionário ou jogador). */
-  finishSale(speed: number, mistakes: number): void {
+  /** Pagamento concluído (funcionário ou jogador). Devolve total, gorjeta e satisfação (>= 3 = feliz). */
+  finishSale(speed: number, mistakes: number): { total: number; tip: number; sat: number } {
     const frac = this.waited / this.patience;
     let sat = 5 - mistakes - (frac > 0.75 ? 1.5 : frac > 0.5 ? 1 : frac > 0.25 ? 0.5 : 0) - this.complaints * 0.5 - this.outOfStock * 0.5;
     if (this.kind === 'picky') sat -= 0.5;
@@ -365,8 +378,9 @@ export class Customer extends Agent {
     this.env.say(this, sat >= 4 ? (res && res.tip > 0 ? 'coin' : 'obrigado') : sat >= 3 ? 'happy' : 'neutral', 2.2);
     this.items.length = 0; this.units = 0;
     this.person.setBasketItems([]);
-    this.person.setBasket(false);
+    this.person.setBag(true);
     this.depart();
+    return { total: res?.total ?? 0, tip: res?.tip ?? 0, sat };
   }
 
   /** Dispensa o cliente sem mexer na economia (fechamento forçado). */

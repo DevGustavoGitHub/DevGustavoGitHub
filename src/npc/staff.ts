@@ -26,35 +26,50 @@ export abstract class Staff extends Agent {
 
 export class Cashier extends Staff {
   lane: Lane | null = null;
-  private posted = false;
+  private st: 'idle' | 'toPost' | 'toSeat' | 'seated' = 'idle';
+  private laneId = -1;
   constructor(env: Env) { super(env, 'cashier'); this.sepWeight = 0; }
-  atPost(lane: Lane): boolean { return this.lane === lane && this.posted; }
+  /** Sentado na cadeira do balcão indicado (pronto para atender). */
+  atPost(lane: Lane): boolean { return this.lane === lane && this.st === 'seated'; }
+  /** Já começa sentado no posto (ao carregar o jogo). */
+  snapToSeat(): void {
+    const l = this.lane;
+    if (!l) return;
+    this.place(l.seat.x, l.seat.z, l.seat.yaw);
+    this.faceYaw = l.seat.yaw;
+    this.laneId = l.furnitureId;
+    this.st = 'seated';
+  }
   update(dt: number, _working: boolean): void {
     const lane = this.lane;
     if (!lane) {
-      this.posted = false;
+      this.st = 'idle'; this.laneId = -1;
       if (this.arrived && this.distTo(this.homeX, this.homeZ) > 0.5) this.moveTo(this.homeX, this.homeZ);
       this.setPose('normal');
       this.step(dt);
       return;
     }
-    const o = lane.operator;
-    if (!this.posted) {
-      if (!this.moving && this.distTo(o.x, o.z) > 0.3) this.moveTo(o.x, o.z);
-      if (!this.moving && this.distTo(o.x, o.z) <= 0.45) this.posted = true;
-    } else if (this.distTo(o.x, o.z) > 0.8) {
-      this.posted = false; // contador foi movido
+    if (lane.furnitureId !== this.laneId) { this.laneId = lane.furnitureId; this.st = 'idle'; }
+    const seat = lane.seat;
+    switch (this.st) {
+      case 'idle': this.moveTo(lane.operator.x, lane.operator.z); this.st = 'toPost'; break;
+      case 'toPost': if (this.arrived) { this.moveTo(seat.x, seat.z, true); this.st = 'toSeat'; } break;
+      case 'toSeat':
+        if (this.arrived || this.distTo(seat.x, seat.z) < 0.15) { this.place(seat.x, seat.z, seat.yaw); this.faceYaw = seat.yaw; this.st = 'seated'; }
+        break;
+      case 'seated':
+        if (this.distTo(seat.x, seat.z) > 0.35) { this.st = 'idle'; break; } // balcão foi movido
+        this.faceYaw = seat.yaw;
+        this.person.seatY = seat.y;
+        this.setPose(lane.scanning ? 'sitScan' : 'sit', lane.scanning);
+        break;
     }
-    if (this.posted) {
-      const q = lane.queue[0];
-      if (q) this.faceTowards(q.x, q.z);
-      this.setPose(lane.serving ? 'scan' : 'normal', lane.serving !== null);
-    } else this.setPose('normal');
+    if (this.st !== 'seated') this.setPose('normal');
     this.step(dt);
   }
 }
 
-type SJob = 'idle' | 'toBox' | 'lift' | 'toShelf' | 'place' | 'toTrash' | 'toss' | 'toStorage' | 'takeStorage';
+type SJob = 'idle' | 'toBox' | 'lift' | 'toShelf' | 'open' | 'place' | 'toTrash' | 'toss' | 'toStorage' | 'takeStorage';
 
 /**
  * Repositor: numa viagem recolhe até `cap` caixas (nível 1: 1, nível 2-3: 2, nível 4+: 3) de produtos diferentes
@@ -172,7 +187,7 @@ export class Stocker extends Staff {
           const b = this.plan.shift()!;
           b.carried = true;
           this.stack.push(b);
-          this.person.setCarryBox(true); this.setPose('carry');
+          this.person.setCarryBox(true); this.person.setCarryOpen(!!b.open && b.units > 0, b.productId); this.setPose('carry');
           this.env.sfx('box', this.x); this.env.changed('sidewalk');
           if (this.plan.length > 0) { this.job = 'toBox'; this.walkToBox(this.plan[0]!); } else this.nextShelf();
         }
@@ -181,9 +196,15 @@ export class Stocker extends Staff {
         if (this.arrived) {
           const f = state.furniture.find((x) => x.id === this.furnId);
           if (f) this.faceTowards(f.x + 0.5, f.z + 0.5);
-          this.job = 'place'; this.timer = Math.max(0.8, safe('employeeSpeed', () => api.employeeSpeed('stocker', this.level), 3));
-          this.setPose('carry', true);
+          // abre a caixa antes de repor (abas abertas, produtos à vista)
+          const b = this.stack[0];
+          if (b && !this.person.isCarryOpen) { this.setOpen(b, true); this.job = 'open'; this.timer = 0.4; this.setPose('carry'); }
+          else { this.job = 'place'; this.timer = this.placeTime(); this.setPose('carry', true); }
         }
+        break;
+      case 'open':
+        this.timer -= dt;
+        if (this.timer <= 0) { this.job = 'place'; this.timer = this.placeTime(); this.setPose('carry', true); }
         break;
       case 'place':
         this.timer -= dt;
@@ -220,7 +241,7 @@ export class Stocker extends Staff {
           }
           this.storePids.length = 0;
           if (this.stack.length > 0) {
-            this.person.setCarryBox(true); this.setPose('carry');
+            this.person.setCarryBox(true); this.person.setCarryOpen(false); this.setPose('carry');
             this.env.sfx('box', this.x); this.env.changed('sidewalk');
             this.nextShelf();
           } else { this.job = 'idle'; this.cooldown = 3; this.storeCool = 10; this.setPose('normal'); }
@@ -273,8 +294,24 @@ export class Stocker extends Staff {
       this.env.sfx('box', this.x); this.env.changed('shelf');
     }
     this.stack.shift();
-    if (b.units <= 0) this.junk.push(b); else this.release(b);
+    if (b.units <= 0) this.junk.push(b);
+    else { this.setOpen(b, false); this.release(b); }
+    // visual: próxima caixa fechada; só vazias = caixa aberta e vazia
+    if (this.stack.length > 0) this.person.setCarryOpen(!!this.stack[0]!.open, this.stack[0]!.productId);
+    else this.person.setCarryOpen(true);
     this.nextShelf();
+  }
+
+  private placeTime(): number { return Math.max(0.8, safe('employeeSpeed', () => api.employeeSpeed('stocker', this.level), 3)); }
+
+  /** Abre/fecha a caixa (api.setBoxOpen) com som e visual. */
+  private setOpen(b: Box, open: boolean): void {
+    const { state } = this.env.ctx;
+    const idx = state.sidewalk.indexOf(b);
+    if (idx >= 0) safe('setBoxOpen', () => api.setBoxOpen(state, idx, open), undefined);
+    this.env.sfx(open ? 'boxOpen' : 'boxClose', this.x);
+    this.person.setCarryOpen(open, b.productId);
+    this.env.changed('sidewalk');
   }
 }
 

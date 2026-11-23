@@ -10,9 +10,13 @@ export interface MenuHooks {
   endDay(): void;
   replayTutorial(): void;
   onStart(): void;
+  /** Fase 3: abrir/fechar a loja (fallback da placa da porta). */
+  toggleStore(): void;
+  tutorialActive(): boolean;
+  skipTutorial(): void;
 }
 
-const EXTRA_KEYS = ['mercadinho:tutorial', 'mercadinho:lastReport', 'mercadinho:daysnap'];
+const EXTRA_KEYS = ['mercadinho:tutorial', 'mercadinho:lastReport', 'mercadinho:daysnap', 'mercadinho:seen', 'mercadinho:autoToday'];
 
 export class Menus {
   private title: HTMLElement | null = null;
@@ -44,23 +48,24 @@ export class Menus {
     if (this.pause || this.title) return;
     if (this.kit.isModalOpen()) return;
     const close = (): void => { this.pause?.remove(); this.pause = null; this.kit.modalClose('pause'); };
-    const ph = this.kit.ctx.clock.phase;
+    const { clock, state, services } = this.kit.ctx;
+    const ph = clock.phase;
+    const tut = this.hooks.tutorialActive();
+    const rep = state.reputation.toFixed(1).replace('.', ',');
     this.pause = h('div', { class: 'mx-modal mx-dim mx-z-menu', role: 'dialog', 'aria-label': 'Menu' },
       h('div', { class: 'menu-card' },
         h('div', { class: 'mx-row' }, h('h2', { style: 'flex:1' }, 'Pausa'), UiKit.closeButton(close)),
+        h('small', { class: 'muted', id: 'pause-info' }, `${state.storeName} · Reputação ${rep} ★ · ${services.npc?.customersInStore() ?? 0} clientes na loja`),
         h('div', { class: 'menu-sub' },
           h('button', { class: 'btn primary block', on: { click: close } }, 'Continuar'),
+          ph === 'prep' || ph === 'open' ? h('button', { class: 'btn accent block', id: 'pause-store', on: { click: () => { close(); this.hooks.toggleStore(); } } },
+            h('span', { html: icon(ph === 'prep' ? 'store' : 'lock', 20) }), ph === 'prep' ? 'Abrir a loja' : 'Fechar a loja') : null,
+          ph === 'report' ? null : h('button', { class: 'btn block', id: 'pause-end', on: { click: () => { close(); this.hooks.endDay(); } } }, h('span', { html: icon('moon', 20) }), 'Terminar o dia'),
           h('button', { class: 'btn block', on: { click: () => this.showOptions() } }, h('span', { html: icon('gear', 20) }), 'Opções'),
-          h('button', { class: 'btn block', on: { click: () => { close(); this.hooks.replayTutorial(); } } }, h('span', { html: icon('bulb', 20) }), 'Rever tutorial'),
-          ph === 'report' ? null : h('button', { class: 'btn block', on: { click: () => void this.confirmEnd(close) } }, h('span', { html: icon('chart', 20) }), 'Encerrar o dia'),
+          h('button', { class: 'btn block', on: { click: () => { close(); if (tut) this.hooks.skipTutorial(); else this.hooks.replayTutorial(); } } }, h('span', { html: icon('bulb', 20) }), tut ? 'Pular tutorial' : 'Rever tutorial'),
           h('button', { class: 'btn danger block', on: { click: () => void this.newGame() } }, 'Novo jogo'))));
     this.layer.appendChild(this.pause);
     this.kit.modalOpen('pause', { pauseClock: true, onEsc: close });
-  }
-
-  private async confirmEnd(close: () => void): Promise<void> {
-    const ok = await this.kit.confirm({ title: 'Encerrar o dia?', text: 'Os clientes que ainda estão na loja vão embora e o relatório do dia será gerado.', ok: 'Encerrar dia' });
-    if (ok) { close(); this.hooks.endDay(); }
   }
 
   showOptions(): void {
