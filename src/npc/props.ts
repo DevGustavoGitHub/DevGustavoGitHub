@@ -133,6 +133,8 @@ export class PayProp {
     this.cardHalo.position.z = -0.003;
     this.group.add(this.card, this.cardHalo);
     this.group.visible = false;
+    this.group.name = 'npc-pay';
+    this.group.userData.npcPay = true;
   }
   /** Mostra notas (cash: `paid` em centavos) ou cartão (variante de cor pela semente). */
   show(method: 'cash' | 'card', paid: number, seed: number): void {

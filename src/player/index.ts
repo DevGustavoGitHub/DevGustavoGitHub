@@ -52,7 +52,7 @@ export default function create(): GameModule {
   const offs: (() => void)[] = [];
 
   // câmera e movimento
-  let yaw = 0, pitch = -0.15;
+  let yaw = 0, pitch = -0.35;
   const pos = { x: 0, z: 0 };
   const vel = new THREE.Vector2();
   let walkDist = 0, stepAcc = 0, bobAmp = 0;

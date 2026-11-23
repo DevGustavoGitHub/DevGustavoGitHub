@@ -44,6 +44,8 @@ export interface WorldService {
   handoffPoint?(counterId: number): THREE.Vector3 | null;
   /** Nova malha de um produto (geometria/material compartilhados) para esteira, cesta e caixa na mão. */
   makeProductMesh?(productId: string): THREE.Object3D;
+  /** FASE 3 (adendo): caixa de papelão animável igual às do chão. `userData.setOpen(t 0..1)`, `userData.setUnits(n)`. Geometria/material compartilhados. */
+  makeBoxMesh?(productId: string, open: boolean, units?: number): THREE.Object3D;
   /** Pontos de interesse para setas do tutorial (mundo). */
   poi?(kind: 'computer' | 'sign' | 'delivery' | 'trash' | 'storageDoor' | 'counter' | 'furniture', id?: number): THREE.Vector3 | null;
 }

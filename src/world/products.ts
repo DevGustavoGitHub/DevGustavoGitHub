@@ -426,3 +426,6 @@ export function makeBoxMesh(pid: string, open: boolean, units?: number): THREE.G
   setOpen(open ? 1 : 0);
   return root;
 }
+
+/** Geometria (cache) da caixa fechada/aberta com etiqueta — prévia de `build:box`. */
+export { boxVisual as boxGeometry };

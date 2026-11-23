@@ -1,22 +1,32 @@
 /**
- * Módulo de UI (DOM/CSS): HUD, tablet de gestão, minigame de checkout, relatório de fim de dia, menus e tutorial.
- * Eventos: ver docs/CONTRACTS.md. Só muda estado via sim/api.ts (e economy.ts para licenças/preços).
+ * Módulo de UI (DOM/CSS) — Fase 3: HUD no layout de referência, atalho de carrinho, missões com setas, comemoração de
+ * nível, noite + "Terminar o dia" + resumo, Mercado com carrinho e estoque de montagem, painéis de troco/maquininha,
+ * aviso de orientação. Os controles de jogo (joystick, ação, sair do caixa...) são do `player`.
+ * Eventos: ver docs/CONTRACTS.md (seções "Fase 3" e "Fase 3 — ui"). Só muda estado via sim/api.ts (e economy.ts).
  */
 import type { GameContext, GameModule } from '../core/module';
+import * as api from '../sim/api';
 import { Bankruptcy } from './bankruptcy';
+import { Celebrate, LevelSheet } from './celebrate';
 import { Checkout, type CheckoutRequest } from './checkout';
 import { h } from './dom';
 import { Hud } from './hud';
 import { UiKit } from './kit';
 import { Menus } from './menu';
+import { Missions } from './missions';
+import { Night } from './night';
+import { PayPanel, type PayRequest } from './pay';
 import { Report } from './report';
+import { RotateWarning } from './rotate';
 import { baseCss } from './styles-base';
 import { playCss } from './styles-play';
 import { phase2Css, scaleFonts } from './styles-phase2';
+import { phase3Css } from './styles-phase3';
 import { tabletCss } from './styles-tablet';
 import { Tablet } from './tablet';
-import { Tutorial } from './tutorial';
 import { parseAutoToast, recordToday } from './tablet/auto';
+import { cart } from './tablet/cart';
+import { unseenTabs } from './unlocks';
 
 export default function create(): GameModule {
   let kit: UiKit;
@@ -24,34 +34,61 @@ export default function create(): GameModule {
   let hud: Hud;
   let tablet: Tablet;
   let checkout: Checkout;
+  let pay: PayPanel;
   let report: Report;
   let menus: Menus;
-  let tutorial: Tutorial;
+  let missions: Missions;
+  let night: Night;
+  let celebrate: Celebrate;
+  let levelSheet: LevelSheet;
   let bankrupt: Bankruptcy;
-  let pending: CheckoutRequest | null = null;
-  let available = false;
+  let rotate: RotateWarning;
+  let legacyPending: CheckoutRequest | null = null;
+  let payPending: PayRequest | null = null;
+  let lvlT = 0, dotT = 0;
   let keyHandler: ((e: KeyboardEvent) => void) | null = null;
   const offs: (() => void)[] = [];
 
-  const tryOpenPending = (): void => {
-    if (!pending || checkout.isOpen || kit.isModalOpen()) return;
-    const req = pending;
-    pending = null;
-    checkout.open(req);
-  };
-  const syncAttend = (): void => hud.setAttend((available || pending !== null) && !checkout.isOpen);
-
+  /** "Terminar o dia": confirma se ainda há clientes (ou se a loja segue aberta) e abre o resumo. */
   const endDay = (): void => {
-    if (report.isOpen) return;
-    const { phase } = kit.ctx.clock;
-    if (phase === 'report') return;
-    if (phase === 'open' || phase === 'prep') {
-      void kit.confirm({ title: 'Encerrar o dia agora?', text: 'Os clientes que ainda estão na loja vão embora e o relatório do dia será gerado.', ok: 'Encerrar dia' })
-        .then((ok) => { if (ok) report.show(); });
-      return;
-    }
-    void kit.confirm({ title: 'Encerrar o dia?', text: 'Ainda pode haver clientes na loja. Eles vão embora e o relatório será gerado.', ok: 'Encerrar dia' })
-      .then((ok) => { if (ok) report.show(); });
+    const { clock, services } = kit.ctx;
+    if (report.isOpen || clock.phase === 'report') return;
+    const n = services.npc?.customersInStore() ?? 0;
+    if (clock.phase === 'closing' && n === 0) { report.show(); return; }
+    const text = n > 0
+      ? `Ainda ${n > 1 ? `há ${n} clientes` : 'há 1 cliente'} na loja. Se terminar agora, ${n > 1 ? 'eles vão' : 'ele vai'} embora sem comprar.`
+      : clock.phase === 'prep' ? 'A loja nem abriu hoje. O dia termina sem vendas e as despesas fixas são cobradas.'
+        : 'A loja ainda está aberta. Os clientes param de entrar e o resumo do dia é gerado.';
+    void kit.confirm({ title: 'Terminar o dia?', text, ok: 'Terminar o dia' }).then((ok) => { if (ok) report.show(); });
+  };
+
+  /** Placa da porta (`store:sign`, do player) e menu de pausa: abre; fecha com confirmação; à noite, orienta. */
+  const storeSign = (): void => {
+    const { clock } = kit.ctx;
+    if (clock.phase === 'prep') { clock.openStore(); kit.sfx('sign'); kit.toast('Loja aberta! Os clientes já podem entrar.', 'good'); }
+    else if (clock.phase === 'open') {
+      void kit.confirm({ title: 'Fechar a loja agora?', text: 'Nenhum cliente novo vai entrar. Quem já está na loja termina as compras.', ok: 'Fechar loja' })
+        .then((ok) => { if (ok && clock.phase === 'open') { clock.closeStore(); kit.sfx('sign'); } });
+    } else if (clock.phase === 'closing') kit.toast('A loja está fechada. Toque em "Terminar o dia" quando quiser.', 'info');
+  };
+
+  const tryPay = (): void => {
+    if (!payPending || pay.isOpen || kit.isModalOpen()) return;
+    const r = payPending;
+    payPending = null;
+    pay.open(r);
+  };
+  const tryLegacy = (): void => {
+    if (!legacyPending || checkout.isOpen || kit.isModalOpen()) return;
+    const r = legacyPending;
+    legacyPending = null;
+    checkout.open(r);
+  };
+  /** A sim não emite eventos: a UI consome os níveis novos e emite `levelUp` (o audio toca 'levelup'). */
+  const pollLevels = (): void => {
+    let lv: number[] = [];
+    try { lv = api.consumeLevelUps(kit.ctx.state); } catch { /* sim em desenvolvimento */ }
+    for (const l of lv) kit.ctx.bus.emit('levelUp', { level: l });
   };
 
   return {
@@ -59,7 +96,7 @@ export default function create(): GameModule {
     init(ctx: GameContext) {
       kit = new UiKit(ctx);
       const style = h('style', { id: 'mx-style' });
-      style.textContent = scaleFonts(baseCss + tabletCss + playCss + phase2Css);
+      style.textContent = scaleFonts(baseCss + tabletCss + playCss + phase2Css + phase3Css);
       document.head.appendChild(style);
       root = h('div', { class: 'mx-root', style: 'pointer-events:none' });
       ctx.uiRoot.appendChild(root);
@@ -67,55 +104,65 @@ export default function create(): GameModule {
       kit.settings.bindRoot(root);
 
       hud = new Hud(kit, root, {
-        openTablet: () => tablet.open(),
+        openTablet: (tab) => tablet.open(tab),
         openMenu: () => menus.showPause(),
-        endDay,
-        attend: () => {
-          if (pending) { if (kit.isModalOpen()) return; const r = pending; pending = null; checkout.open(r); syncAttend(); }
-          else kit.toast('Vá até o caixa para atender o cliente.', 'info');
-        },
+        openLevel: () => levelSheet.open(),
       });
       tablet = new Tablet(kit, root);
       bankrupt = new Bankruptcy(kit, root);
       tablet.guard = () => bankrupt.check();
-      tablet.onOpen = () => tutorial.noteTabletOpened();
+      tablet.onSeen = () => hud.setDot(unseenTabs(ctx.state).size > 0);
       checkout = new Checkout(kit, root);
+      pay = new PayPanel(kit, root);
       report = new Report(kit, root);
       report.afterNext = () => { bankrupt.check(); };
-      tutorial = new Tutorial(kit, hud);
+      missions = new Missions(kit, hud, root);
+      night = new Night(kit, hud, root, missions, endDay);
+      celebrate = new Celebrate(kit, root);
+      levelSheet = new LevelSheet(kit, root, (tab) => tablet.open(tab));
       menus = new Menus(kit, root, {
         endDay,
-        replayTutorial: () => tutorial.start(true),
-        onStart: () => { kit.settings.emit(); if (!bankrupt.check()) tutorial.start(); },
+        replayTutorial: () => missions.start(true),
+        onStart: () => { kit.settings.emit(); if (!bankrupt.check()) missions.start(); },
+        toggleStore: storeSign,
+        tutorialActive: () => missions.active,
+        skipTutorial: () => { missions.finish(false); kit.toast('Tutorial pulado. Você pode revê-lo no menu.', 'info'); },
       });
+      rotate = new RotateWarning(kit, root);
 
       const bus = ctx.bus;
       offs.push(
-        bus.on('storeEmpty', () => { if (!report.isOpen) report.show(); }),
-        bus.on('checkoutAvailable', (p: { customerId: number | null }) => {
-          available = p.customerId !== null;
-          if (!available && !checkout.isOpen) pending = null;
-          syncAttend();
+        bus.on('ui:openTablet', (p?: { tab?: string; productId?: string }) => tablet.open(p?.tab, { productId: p?.productId })),
+        bus.on('store:sign', storeSign),
+        bus.on('storeClosing', () => night.show()),
+        bus.on('storeEmpty', () => night.empty()), // o resumo NÃO abre sozinho (Fase 3)
+        bus.on('dayStarted', () => { night.hide(); report.snapshotDay(); }),
+        bus.on('levelUp', (p?: { level: number }) => { if (p) celebrate.push(p.level); }),
+        bus.on('checkoutAvailable', (p?: { customerId: number | null }) => { if (p?.customerId === null && !checkout.isOpen) legacyPending = null; }),
+        bus.on('checkoutRequest', (req?: PayRequest) => {
+          if (!req) return;
+          if (req.stage === 'pay') { payPending = req; tryPay(); return; }
+          legacyPending = req; // fluxo antigo (bipar no painel + pagar)
+          tryLegacy();
         }),
-        bus.on('checkoutRequest', (req: CheckoutRequest) => {
-          pending = req;
-          tryOpenPending();
-          syncAttend();
-        }),
-        bus.on('dayStarted', () => report.snapshotDay()),
         bus.on('quality:auto', (p: { quality: 'low' | 'medium' | 'high' }) => kit.settings.adopt({ quality: p.quality })),
-        // Pedido automático feito pelo npc (toast "Pedido automático: 3 cx Arroz, 2 cx Feijão"): guarda para a aba Automático.
+        // Pedido automático do npc ("Pedido automático: 3 cx Arroz, 2 cx Feijão"): guarda para a aba Automático.
         bus.on('toast', (p: { text: string }) => {
           const items = parseAutoToast(p.text, kit.ctx.state);
           if (items.length) recordToday(kit.ctx.state.day, items);
         }),
       );
       keyHandler = (e: KeyboardEvent): void => {
-        if (e.key === 'Escape') kit.escape();
+        if (e.key === 'Escape') { kit.escape(); return; }
+        const t = e.target as HTMLElement | null;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+        if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !kit.isModalOpen()) tablet.open('market');
       };
       window.addEventListener('keydown', keyHandler);
+      (window as unknown as { __ui?: unknown }).__ui = { kit, hud, tablet, pay, report, celebrate, missions, night, cart, levelSheet, endDay, storeSign };
 
       report.snapshotDay();
+      hud.setDot(unseenTabs(ctx.state).size > 0);
       kit.settings.emit();
       menus.showTitle();
       ctx.bus.emit('toast', { text: `Bem-vindo à ${ctx.state.storeName}!`, kind: 'info' });
@@ -124,12 +171,22 @@ export default function create(): GameModule {
       hud.update(dt);
       tablet.update(dt);
       checkout.update(dt);
-      tutorial.update(dt);
-      if (pending) { tryOpenPending(); syncAttend(); }
+      pay.update(dt);
+      missions.update(dt);
+      celebrate.update();
+      night.sync();
+      if (payPending) tryPay();
+      if (legacyPending) tryLegacy();
+      lvlT += dt;
+      if (lvlT >= 0.25) { lvlT = 0; pollLevels(); }
+      dotT += dt;
+      if (dotT >= 1) { dotT = 0; hud.setDot(unseenTabs(kit.ctx.state).size > 0); }
     },
     dispose() {
       offs.forEach((f) => f());
       if (keyHandler) window.removeEventListener('keydown', keyHandler);
+      missions.dispose();
+      rotate.dispose();
       root?.remove();
       document.getElementById('mx-style')?.remove();
     },

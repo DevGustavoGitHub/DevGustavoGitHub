@@ -74,7 +74,7 @@ export function marketTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
       h('div', { class: 'cart-h' }, h('span', null, 'Item'), h('span', null, 'Preço'), h('span', null, 'Unid.')),
       h('div', { class: 'cart-lines' }, lines.length ? lines : h('div', { class: 'cart-empty' }, 'Vazio. Toque em Adicionar nos cartões.')),
       h('div', { class: 'cart-total' }, h('span', null, 'Total'), h('b', { id: 'cart-total' }, money(total))),
-      poor && cart.length ? h('div', { class: 'cart-msg' }, `Faltam ${money(total - s.money)}`) : null,
+      ...(poor && cart.length ? [h('div', { class: 'cart-msg' }, `Faltam ${money(total - s.money)}`)] : []),
       h('div', { class: 'cart-act' },
         h('button', { class: 'cart-buy', id: 'cart-buy', disabled: !cart.length || poor, on: { click: () => { if (buyCart(kit, () => tab.close())) tab.refresh(); } } }, 'Comprar'),
         h('button', { class: 'cart-clear', 'aria-label': 'Limpar carrinho', disabled: !cart.length, html: icon('trash', 22), on: { click: () => { clearCart(); kit.sfx('pop'); renderCart(); } } }, 'Limpar')));

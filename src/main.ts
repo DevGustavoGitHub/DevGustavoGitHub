@@ -19,7 +19,8 @@ const kv: KV = {
 const app = document.getElementById('app')!;
 // Qualidade inicial (opção salva ou padrão por dispositivo); o world ajusta o resto em tempo real. Antialias só vale no carregamento.
 const tier0 = TIERS[initialTier()];
-const renderer = new THREE.WebGLRenderer({ antialias: tier0.antialias, powerPreference: 'high-performance' });
+// stencil: contorno de destaque do world (silhueta de móveis fundidos); custo desprezível.
+const renderer = new THREE.WebGLRenderer({ antialias: tier0.antialias, powerPreference: 'high-performance', stencil: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, tier0.pixelRatio));
 renderer.shadowMap.enabled = true;
 app.appendChild(renderer.domElement);

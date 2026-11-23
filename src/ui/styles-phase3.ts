@@ -200,6 +200,9 @@ export const phase3Css = `
 @keyframes mx-focus{50%{outline-color:transparent}}
 @media (min-width:1000px) and (min-height:600px){.t3{grid-template-columns:76px minmax(0,1fr)}.rail-btn{width:68px;font-size:10.5px}.rail-btn.on{width:76px}}
 
+/* tiles de produto com ícone procedural (Preços/Automático) */
+.ptile.pt3{background:#fff;padding:2px;box-shadow:inset 0 0 0 2px var(--tc)}.ptile.pt3 svg{width:40px;height:40px}
+
 /* botões de compra no estilo da referência */
 .abtn{min-height:48px;width:100%;border:0;border-radius:10px;font-weight:900;font-size:15px;text-transform:uppercase;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 10px;
   box-shadow:0 4px 0 rgba(0,0,0,.3);letter-spacing:.01em;line-height:1.1;text-align:center}

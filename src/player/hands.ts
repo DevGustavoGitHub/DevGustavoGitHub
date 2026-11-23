@@ -11,7 +11,7 @@ import { productById } from '../sim/catalog';
 export const BOX_W = 0.52, BOX_H = 0.34, BOX_D = 0.42;
 const T = 0.012; // parede do papelão
 const FT = 0.01; // espessura das abas
-const OPEN_OUTER = 2.2, OPEN_INNER = 2.0; // ângulo das abas abertas (rad)
+const OPEN_OUTER = 3.75, OPEN_INNER = 3.6; // abas abertas dobram para fora e para baixo (rad)
 const OPEN_TIME = 0.35;
 const C_OUT = new THREE.Color('#c8955a'), C_IN = new THREE.Color('#8f6436'), C_RIM = new THREE.Color('#e0b67e');
 const CAT_COLOR: Record<string, string> = {
@@ -170,7 +170,7 @@ function fallbackProduct(pid: string, own: { dispose(): void }[]): THREE.Object3
   geo.computeBoundingBox();
   const bb = geo.boundingBox!;
   const pos = geo.getAttribute('position');
-  const base = new THREE.Color(color), band = base.clone().lerp(new THREE.Color('#ffffff'), 0.65), top = base.clone().multiplyScalar(0.8);
+  const base = new THREE.Color(color), band = base.clone().lerp(new THREE.Color('#ffffff'), 0.4), top = base.clone().multiplyScalar(0.8);
   const col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
     const v = (pos.getY(i) - bb.min.y) / Math.max(1e-6, bb.max.y - bb.min.y);
@@ -435,8 +435,9 @@ export class HeldView {
   constructor(scene: THREE.Scene, private readonly tpls: ProductTemplates) {
     this.rig.name = 'player-hands';
     this.rig.renderOrder = 1000;
-    this.hold.position.set(0, -0.4, -0.6);
-    this.stack.rotation.x = 0.46;
+    this.hold.position.set(0, -0.47, -0.64);
+    this.stack.rotation.x = 0.62;
+    this.stack.scale.setScalar(1.08);
     this.hold.add(this.stack);
     this.stack.add(this.dolly);
     const g = geos();
@@ -516,8 +517,8 @@ export class HeldView {
     const r = ease(this.raise);
     this.hold.position.set(
       Math.sin(this.bob) * 0.008 * walk + this.sx,
-      -0.4 + Math.abs(Math.cos(this.bob)) * -0.008 * walk + breathe + this.sy - (1 - r) * 0.32 - this.lower * 0.5,
-      -0.6,
+      -0.47 + Math.abs(Math.cos(this.bob)) * -0.008 * walk + breathe + this.sy - (1 - r) * 0.32 - this.lower * 0.5,
+      -0.64,
     );
     this.rig.position.copy(cam.position);
     this.rig.quaternion.copy(cam.quaternion);
