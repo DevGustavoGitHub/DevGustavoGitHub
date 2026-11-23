@@ -64,7 +64,7 @@ export class Missions {
         auto: () => s.sidewalk.length > 0, tablet: { tab: 'market', text: 'Missão: toque em Adicionar num produto e depois em Comprar.' } },
       { id: 'pick', text: 'Pegue a caixa na área de entrega', goal: 1, icon: () => productSvg({ category: 'mercearia', color: '#c9955c', shape: 'box' }, 44),
         target: () => this.boxTarget(), auto: () => (ctx.services.player?.carrying ?? null) !== null },
-      { id: 'stock', text: 'Abra a caixa e reponha a prateleira', goal: 1, icon: () => furnitureSvg('shelf', 44), target: () => this.shelfTarget() },
+      { id: 'stock', text: 'Abra a caixa e reponha a prateleira', goal: 2, icon: () => furnitureSvg('shelf', 44), target: () => this.shelfTarget() },
       { id: 'open', text: 'Abra a loja tocando na placa da porta', goal: 1, icon: () => upgradeSvg('capacity', 44), target: poi('sign'),
         auto: () => ctx.clock.phase === 'open' || ctx.clock.phase === 'closing' },
       { id: 'sell3', text: 'Sente no caixa e conclua 3 compras!', goal: 3, icon: bagIcon, target: counter, needsCustomers: true },
@@ -76,7 +76,10 @@ export class Missions {
     bus.on('player:action', (p?: { kind?: string }) => {
       const k = p?.kind;
       const id = this.step?.id;
-      if ((id === 'pick' && (k === 'pickBox' || k === 'takeBox')) || (id === 'stock' && k === 'placeUnits') || (id === 'trash' && k === 'discardBox')) this.progress(1);
+      // "Abra a caixa e reponha": abrir conta 1/2; repor conclui (a caixa pode já estar aberta)
+      if (id === 'stock' && k === 'openBox') { if (this.n < 1) this.progress(1); return; }
+      if (id === 'stock' && k === 'placeUnits') { this.progress(2); return; }
+      if ((id === 'pick' && (k === 'pickBox' || k === 'takeBox')) || (id === 'trash' && k === 'discardBox')) this.progress(1);
     });
     bus.on('stateChanged', (p?: { what?: string; boxes?: number }) => {
       if (this.step?.id === 'buy' && p?.what === 'cart' && (p.boxes ?? 0) > 0) this.progress(1);

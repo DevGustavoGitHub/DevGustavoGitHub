@@ -106,7 +106,7 @@ export default function create(): GameModule {
       hud = new Hud(kit, root, {
         openTablet: (tab) => tablet.open(tab),
         openMenu: () => menus.showPause(),
-        openLevel: () => levelSheet.open(),
+        openLevel: () => { levelSheet.open(); hud.setDot(unseenTabs(ctx.state).size > 0); },
       });
       tablet = new Tablet(kit, root);
       bankrupt = new Bankruptcy(kit, root);

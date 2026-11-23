@@ -57,6 +57,9 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   check(`[${tag}] HUD: sem botões antigos (interação/atender/loja/tablet)`, (await page.locator('.interact-btn, .attend-btn, .store-btn, .fab').count()) === 0);
   const cr = await rect(page, '.cart-fab');
   check(`[${tag}] HUD: atalho de carrinho embaixo à esquerda (≥48px)`, !!cr && cr.x < w * 0.4 && cr.b > h * 0.75 && cr.w >= 48 && cr.h >= 48, JSON.stringify(cr));
+  // não cobre a área do joystick do player (centro x 96–150, y = altura − 90..122, raio 58)
+  const jd = cr ? Math.hypot(Math.max(0, cr.x - 150), Math.max(0, (h - 90) - cr.b, cr.y - (h - 90))) : 0;
+  check(`[${tag}] atalho de carrinho ao lado do joystick, sem cobri-lo`, jd > 58, String(jd));
   const hb = await rect(page, '.hud3'), bd = await rect(page, '.day-badge');
   check(`[${tag}] HUD: selo do dia no centro do topo`, !!bd && Math.abs(bd.x + bd.w / 2 - w / 2) < 6 && bd.y < 20, JSON.stringify(bd));
   check(`[${tag}] missão inicial visível (0/1)`, /0\/1/.test(await page.locator('.mcard.mission').innerText()));
@@ -194,6 +197,9 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
     await page.evaluate(() => window.__game.bus.emit('player:action', { kind: 'pickBox', productId: 'arroz' }));
     await page.waitForTimeout(150);
     check('[missões] "Abra a caixa e reponha a prateleira"', /Abra a caixa e reponha a prateleira/.test(await mtx()));
+    await page.evaluate(() => window.__game.bus.emit('player:action', { kind: 'openBox', productId: 'arroz' }));
+    await page.waitForTimeout(150);
+    check('[missões] abrir a caixa conta 1/2', /1\/2/.test(await mtx()));
     await page.evaluate(() => window.__game.bus.emit('player:action', { kind: 'placeUnits', productId: 'arroz' }));
     await page.waitForTimeout(150);
     check('[missões] abrir a loja na placa', /placa/.test(await mtx()));

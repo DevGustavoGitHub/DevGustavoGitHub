@@ -31,7 +31,7 @@ export const phase3Css = `
 .mx-root.has-card .mx-top .toasts{padding-right:min(340px,42vw)}
 
 /* atalho do carrinho (ao lado do joystick do player) */
-.cart-fab{position:absolute;left:calc(var(--sa-l) + 184px);bottom:calc(var(--sa-b) + 14px);z-index:32;width:56px;height:56px;border-radius:50%;
+.cart-fab{position:absolute;left:calc(var(--sa-l) + 220px);bottom:calc(var(--sa-b) + 14px);z-index:32;width:56px;height:56px;border-radius:50%;
   border:3px solid rgba(255,255,255,.9);background:rgba(29,42,60,.84);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:var(--sh-1);pointer-events:auto}
 .cart-fab:active{transform:scale(.94)}
 .cart-fab .dot{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:#f0302a;border:2px solid #fff}
