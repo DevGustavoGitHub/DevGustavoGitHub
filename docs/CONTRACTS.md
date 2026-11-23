@@ -120,3 +120,90 @@ Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, 
 - `PlayerService.carryingAll: Box[]` — todas as caixas carregadas (base → topo, LIFO); `carrying` é o topo. Capacidade: `api.carryCapacity(state)` (1; 3 com dolly).
 - O toast do pedido automático segue o formato `Pedido automático: N cx Nome, ...` — a aba "Automático" da UI o interpreta (mudança de texto exige mudar `src/ui/tablet/auto.ts`).
 - Expansão máxima é `MAX_EXPANSION` (core/layout.ts), hoje 6.
+
+---
+
+# Fase 3 — 1ª pessoa, caixa sentado, visual de referência (PROTOCOLO OBRIGATÓRIO)
+
+Plano e prints de referência: `docs/PHASE3.md`. Tipos novos: `src/core/services.ts` (PickInfo, PickService,
+campos opcionais de WorldService/PlayerService), `src/core/outline.ts` (contorno verde compartilhado),
+`src/sim/api.ts` (seção "FASE 3").
+
+## Donos (mudanças de propriedade desta fase)
+- **player** é dono de TODOS os controles de jogo na tela: joystick, área de olhar, mira, botão de ação (com rótulo),
+  arremessar, largar, "Sair do caixa". A UI **remove** seu botão contextual antigo (`interact:prompt` deixa de ter
+  botão na UI) e o botão "Atender cliente".
+- **world** é dono do modo de posicionamento (móveis e caixas) e da barra ⟲ COLOCAR ⟳ / CANCELAR (centro, embaixo).
+- **ui** é dono do HUD, do atalho de carrinho (embaixo à esquerda, ao lado do joystick), de todos os painéis
+  (tablet, troco, maquininha, comemoração, resumo, noite, missões) e do aviso de orientação.
+- Camadas (z-index): cena < HUD (20) < controles do player (30) < barra de posicionamento do world (35) < painéis/modais (60+).
+
+## Interação em 1ª pessoa (pick)
+- O world mantém `pickGroup` (proxies invisíveis: `material.visible=false`, raycast funciona) com `userData.pick: PickInfo`
+  para: móveis (`furniture`, id=furnitureId), caixas no chão (`box`, id=índice em state.sidewalk), sujeira (`dirt`,
+  id=índice em state.dirt), lixeira (`trash`), placa da porta (`sign`), computador (`computer`), assento do caixa
+  (`seat`, id=furnitureId do balcão), porta do depósito (`storageDoor`). Atualiza quando o estado muda.
+- O player faz raycast do **centro da tela** contra `pickGroup` (alcance ~2,6 m; placa/computador até ~3,5 m),
+  chama `world.highlight(pick|null)` quando o alvo muda e define o rótulo do botão de ação:
+  | Alvo | Condição | Ação (rótulo) |
+  |---|---|---|
+  | box | mãos com espaço | Pegar |
+  | furniture shelf/fridge/freezer | carregando caixa do mesmo produto | Repor (segurar repete, 1 un. a cada ~0,12 s) |
+  | furniture shelf/fridge/freezer | sem caixa compatível | Preço → `ui:openTablet {tab:'prices', productId}`; secundário: Mover → `build:edit` |
+  | furniture rack (depósito) | com caixa / sem caixa | Guardar / Retirar |
+  | trash | caixa vazia na mão | Jogar fora |
+  | dirt | — | Limpar (animação ~0,9 s de esfregão na tela, depois `api.cleanDirt`) |
+  | sign | — | Abrir loja / Fechar loja → `store:sign` |
+  | computer | — | Usar computador → `ui:openTablet {}` |
+  | seat | balcão sem funcionário | Sentar no caixa |
+  | storageDoor | depósito trancado | Depósito (licença) → `ui:openTablet {tab:'services'}` |
+- Carregando caixa e sem alvo: botões extras **Largar** (→ `build:box {boxIndex}`) e **Arremessar**.
+- Arremesso: o player simula a trajetória (gravidade, chão y=0, paredes por `isWalkable`). Se cair na lixeira
+  (raio ~0,8 m de `world.trashBin()`) e estiver vazia → `api.discardBox`; cheia na lixeira → cai ao lado (`api.dropBox`)
+  com aviso; senão `api.dropBox(x,z,rot)` no ponto de queda (ajustado para ponto caminhável).
+- Após cada ação bem-sucedida o player emite `player:action` (para missões e áudio) e `stateChanged`.
+
+## Caixa sentado (sequência)
+1. Player: ação "Sentar no caixa" → câmera vai para `world.seatPose(counterId)`; `PlayerService.mode='seated'`,
+   `seatedAt=counterId` e `atCounter=counterId`; olhar limitado; movimento travado; botão laranja **Sair do caixa**.
+   Toques no canvas fazem raycast contra os objetos registrados em `services.pick` (PickService do player).
+2. Npc: cliente da frente chega ao balcão onde `seatedAt===counterId` (ou com funcionário caixa) e coloca os produtos
+   na esteira: malhas de `world.makeProductMesh(productId)` em `world.beltSlots(counterId)`, com `addOutline` e
+   `services.pick.add(mesh, onTap)`.
+3. Cada toque bipa um item (`sfx scan`, item some/vai para a sacola) e o npc emite `checkout:display`
+   `{counterId, mode:'items', lastItem:{name, price}, total}` (total acumulado).
+4. Tudo bipado → cliente estende **notas** (leque) ou **cartão** em `world.handoffPoint(counterId)`, tocável.
+5. Toque no dinheiro/cartão → npc emite `checkoutRequest {customerId, counterId, items, total, method, paid, stage:'pay'}`.
+6. UI abre só o painel de pagamento (à direita): troco (5 notas + 5 moedas, desfazer/OK/C) ou maquininha
+   (1–9, apagar, 0, vírgula, OK/C), emite `checkout:display` com `mode:'cash', received, total, change, giving`
+   ou `mode:'card', total, typed`, e no fim `checkoutResult {customerId, ok, speed, mistakes}` (speed = só o pagamento).
+7. Npc: `api.completeSale` (speed combinando bipagem + pagamento), emite `checkout:done`, cliente sai, próximo avança;
+   `checkout:display {mode:'idle'}`. O world desenha o monitor do balcão a partir do último `checkout:display`.
+- Funcionário caixa: fica sentado no balcão dele e faz tudo sozinho (mesmo visual, sem painéis).
+
+## Posicionamento em 1ª pessoa (world)
+- Início: `build:start {type, productId?, variant?, stockIndex?}` (montar do estoque se `stockIndex`), `build:edit {furnitureId}`
+  ou `build:box {boxIndex}`. **Sem `camera:override`**: o jogador continua andando e olhando.
+- A prévia segue o raio do centro da câmera até o chão (móveis na grade com `canPlace`; caixas livres em ponto caminhável),
+  verde/vermelha (caixa: ciano/vermelho). Barra: ⟲ COLOCAR ⟳ e CANCELAR (+ VENDER e GUARDAR no modo editar).
+- Confirmar: estoque → `api.placeFromStock`; editar → `moveFurniture`; caixa → `api.dropBox`; legado → `buyFurniture`.
+- Emite `build:state {active, kind:'furniture'|'box'}` no início e no fim (o player esconde os botões de ação), e `build:end`.
+
+## Dia e noite
+- 21:00 (`storeClosing`): sem clientes novos. A UI mostra o aviso de noite e o botão **Terminar o dia**.
+  **O relatório não abre sozinho em `storeEmpty`**: só ao tocar Terminar o dia (com confirmação se ainda houver clientes).
+- Abrir/fechar a loja: placa da porta (`store:sign`, a UI decide e confirma o fechamento antecipado) e menu de pausa.
+
+## Eventos novos da Fase 3
+| Evento | Payload | Emissor → ouvintes |
+|---|---|---|
+| `player:action` | `{kind:'pickBox'\|'placeUnits'\|'discardBox'\|'dropBox'\|'throwBox'\|'storeBox'\|'takeBox'\|'clean'\|'sit'\|'stand'\|'useComputer'\|'sign'\|'move', productId?, furnitureId?}` | player → ui (missões), audio |
+| `checkout:display` | `{counterId, mode:'idle'\|'items'\|'cash'\|'card', lastItem?:{name,price}, total?, received?, change?, giving?, typed?}` | npc e ui → world (monitor) |
+| `checkout:done` | `{customerId, counterId, total, tip, method, happy:boolean}` | npc → ui, audio |
+| `store:sign` | – | player → ui |
+| `ui:openTablet` | `{tab?:string, productId?:string}` | player, world, ui → ui |
+| `build:box` | `{boxIndex:number}` | player → world |
+| `build:state` | `{active:boolean, kind:'furniture'\|'box'}` | world → player, ui |
+| `checkoutRequest` (estendido) | `+ {counterId, stage:'pay'}` | npc → ui |
+| `build:start` (estendido) | `+ {stockIndex?:number}` | ui → world |
+| `sfx` (novos nomes) | `'throw'\|'mop'\|'sit'\|'stand'\|'place'\|'sign'\|'night'\|'celebrate'` | qualquer → audio |

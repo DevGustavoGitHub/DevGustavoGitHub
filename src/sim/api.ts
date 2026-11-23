@@ -566,3 +566,31 @@ export function topProducts(state: StoreState, days = 7): { productId: string; u
   }
   return [...acc.values()].sort((a, b) => b.profit - a.profit || b.units - a.units);
 }
+
+/* =====================================================================
+ * FASE 3 — assinaturas CONGELADAS (o agente `sim` implementa; demais programam contra elas).
+ * StoreState ganha (sim cria defaults + migração): furnitureStock. UpgradeId ganhará 'tipjar' | 'capacity'.
+ * ===================================================================== */
+const p3 = (n: string): never => { throw new Error(`NOT_IMPLEMENTED: ${n}`); };
+
+/** Linha do carrinho do Mercado. produto: id do catálogo, qty = nº de CAIXAS. móvel: id = FurnitureType, qty = unidades. */
+export interface CartLine { kind: 'product' | 'furniture'; id: string; qty: number; variant?: string }
+/** Total do carrinho a preço de hoje (produtos: caixas × boxSize × atacado; móveis: custo do catálogo). */
+export function cartTotal(state: StoreState, lines: CartLine[]): Cents { return p3('cartTotal'); }
+/**
+ * Compra atômica (tudo ou nada; valida licença, nível e dinheiro). Produtos viram caixas na calçada
+ * (entrega instantânea); móveis vão para o estoque de montagem (`furnitureStock`), montados depois em 1ª pessoa.
+ */
+export function checkoutCart(state: StoreState, lines: CartLine[]): { cost: Cents; boxes: number; furniture: number } { return p3('checkoutCart'); }
+export interface StockedFurniture { type: FurnitureType; variant?: string }
+export function furnitureStock(state: StoreState): StockedFurniture[] { return p3('furnitureStock'); }
+/** Monta um móvel do estoque (sem cobrar de novo). Mesma validação de canPlace. Remove do estoque. */
+export function placeFromStock(state: StoreState, index: number, x: number, z: number, rot: 0 | 90 | 180 | 270, productId?: string): Furniture { return p3('placeFromStock'); }
+/** Desmonta um móvel montado de volta para o estoque (alternativa a vender); estoque exposto vai para depósito/calçada. */
+export function storeFurniture(state: StoreState, id: number): void { p3('storeFurniture'); }
+/** Larga a caixa no chão (metros, posição livre): carried=false, define x/z/rot. Valida ponto caminhável (loja, depósito ou calçada). */
+export function dropBox(state: StoreState, boxIndex: number, x: number, z: number, rot?: number): void { p3('dropBox'); }
+/** Máximo de clientes simultâneos (cresce com expansão e com a melhoria 'capacity'). O npc usa como limite. */
+export function customerCapacity(state: StoreState): number { return p3('customerCapacity'); }
+/** Tipo de móvel que expõe o produto (para o ícone "móvel exigido" no Mercado). */
+export function furnitureForProduct(productId: string): FurnitureType { return p3('furnitureForProduct'); }

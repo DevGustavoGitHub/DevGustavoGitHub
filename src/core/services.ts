@@ -3,6 +3,16 @@ import type { Box } from '../sim/state';
 
 export interface Vec2 { x: number; z: number }
 
+/**
+ * FASE 3 — alvo de interação em 1ª pessoa. O world cria proxies invisíveis (raycast) em `pickGroup`,
+ * cada um com `userData.pick: PickInfo`. O player faz raycast do centro da tela contra eles.
+ */
+export interface PickInfo {
+  kind: 'furniture' | 'box' | 'dirt' | 'trash' | 'sign' | 'computer' | 'seat' | 'storageDoor';
+  /** furnitureId (furniture/seat), índice em state.sidewalk (box), índice em state.dirt (dirt). */
+  id?: number;
+}
+
 /** Publicado pelo módulo `world`. Usado por npc/player. */
 export interface WorldService {
   /** Caminho A* na grade (centros de tile, em tiles). null se inalcançável. Evita móveis/paredes. */
@@ -20,6 +30,22 @@ export interface WorldService {
   door(): Vec2;
   /** Coloca sujeira visual (a lógica fica em state.dirt). */
   group: THREE.Group;
+
+  /* ---------- FASE 3 (opcionais até o world implementar; consumidores devem tolerar ausência) ---------- */
+  /** Proxies invisíveis para raycast, cada filho com userData.pick: PickInfo. Atualizado pelo world. */
+  pickGroup?: THREE.Group;
+  /** Contorno verde no objeto do alvo (null remove). Chamado pelo player quando o alvo muda. */
+  highlight?(pick: PickInfo | null): void;
+  /** Pose da câmera sentada no caixa (coordenadas de mundo): posição dos olhos e ponto para onde olha. */
+  seatPose?(counterId: number): { pos: THREE.Vector3; look: THREE.Vector3 } | null;
+  /** Posições de mundo na esteira, na ordem cliente → scanner (onde o npc pousa os produtos). */
+  beltSlots?(counterId: number): THREE.Vector3[];
+  /** Ponto de mundo onde o cliente estende dinheiro/cartão para o jogador sentado. */
+  handoffPoint?(counterId: number): THREE.Vector3 | null;
+  /** Nova malha de um produto (geometria/material compartilhados) para esteira, cesta e caixa na mão. */
+  makeProductMesh?(productId: string): THREE.Object3D;
+  /** Pontos de interesse para setas do tutorial (mundo). */
+  poi?(kind: 'computer' | 'sign' | 'delivery' | 'trash' | 'storageDoor' | 'counter' | 'furniture', id?: number): THREE.Vector3 | null;
 }
 
 /** Publicado pelo módulo `player`. */
@@ -35,6 +61,19 @@ export interface PlayerService {
   atCounter: number | null;
   /** Personaliza cores do avatar (hex CSS). Opcional. */
   setAppearance?(c: Partial<Record<'skin' | 'shirt' | 'apron' | 'cap' | 'pants', string>>): void;
+  /** FASE 3: caixa onde o jogador está SENTADO (null = em pé). `atCounter` passa a espelhar este valor. */
+  seatedAt?: number | null;
+  /** FASE 3: modo atual da câmera/controle. */
+  mode?: 'walk' | 'seated' | 'build';
+}
+
+/**
+ * FASE 3 — publicado pelo `player`. Objetos tocáveis enquanto sentado no caixa (itens na esteira,
+ * dinheiro/cartão na mão do cliente). O player faz raycast do toque contra eles e chama `onTap`.
+ */
+export interface PickService {
+  add(obj: THREE.Object3D, onTap: () => void): void;
+  remove(obj: THREE.Object3D): void;
 }
 
 /** Publicado pelo módulo `npc`. */
@@ -52,6 +91,7 @@ export interface AudioService {
 }
 
 export interface Services {
+  pick?: PickService;
   audio?: AudioService;
   world?: WorldService;
   player?: PlayerService;

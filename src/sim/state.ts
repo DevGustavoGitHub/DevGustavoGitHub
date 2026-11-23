@@ -23,6 +23,8 @@ export interface Box {
   z?: number;
   /** true enquanto o jogador (ou repositor) a carrega. */
   carried?: boolean;
+  /** FASE 3: rotação no chão (radianos), definida ao largar/posicionar a caixa. */
+  rot?: number;
 }
 
 export interface Employees {
