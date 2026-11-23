@@ -628,7 +628,8 @@ export default function create(): GameModule {
   const throwTop = (): void => {
     if (!canAct() || !carried.length) return;
     const b = top()!;
-    const cam = ctx.camera;
+    desiredPose(); // pose atual do jogador (não a do último quadro desenhado)
+    const cam = { position: wantPos, quaternion: wantQuat };
     const o = new THREE.Vector3(0, -0.34, -0.62).applyQuaternion(cam.quaternion).add(cam.position);
     const fwd = tv.set(0, 0, -1).applyQuaternion(cam.quaternion);
     const bin = binPos();

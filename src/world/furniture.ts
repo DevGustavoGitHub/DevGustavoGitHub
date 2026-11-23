@@ -160,7 +160,7 @@ function freezer(f: Furniture): Batch {
 const C_BODY = matte(0x7d93c4), C_PANEL = matte(0xd5dae3), C_RED = matte(0xc9252c), C_TOP = matte(0xeef0f3), C_PLINTH = matte(0x3a3e48);
 export const BELT_Y = 0.882;
 /** Monitor (pose local no balcão): tela w×h a `cy` acima da mesa, virada para o operador. */
-export const MONITOR = { x: 0.74, y: 0.92, z: -0.12, ry: Math.atan2(0.5 - 0.74, -1.42 + 0.12), tilt: -0.08, w: 0.56, h: 0.36, cy: 0.41, cz: 0.008 };
+export const MONITOR = { x: 0.74, y: 0.92, z: -0.12, ry: Math.atan2(0.5 - 0.74, -1.42 + 0.12), tilt: -0.08, w: 0.56, h: 0.36, cy: 0.41, cz: 0.014 };
 /** Maquininha de cartão: face (tela + teclas) w×h no topo do corpo inclinado. */
 export const CARDPAD = { x: 0.16, y: 0.92, z: -0.6, ry: Math.atan2(0.5 - 0.16, -1.42 + 0.6), tilt: 0.45, lift: 0.075, w: 0.088, h: 0.176 };
 /** Assento do operador (local) e pose dos olhos sentado. */

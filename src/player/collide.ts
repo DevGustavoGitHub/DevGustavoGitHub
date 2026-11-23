@@ -132,7 +132,7 @@ export class Collider {
       if (tx >= r.x0 && tx < r.x1 && tz >= r.z0 && tz < r.z1) return FURN_H[f.type] ?? 1.5;
     }
     const b = storeBounds(this.state().expansion);
-    if (z >= b.depth) return 1.2; // props da calçada (árvore, poste, lixeira)
+    if (z >= b.depth) return 0; // props finos da calçada (poste, árvore): o tile inteiro bloquearia demais o arremesso
     return 99;
   }
 

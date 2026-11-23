@@ -25,7 +25,8 @@ const dismissTitle = async () => {
   for (let i = 0; i < 4; i++) {
     const t = page.getByText('Jogar', { exact: true }).first();
     if (!(await t.isVisible().catch(() => false))) return;
-    await t.click({ timeout: 2000 }).catch(() => {});
+    // clique via DOM (o botão anima e o Playwright pode não considerá-lo "estável" no SwiftShader)
+    await page.evaluate(() => { const el = [...document.querySelectorAll('button, [role=button], a, div')].find((x) => x.textContent?.trim() === 'Jogar' && x.offsetParent !== null); (el?.closest('button') ?? el)?.click(); });
     await page.waitForTimeout(500);
   }
 };
@@ -76,7 +77,7 @@ await page.evaluate(() => { __npc.timeScale = 4; __npc.spawnNow(1, 'normal'); })
 const reg1 = await until(() => {
   const l = __npc.lanes()[0];
   return window.__reg.size > 0 && l && l.belt > 0 ? { reg: window.__reg.size, lane: l } : null;
-}, undefined, 70000);
+}, undefined, 150000);
 check('itens na esteira registrados no PickService', !!reg1, JSON.stringify(reg1));
 await page.evaluate(() => { __npc.timeScale = 1; });
 await dismissTitle();

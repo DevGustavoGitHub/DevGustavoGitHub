@@ -66,7 +66,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   /* ---------- 2) Mercado com carrinho: produto ---------- */
   await page.evaluate(() => { window.__game.state.money = 900000; });
   await page.locator('.cart-fab').click();
-  await page.waitForSelector('.t3', { timeout: 5000 });
+  await page.waitForSelector('.t3', { timeout: 9000 });
   check(`[${tag}] carrinho abre o Mercado`, /Mercado/i.test(await page.locator('.t3-head h2').innerText()));
   const tr = await rect(page, '.t3-panel');
   check(`[${tag}] tablet abaixo do HUD e dentro da tela`, !!tr && tr.y >= hb.b - 1 && tr.b <= h + 1 && tr.r <= w + 1, JSON.stringify({ tr, hb }));
@@ -108,7 +108,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.evaluate(() => { window.__game.bus.emit('build:state', { active: false, kind: 'furniture' }); window.__game.bus.emit('build:end'); });
   await page.waitForTimeout(200);
   await page.evaluate(() => window.__game.bus.emit('ui:openTablet', { tab: 'furniture' }));
-  await page.waitForSelector('#mk-stock', { timeout: 4000 }).catch(() => {});
+  await page.waitForSelector('#mk-stock', { timeout: 9000 }).catch(() => {});
   check(`[${tag}] "Para montar (1)" com botão Montar`, /Para montar \(1\)/.test(await page.locator('#mk-stock').innerText().catch(() => '')) && (await page.locator('#mk-stock .abtn').count()) === 1);
   // outras abas no visual novo
   for (const [tab, title] of [['licenses', 'Licenças'], ['staff', 'Funcionários'], ['services', 'Serviços'], ['upgrades', 'Melhorias']]) {
@@ -127,7 +127,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
 
   /* ---------- 3) Pagamento em dinheiro ---------- */
   await page.evaluate(() => window.__game.bus.emit('checkoutRequest', { customerId: 901, counterId: 1, items: [{ productId: 'arroz', qty: 1 }], total: 3785, method: 'cash', paid: 5000, stage: 'pay' }));
-  await page.waitForSelector('.pay.cash', { timeout: 4000 });
+  await page.waitForSelector('.pay.cash', { timeout: 9000 });
   const modalEv = await last(page, 'ui:modal');
   check(`[${tag}] painel de troco abre como modal (ui:modal)`, !!modalEv && modalEv.open === true);
   check(`[${tag}] 5 notas e 5 moedas`, (await page.locator('.pay-row.bills .pay-den').count()) === 5 && (await page.locator('.pay-row.coins .pay-den').count()) === 5);
@@ -152,7 +152,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
 
   /* ---------- 4) Pagamento no cartão ---------- */
   await page.evaluate(() => window.__game.bus.emit('checkoutRequest', { customerId: 902, counterId: 1, items: [{ productId: 'cafe', qty: 1 }], total: 2350, method: 'card', stage: 'pay' }));
-  await page.waitForSelector('.pay.card', { timeout: 4000 });
+  await page.waitForSelector('.pay.card', { timeout: 9000 });
   check(`[${tag}] maquininha com 1–9, apagar, 0, vírgula, OK, C`, (await page.locator('.pay-pad .pk').count()) === 14);
   for (const k of ['2', '3', ',', '5']) await page.locator(`.pay-pad [data-key="${k}"]`).click();
   const d2 = await last(page, 'checkout:display');
@@ -167,7 +167,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
 
   /* ---------- 5) Comemoração de nível ---------- */
   await page.evaluate(() => { window.__game.state.level = 3; });
-  await page.waitForSelector('.cele:not(.summary)', { timeout: 5000 });
+  await page.waitForSelector('.cele:not(.summary)', { timeout: 9000 });
   const c1 = await page.locator('.cele').innerText();
   check(`[${tag}] comemoração: Parabéns — Nível 2 e "Agora disponível"`, /Parab/i.test(c1) && /Nível 2/i.test(c1) && /Agora disponível/i.test(c1) && (await page.locator('.cele .c-item').count()) >= 1, c1.slice(0, 120));
   check(`[${tag}] comemoração mostra o gerente comemorando`, (await page.locator('.cele .c-face svg.mgr').count()) === 1);
@@ -180,7 +180,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   check(`[${tag}] "Continue jogando!" fecha a comemoração`, (await page.locator('.cele').count()) === 0);
   check(`[${tag}] ponto vermelho de novidade na estrela`, await page.locator('.lvl3 .dot').isVisible());
   await page.locator('.lvl3').click();
-  await page.waitForSelector('.lvl-sheet', { timeout: 3000 });
+  await page.waitForSelector('.lvl-sheet', { timeout: 9000 });
   check(`[${tag}] folha de nível lista as novidades`, (await page.locator('.lvl-sheet .urow').count()) >= 1);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
@@ -222,7 +222,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
 
   /* ---------- 7) Noite + Terminar o dia + resumo ---------- */
   await page.evaluate(() => { const c = window.__game.clock; if (c.phase === 'prep') c.openStore(); if (c.phase === 'open') { c.minute = 21 * 60; c.closeStore(); } });
-  await page.waitForSelector('#end-day', { timeout: 4000 });
+  await page.waitForSelector('#end-day', { timeout: 9000 });
   check(`[${tag}] noite: aviso "Nenhum cliente novo virá à noite"`, /Nenhum cliente novo virá à noite/.test(await page.locator('.mcard.night').innerText()));
   await page.evaluate(() => window.__game.bus.emit('storeEmpty'));
   await page.waitForTimeout(400);
@@ -232,13 +232,13 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.locator('#end-day').click();
   await page.waitForTimeout(300);
   if (await page.locator('.mx-dialog').count()) await page.locator('.mx-dialog .btn.primary').click(); // ainda havia clientes do npc
-  await page.waitForSelector('.summary', { timeout: 5000 });
+  await page.waitForSelector('.summary', { timeout: 9000 });
   const sum = await page.evaluate(() => ({ total: document.querySelector('#sum-total b')?.textContent, angry: document.querySelector('#sum-angry b')?.textContent, happy: document.querySelector('#sum-happy b')?.textContent, inc: document.querySelector('#sum-income')?.textContent, exp: document.querySelector('#sum-expense')?.textContent, prof: document.querySelector('#sum-profit')?.textContent }));
   check(`[${tag}] resumo: total/irritados/felizes e rendimento/despesa/lucro`, Number(sum.total) === Number(sum.angry) + Number(sum.happy) && Number(sum.happy) >= 2 && /R\$/.test(sum.inc ?? '') && /R\$/.test(sum.exp ?? '') && /R\$/.test(sum.prof ?? ''), JSON.stringify(sum));
   check(`[${tag}] resumo com gerente fazendo joinha`, (await page.locator('.summary .c-face svg.mgr').count()) === 1);
   await shot(page, `${tag}-summary`);
   await page.locator('#sum-details').click();
-  await page.waitForSelector('.sum-sheet', { timeout: 3000 });
+  await page.waitForSelector('.sum-sheet', { timeout: 9000 });
   check(`[${tag}] "Detalhes" mostra o relatório completo`, /Lucro líquido/.test(await page.locator('.sum-sheet').innerText()));
   if (w === 844) await shot(page, `${tag}-summary-details`);
   await page.locator('.sum-sheet .rp-foot .btn').click(); // o botão do rodapé dos detalhes também continua

@@ -54,7 +54,15 @@ const drag = async (x0, y0, x1, y1, steps = 8, hold = 0) => {
 const until = (fn, arg, ms = 4000) => page.waitForFunction(fn, arg, { timeout: ms, polling: 50 }).then(() => true, () => false);
 const frames = (n = 4) => page.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r() : requestAnimationFrame(f)); f(); }), n);
 const center = async (sel) => { const b = await page.locator(sel).first().boundingBox(); return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null; };
-const tapSel = async (sel) => { const c = await center(sel); if (!c) return false; await page.touchscreen.tap(c.x, c.y); await page.waitForTimeout(120); return true; };
+const tapSel = async (sel) => {
+  const c = await center(sel);
+  if (!c) return false;
+  const cover = await page.evaluate(([s, x, y]) => { const e = document.elementFromPoint(x, y); return e && !e.closest(s) ? `${e.tagName}.${typeof e.className === 'string' ? e.className : ''}` : ''; }, [sel, c.x, c.y]);
+  if (cover) console.log(`WARN ${sel} coberto por ${cover}`);
+  await page.touchscreen.tap(c.x, c.y);
+  await page.waitForTimeout(120);
+  return true;
+};
 const holdSel = async (sel, ms) => { const c = await center(sel); if (!c) return false; await touch('touchStart', [c]); await page.waitForTimeout(ms); await touch('touchEnd', []); await page.waitForTimeout(80); return true; };
 const evs = (n) => page.evaluate((k) => window.__ev.filter((e) => e.n === k).map((e) => e.p), n);
 const clearEv = () => page.evaluate(() => { window.__ev.length = 0; });
@@ -231,7 +239,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('caixa cheia na lixeira cai ao lado (dropBox) com aviso', !!full && !full.carried && full.d > 0.4 && full.d < 2.2 && (await evs('toast')).length > 0, JSON.stringify(full));
   await place(6, 6.5, 0, -0.55);
   await giveBox('cafe', 4, false);
-  await page.waitForTimeout(200);
+  await frames(3);
   await page.evaluate(() => __player.throwBox());
   await until(() => __player.flying() === 0, null, 6000);
   await page.waitForTimeout(150);
@@ -245,21 +253,25 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await closeModals();
   await place(6, 7.5, 0, -0.3);
   await giveBox('arroz', 5, false);
+  const idx = await page.evaluate(() => __game.state.sidewalk.length - 1);
   await clearEv();
   await tapSel('.pl-drop .pl-btn');
   await until(() => window.__ev.some((e) => e.n === 'build:state' && e.p?.active) || !__player.svc.carrying, null, 3000);
   const bb = await evs('build:box');
-  const idx = await page.evaluate(() => __game.state.sidewalk.findIndex((b) => b.productId === 'arroz' && b.units === 5));
   check('Largar emite build:box com o índice da caixa', bb.length === 1 && bb[0].boxIndex === idx, JSON.stringify(bb));
   const st = await evs('build:state');
   if (st.some((e) => e.active)) {
     check('durante a prévia os botões de ação somem', !(await page.locator('.pl-acts').isVisible()));
-    const btn = page.getByText(/^COLOCAR$/i).first();
-    if (await btn.count()) await btn.click({ timeout: 1500 }).catch(() => {}); else await page.keyboard.press('Enter');
-    await until(() => !__player.svc.carrying, null, 3000);
+    await page.evaluate(() => __player.look(__player.cam().yaw, -0.75)); // prévia no chão logo à frente
+    await page.waitForTimeout(1200);
+    const clicked = await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.offsetParent && /COLOCAR/i.test(x.textContent)); b?.click(); return !!b; });
+    if (!clicked) await page.keyboard.press('Enter');
+    await until(() => !__player.svc.carrying, null, 4000);
   }
   const d = await page.evaluate(() => { const b = __game.state.sidewalk.find((x) => x.productId === 'arroz' && x.units === 5); return b ? { carried: !!b.carried, x: b.x, z: b.z } : null; });
   check(`caixa largada no chão (${st.some((e) => e.active) ? 'prévia do world' : 'fallback à frente'})`, !!d && !d.carried && Number.isFinite(d.x) && !(await page.evaluate(() => !!__player.svc.carrying)), JSON.stringify(d));
+  if (await page.evaluate(() => __player.svc.mode === 'build')) { await page.keyboard.press('Escape'); await until(() => __player.svc.mode !== 'build', null, 3000); }
+  await dropAll();
 }
 
 // 9) limpar: esfregão ~0,9 s e depois api.cleanDirt
@@ -298,7 +310,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('sentado: mode=seated, seatedAt=atCounter=balcão', s.mode === 'seated' && s.seatedAt === cid && s.atCounter === cid, JSON.stringify(s));
   check('sentado: botão "Sair do caixa" visível; joystick e ação ocultos', await page.locator('.pl-exit').isVisible() && !(await page.locator('.pl-acts').isVisible()) && !(await page.locator('.pl-joy').isVisible()));
   check('sfx sit + player:action sit', (await evs('sfx')).some((e) => e.name === 'sit') && (await evs('player:action')).some((e) => e.kind === 'sit' && e.furnitureId === cid));
-  await drag(560, 110, 60, 110, 12); await drag(560, 110, 60, 110, 12); // longe do botão "Sair do caixa"
+  await drag(520, 250, 40, 250, 12); await drag(520, 250, 40, 250, 12); // longe do botão "Sair do caixa" e dos painéis da UI
   await frames();
   const sy = await page.evaluate(() => __player.cam().seatYaw);
   check('olhar sentado limitado a ±60°', Math.abs(sy) <= Math.PI / 3 + 1e-6 && Math.abs(sy) > 0.9, sy.toFixed(3));
@@ -329,6 +341,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await closeModals();
   await clearEv();
   const run = async (pick, want) => {
+    await closeModals(); // a UI real abre o tablet (modal) em ui:openTablet
     await page.evaluate((p) => __player.forceTarget(p), pick);
     await until((w) => __player.actions().primary?.label === w, want, 2000);
     const a = await act();
@@ -337,12 +350,12 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
     return a.primary?.label === want;
   };
   check('placa (loja fechada) → "Abrir loja" → store:sign', await run({ kind: 'sign' }, 'Abrir loja') && (await evs('store:sign')).length === 1);
-  await page.evaluate(() => { if (__game.clock.phase !== 'prep') { __game.clock.phase = 'prep'; } });
   check('computador → "Usar computador" → ui:openTablet {}', await run({ kind: 'computer' }, 'Usar computador') && (await evs('ui:openTablet')).some((e) => !e.tab));
   const locked = await page.evaluate(() => !__game.state.storageUnlocked);
   if (locked) check('depósito trancado → ui:openTablet {tab:services}', await run({ kind: 'storageDoor' }, 'Depósito (licença)') && (await evs('ui:openTablet')).some((e) => e.tab === 'services'));
   const f = await shelfOf('feijao');
   check('prateleira sem caixa → "Preço" → ui:openTablet prices', await run({ kind: 'furniture', id: f.id }, 'Preço') && (await evs('ui:openTablet')).some((e) => e.tab === 'prices' && e.productId === 'feijao'));
+  await closeModals();
   await page.evaluate((id) => __player.forceTarget({ kind: 'furniture', id }), f.id);
   await until(() => __player.actions().secondary === 'Mover', null, 2000);
   await frames(2);

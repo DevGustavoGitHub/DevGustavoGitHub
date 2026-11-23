@@ -35,9 +35,8 @@ try {
   // fecha o menu inicial/pausa da UI se estiver aberto (o teste dirige o world por eventos)
   const closeMenus = async () => {
     for (let i = 0; i < 3; i++) {
-      const open = await page.evaluate(() => !!document.querySelector('.modal-open'));
+      const open = await page.evaluate(() => { const b = document.querySelector('.menu-btns button'); if (b) b.click(); return !!b; });
       if (!open) return;
-      await page.locator('.menu-btns button').first().click({ timeout: 2000 }).catch(() => {});
       await page.waitForTimeout(300);
     }
   };

@@ -70,7 +70,7 @@ export class Picks {
     this.group.name = 'pickGroup';
     this.fx.name = 'highlight';
     const uniforms = (grow: number, bias: number): Record<string, THREE.IUniform> => ({ uColor: { value: new THREE.Color(OUTLINE_GREEN) }, uGrow: { value: grow }, uBias: { value: bias } });
-    const sMat = new THREE.ShaderMaterial({ uniforms: uniforms(0, 0.04), vertexShader: VERT, fragmentShader: FRAG, colorWrite: false, depthWrite: false });
+    const sMat = new THREE.ShaderMaterial({ uniforms: uniforms(0, 0.17), vertexShader: VERT, fragmentShader: FRAG, colorWrite: false, depthWrite: false });
     sMat.stencilWrite = true; sMat.stencilRef = 1; sMat.stencilFunc = THREE.AlwaysStencilFunc; sMat.stencilZPass = THREE.ReplaceStencilOp;
     const hMat = new THREE.ShaderMaterial({ uniforms: uniforms(0.009, stencil ? 0.12 : 0), vertexShader: VERT, fragmentShader: FRAG, depthWrite: false, side: stencil ? THREE.FrontSide : THREE.BackSide });
     if (stencil) { hMat.stencilWrite = true; hMat.stencilRef = 1; hMat.stencilFunc = THREE.NotEqualStencilFunc; hMat.stencilZPass = THREE.KeepStencilOp; }
