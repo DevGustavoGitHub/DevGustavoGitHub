@@ -23,11 +23,17 @@ page.on('console', (m) => { if (m.type() === 'error' && !/404|favicon|MIME/.test
 await page.goto(URL);
 await page.waitForFunction(() => window.__game && window.__player, null, { timeout: 30000 });
 await page.waitForTimeout(900);
-for (let i = 0; i < 6; i++) { // fecha título/tutorial/modais da UI
-  if (!(await page.evaluate(() => __player.svc.inputLocked))) break;
-  await page.getByText(/^(Jogar|Continuar|Começar|Pular|Fechar|OK|Entendi)$/i).first().click({ timeout: 1200 }).catch(() => {});
-  await page.waitForTimeout(500);
-}
+await page.evaluate(() => window.__world?.setTier?.('low')); // SwiftShader: mais quadros por segundo
+/** Fecha título/tutorial/painéis modais da UI que estiverem abertos. */
+const closeModals = async () => {
+  for (let i = 0; i < 10; i++) {
+    if (!(await page.evaluate(() => __player.svc.inputLocked))) return;
+    const btn = page.locator('button:visible', { hasText: /Jogar|Continuar|Começar|Pular|Fechar|Entendi|Vamos|OK/i }).first();
+    if (await btn.count()) await btn.click({ timeout: 1500 }).catch(() => {}); else await page.keyboard.press('Escape');
+    await page.waitForTimeout(600);
+  }
+};
+await closeModals();
 if (await page.evaluate(() => __player.svc.inputLocked)) { console.log('WARN modal da UI não fechou; liberando input para o teste'); await page.evaluate(() => __game.bus.emit('ui:modal', { open: false })); }
 await page.evaluate(() => {
   __game.clock.paused = true;
@@ -44,6 +50,8 @@ const drag = async (x0, y0, x1, y1, steps = 8, hold = 0) => {
   if (hold) await page.waitForTimeout(hold);
   await touch('touchEnd', []);
 };
+/** Espera uma condição no navegador (o jogo pode rodar a poucos quadros por segundo no SwiftShader). */
+const until = (fn, arg, ms = 4000) => page.waitForFunction(fn, arg, { timeout: ms, polling: 50 }).then(() => true, () => false);
 const frames = (n = 4) => page.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r() : requestAnimationFrame(f)); f(); }), n);
 const center = async (sel) => { const b = await page.locator(sel).first().boundingBox(); return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null; };
 const tapSel = async (sel) => { const c = await center(sel); if (!c) return false; await page.touchscreen.tap(c.x, c.y); await page.waitForTimeout(120); return true; };
@@ -74,7 +82,8 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const sw = f.rot === 90 || f.rot === 270, cx = f.x + (sw ? 0.5 : 1), cz = f.z + (sw ? 1 : 0.5);
   await place(cx + fx * 1.9, cz + fz * 1.9);
   await page.evaluate(([x, z]) => __player.lookAt(x, 0.95, z), [cx, cz]);
-  await page.waitForTimeout(350);
+  await until((id) => __player.target()?.kind === 'furniture' && __player.target()?.id === id, f.id, 3000);
+  await page.waitForTimeout(100);
 };
 
 // 1) câmera 1ª pessoa
@@ -95,7 +104,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await frames();
   const b = await page.evaluate(() => __player.cam());
   check('arrastar à direita da tela gira a câmera (yaw e pitch)', b.yaw - a.yaw > 0.2 && b.pitch > a.pitch, `dyaw=${(b.yaw - a.yaw).toFixed(2)} dpitch=${(b.pitch - a.pitch).toFixed(2)}`);
-  await drag(640, 60, 640, 380, 10); await drag(640, 60, 640, 380, 10); await drag(640, 60, 640, 380, 10);
+  for (let i = 0; i < 4; i++) await drag(640, 120, 640, 385, 10);
   await frames();
   const c = await page.evaluate(() => __player.cam());
   check('pitch limitado', c.pitch >= -1.36 && c.pitch < -1.2, c.pitch.toFixed(2));
@@ -120,16 +129,17 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 4) alvo + rótulo: caixa no chão → "Pegar" (anel verde), pegar pelo botão
 {
+  await closeModals();
   const p = await place(6, 7.5, 0, 0);
   await page.evaluate(([x, z]) => { __game.state.sidewalk.push({ productId: 'feijao', units: 12, x, z, open: false }); __game.bus.emit('stateChanged', { what: 'sidewalk' }); __player.lookAt(x, 0.15, z); }, [p.x, p.z - 1.4]);
-  await page.waitForTimeout(450);
+  await until(() => __player.target()?.kind === 'box');
   const t = await page.evaluate(() => __player.target());
   check('mira na caixa do chão vira alvo "box"', t?.kind === 'box', JSON.stringify(t));
   check('rótulo "Pegar" no botão de ação', (await label()) === 'Pegar' && (await page.locator('.pl-main.ready').count()) === 1);
   await shot('p1-alvo-caixa');
   await clearEv();
   await tapSel('.pl-act-btn');
-  await page.waitForTimeout(350);
+  await until(() => !!__player.svc.carrying && __player.held().boxes === 1);
   const s = await page.evaluate(() => ({ pid: __player.svc.carrying?.productId, held: __player.held() }));
   check('pegar caixa (toque no botão de ação)', s.pid === 'feijao' && s.held.boxes === 1 && s.held.open[0] === 0, JSON.stringify(s));
   const pa = await evs('player:action');
@@ -139,25 +149,26 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 5) repor exige caixa aberta: "Abrir caixa" → abre (anima) → segurar "Repor"
 {
+  await closeModals();
   const f = await shelfOf('feijao');
   await aimFurniture(f);
   const a0 = await act();
   check('móvel do produto com caixa fechada → "Abrir caixa"', a0.primary?.label === 'Abrir caixa', JSON.stringify(a0));
   await clearEv();
   await tapSel('.pl-act-btn');
-  await page.waitForTimeout(500);
+  await until(() => __player.held().open[0] === 1);
   const o = await page.evaluate(() => ({ open: __player.svc.carrying?.open, held: __player.held() }));
   check('caixa abre (Box.open + abas animadas + produtos visíveis)', o.open === true && o.held.open[0] === 1 && o.held.items > 0, JSON.stringify(o));
   check('sfx boxOpen + player:action openBox', (await evs('sfx')).some((e) => e.name === 'boxOpen') && (await evs('player:action')).some((e) => e.kind === 'openBox'));
   check('ação vira "Repor"', (await act()).primary?.label === 'Repor');
   const before = await page.evaluate(() => __game.state.shelf.feijao ?? 0);
   await shot('p2-caixa-aberta-repor');
-  await holdSel('.pl-act-btn', 1000);
+  await holdSel('.pl-act-btn', 1600);
   const after = await page.evaluate(() => ({ shelf: __game.state.shelf.feijao ?? 0, units: __player.svc.carrying?.units }));
-  check('segurar "Repor" repete (1 un. a cada ~0,12 s)', after.shelf - before >= 5 && after.shelf - before <= 10, `${before} → ${after.shelf}`);
+  check('segurar "Repor" repete (1 un. a cada ~0,12 s de jogo)', after.shelf - before >= 4 && after.shelf - before <= 14, `${before} → ${after.shelf}`);
   check('player:action placeUnits por unidade', (await evs('player:action')).filter((e) => e.kind === 'placeUnits').length === after.shelf - before);
   await tapSel('.pl-box .pl-btn');
-  await page.waitForTimeout(550);
+  await until(() => __player.held().open[0] === 0);
   const cl = await page.evaluate(() => ({ open: __player.svc.carrying?.open, held: __player.held() }));
   check('botão "Fechar caixa" fecha (abas fechadas, sem produtos à vista)', cl.open === false && cl.held.open[0] === 0 && cl.held.items === 0, JSON.stringify(cl));
   check('sfx boxClose', (await evs('sfx')).some((e) => e.name === 'boxClose'));
@@ -169,6 +180,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 6) "Outro produto" e abastecer móvel esgotado (assignProduct + placeUnits)
 {
+  await closeModals();
   await giveBox('arroz', 10, true);
   await aimFurniture(await shelfOf('feijao'));
   const a = await act();
@@ -181,7 +193,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await aimFurniture(cafe);
   const b = await act();
   check('móvel com produto esgotado e categoria aceita → "Repor"', b.primary?.label === 'Repor', JSON.stringify(b));
-  await holdSel('.pl-act-btn', 500);
+  await holdSel('.pl-act-btn', 900);
   const r = await page.evaluate((id) => ({ pid: __game.state.furniture.find((x) => x.id === id)?.productId, shelf: __game.state.shelf.arroz ?? 0 }), cafe.id);
   check('assignProduct trocou o produto do móvel e repôs', r.pid === 'arroz' && r.shelf > s0, JSON.stringify(r));
   await dropAll();
@@ -189,20 +201,21 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 7) arremessar: vazia na lixeira → descartada; cheia → cai ao lado com aviso; no chão → dropBox
 {
+  await closeModals();
   const bin = await page.evaluate(() => __game.services.world?.trashBin() ?? { x: 10.5, z: 11.5 });
   const stand = await place(bin.x - 2.3, bin.z, -Math.PI / 2, 0);
   await giveBox('macarrao', 0, true);
   await page.evaluate(([x, z]) => __player.lookAt(x, 0.55, z), [bin.x, bin.z]);
-  await page.waitForTimeout(400);
+  await until(() => __player.target()?.kind === 'trash' && __player.actions().primary?.label === 'Jogar fora');
   const t = await page.evaluate(() => ({ t: __player.target(), a: __player.actions() }));
   check('mira na lixeira com caixa vazia → "Jogar fora"', t.t?.kind === 'trash' && t.a.primary?.label === 'Jogar fora', JSON.stringify(t));
   await clearEv();
   const n0 = await page.evaluate(() => __game.state.sidewalk.length);
   await tapSel('.pl-throw .pl-btn');
-  await page.waitForTimeout(250);
-  check('caixa voando (malha própria)', (await page.evaluate(() => __player.flying())) === 1);
+  check('caixa voando (malha própria)', await until(() => __player.flying() === 1, null, 2000));
   await shot('p4-arremesso');
-  await page.waitForTimeout(1500);
+  await until(() => __player.flying() === 0, null, 6000);
+  await page.waitForTimeout(150);
   const n1 = await page.evaluate(() => __game.state.sidewalk.length);
   check('caixa vazia arremessada na lixeira é descartada', n1 === n0 - 1 && (await evs('player:action')).some((e) => e.kind === 'discardBox'), `${n0} → ${n1}`);
   check('sfx throw no início', (await evs('sfx')).some((e) => e.name === 'throw'));
@@ -210,15 +223,18 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await page.evaluate(([x, z]) => __player.lookAt(x, 0.55, z), [bin.x, bin.z]);
   await page.waitForTimeout(300);
   await clearEv();
+  await until(() => __player.target()?.kind === 'trash', null, 2000);
   await page.evaluate(() => __player.throwBox());
-  await page.waitForTimeout(1700);
+  await until(() => __player.flying() === 0, null, 6000);
+  await page.waitForTimeout(150);
   const full = await page.evaluate(([bx, bz]) => { const b = __game.state.sidewalk.find((x) => x.productId === 'macarrao' && x.units === 6); return b ? { carried: !!b.carried, d: Math.hypot(b.x - bx, b.z - bz), ok: __game.state.sidewalk.includes(b) } : null; }, [bin.x, bin.z]);
   check('caixa cheia na lixeira cai ao lado (dropBox) com aviso', !!full && !full.carried && full.d > 0.4 && full.d < 2.2 && (await evs('toast')).length > 0, JSON.stringify(full));
   await place(6, 6.5, 0, -0.55);
   await giveBox('cafe', 4, false);
   await page.waitForTimeout(200);
   await page.evaluate(() => __player.throwBox());
-  await page.waitForTimeout(1700);
+  await until(() => __player.flying() === 0, null, 6000);
+  await page.waitForTimeout(150);
   const fl = await page.evaluate(() => { const b = __game.state.sidewalk.find((x) => x.productId === 'cafe' && x.units === 4); return b ? { carried: !!b.carried, x: b.x, z: b.z, can: __game.services.world ? true : true } : null; });
   check('arremesso no chão larga a caixa onde caiu (api.dropBox)', !!fl && !fl.carried && fl.z < 6.5 && fl.z > 2.5, JSON.stringify(fl));
   check('player:action throwBox', (await evs('player:action')).some((e) => e.kind === 'throwBox'));
@@ -226,11 +242,12 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 8) largar: build:box {boxIndex} → prévia do world (confirma) ou fallback à frente
 {
+  await closeModals();
   await place(6, 7.5, 0, -0.3);
   await giveBox('arroz', 5, false);
   await clearEv();
   await tapSel('.pl-drop .pl-btn');
-  await page.waitForTimeout(600);
+  await until(() => window.__ev.some((e) => e.n === 'build:state' && e.p?.active) || !__player.svc.carrying, null, 3000);
   const bb = await evs('build:box');
   const idx = await page.evaluate(() => __game.state.sidewalk.findIndex((b) => b.productId === 'arroz' && b.units === 5));
   check('Largar emite build:box com o índice da caixa', bb.length === 1 && bb[0].boxIndex === idx, JSON.stringify(bb));
@@ -239,7 +256,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
     check('durante a prévia os botões de ação somem', !(await page.locator('.pl-acts').isVisible()));
     const btn = page.getByText(/^COLOCAR$/i).first();
     if (await btn.count()) await btn.click({ timeout: 1500 }).catch(() => {}); else await page.keyboard.press('Enter');
-    await page.waitForTimeout(700);
+    await until(() => !__player.svc.carrying, null, 3000);
   }
   const d = await page.evaluate(() => { const b = __game.state.sidewalk.find((x) => x.productId === 'arroz' && x.units === 5); return b ? { carried: !!b.carried, x: b.x, z: b.z } : null; });
   check(`caixa largada no chão (${st.some((e) => e.active) ? 'prévia do world' : 'fallback à frente'})`, !!d && !d.carried && Number.isFinite(d.x) && !(await page.evaluate(() => !!__player.svc.carrying)), JSON.stringify(d));
@@ -247,32 +264,36 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 9) limpar: esfregão ~0,9 s e depois api.cleanDirt
 {
+  await closeModals();
   const p = await place(3.5, 5.5, 0, 0);
   await page.evaluate(([x, z]) => { __game.state.dirt.push({ x, z }); __game.bus.emit('stateChanged', { what: 'dirt' }); __player.lookAt(x, 0, z); }, [p.x, p.z - 1.3]);
-  await page.waitForTimeout(400);
+  await until(() => __player.actions().primary?.label === 'Limpar', null, 3000);
   check('mira na sujeira → "Limpar"', (await act()).primary?.label === 'Limpar', JSON.stringify(await act()));
   const n0 = await page.evaluate(() => __game.state.dirt.length);
   await clearEv();
   await tapSel('.pl-act-btn');
-  await page.waitForTimeout(420);
+  await until(() => __player.mopping(), null, 2000);
+  await page.waitForTimeout(150);
   const mid = await page.evaluate(() => ({ mop: __player.mopping(), held: __player.held(), dirt: __game.state.dirt.length }));
   check('esfregão aparece e esfrega (sujeira ainda lá no meio)', mid.mop && mid.held.mop && mid.dirt === n0, JSON.stringify(mid));
   await shot('p5-esfregao');
-  await page.waitForTimeout(800);
+  await until(() => !__player.mopping(), null, 5000);
+  await page.waitForTimeout(100);
   const n1 = await page.evaluate(() => __game.state.dirt.length);
   check('depois de ~0,9 s a sujeira some (cleanDirt) + sfx mop + player:action clean', n1 === n0 - 1 && (await evs('sfx')).some((e) => e.name === 'mop') && (await evs('player:action')).some((e) => e.kind === 'clean'), `${n0} → ${n1}`);
 }
 
 // 10) sentar no caixa, olhar limitado, PickService, sair
 {
+  await closeModals();
   const cid = await page.evaluate(() => __game.state.furniture.find((f) => f.type === 'counter').id);
   await page.evaluate((id) => __player.forceTarget({ kind: 'seat', id }), cid);
-  await page.waitForTimeout(150);
+  await until(() => __player.actions().primary?.label === 'Sentar no caixa', null, 2000);
   check('assento do caixa → "Sentar no caixa"', (await act()).primary?.label === 'Sentar no caixa', JSON.stringify(await act()));
   await clearEv();
   await tapSel('.pl-act-btn');
   await page.evaluate(() => __player.forceTarget(null));
-  await page.waitForTimeout(800);
+  await until(() => __player.svc.mode === 'seated' && !__player.cam().trans, null, 4000);
   const s = await page.evaluate(() => ({ mode: __player.svc.mode, seatedAt: __player.svc.seatedAt, atCounter: __player.svc.atCounter, y: __player.cam().eye[1] }));
   check('sentado: mode=seated, seatedAt=atCounter=balcão', s.mode === 'seated' && s.seatedAt === cid && s.atCounter === cid, JSON.stringify(s));
   check('sentado: botão "Sair do caixa" visível; joystick e ação ocultos', await page.locator('.pl-exit').isVisible() && !(await page.locator('.pl-acts').isVisible()) && !(await page.locator('.pl-joy').isVisible()));
@@ -285,7 +306,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const scr = await page.evaluate(() => __player.tapProbe(0.9)); // objeto tocável registrado no PickService
   await page.waitForTimeout(100);
   await page.touchscreen.tap(scr.x + 6, scr.y + 4);
-  await page.waitForTimeout(150);
+  await until(() => __player.tapProbeHits() > 0, null, 1500);
   const tapped = await page.evaluate(() => __player.tapProbeHits());
   check('toque no objeto registrado no PickService chama onTap', tapped === 1, JSON.stringify({ scr, tapped }));
   await page.evaluate(() => __game.bus.emit('ui:modal', { open: true }));
@@ -297,7 +318,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await shot('p6-sentado');
   await clearEv();
   await tapSel('.pl-exit');
-  await page.waitForTimeout(700);
+  await until(() => __player.svc.mode === 'walk' && !__player.cam().trans, null, 4000);
   const u = await page.evaluate(() => ({ mode: __player.svc.mode, seatedAt: __player.svc.seatedAt, atCounter: __player.svc.atCounter, y: __player.cam().eye[1] }));
   check('"Sair do caixa" levanta atrás do balcão', u.mode === 'walk' && u.seatedAt === null && u.atCounter === null && Math.abs(u.y - 1.6) < 0.06, JSON.stringify(u));
   check('sfx stand + player:action stand', (await evs('sfx')).some((e) => e.name === 'stand') && (await evs('player:action')).some((e) => e.kind === 'stand'));
@@ -305,10 +326,11 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 11) placa, computador, depósito trancado, preço/mover
 {
+  await closeModals();
   await clearEv();
   const run = async (pick, want) => {
     await page.evaluate((p) => __player.forceTarget(p), pick);
-    await page.waitForTimeout(120);
+    await until((w) => __player.actions().primary?.label === w, want, 2000);
     const a = await act();
     await page.evaluate(() => __player.press());
     await page.waitForTimeout(80);
@@ -322,7 +344,8 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const f = await shelfOf('feijao');
   check('prateleira sem caixa → "Preço" → ui:openTablet prices', await run({ kind: 'furniture', id: f.id }, 'Preço') && (await evs('ui:openTablet')).some((e) => e.tab === 'prices' && e.productId === 'feijao'));
   await page.evaluate((id) => __player.forceTarget({ kind: 'furniture', id }), f.id);
-  await page.waitForTimeout(120);
+  await until(() => __player.actions().secondary === 'Mover', null, 2000);
+  await frames(2);
   check('secundário "Mover" visível', await page.locator('.pl-move').isVisible() && (await page.locator('.pl-move .pl-cap').textContent()) === 'Mover');
   await page.evaluate(() => __player.forceTarget(null));
   await page.evaluate(() => { __game.clock.paused = true; });
@@ -330,6 +353,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
 
 // 12) botões somem em build:state e ui:modal; dolly mostra a pilha; reduceMotion sem balanço
 {
+  await closeModals();
   await page.evaluate(() => __game.bus.emit('build:state', { active: true, kind: 'furniture' }));
   await frames();
   check('build:state ativo esconde o grupo de ação', !(await page.locator('.pl-acts').isVisible()));
@@ -343,7 +367,8 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await place(6, 7, 0, 0.1);
   await page.evaluate(() => __player.forceCap(3));
   await giveBox('arroz', 8, false); await giveBox('feijao', 8, false); await giveBox('cafe', 8, true);
-  await page.waitForTimeout(500);
+  await until(() => __player.held().boxes === 3, null, 2000);
+  await page.waitForTimeout(300);
   const h = await page.evaluate(() => __player.held());
   check('dolly (capacidade 3) mostra a pilha', h.boxes === 3 && h.dolly && h.items > 0, JSON.stringify(h));
   await shot('p7-dolly-pilha');

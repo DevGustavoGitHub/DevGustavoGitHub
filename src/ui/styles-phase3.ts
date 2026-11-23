@@ -4,6 +4,7 @@ export const phase3Css = `
 /* camadas: cena < HUD (20) < controles do player (30) < barra do world (35) < painéis/modais (60+) */
 .mx-modal{z-index:60}.mx-z-report{z-index:62}.mx-z-menu{z-index:64}.mx-z-confirm{z-index:85}.ck-wrap{z-index:62}
 .mx-root.hud-over .mx-top{z-index:66}
+.mx-root:has(.cele) .mx-top,.mx-root:has(.cele) .mslot,.mx-root:has(.cele) .edge-arrow{visibility:hidden}
 
 /* ---------------- HUD ---------------- */
 .mx-top{z-index:20;gap:4px;padding:calc(var(--sa-t) + 6px) calc(var(--sa-r) + 8px) 0 calc(var(--sa-l) + 8px)}
@@ -153,7 +154,7 @@ export const phase3Css = `
 .pay-done span{width:76px;height:76px;border-radius:50%;background:#22b13c;color:#fff;display:flex;align-items:center;justify-content:center}
 .pay.shake{animation:mx-shake .45s}
 @media (max-height:420px){
-  .pay{gap:4px;padding:6px}.pay-h h3{font-size:18px}.pay-h .icon-btn{width:40px;height:40px}
+  .pay{gap:4px;padding:6px}.pay-h h3{font-size:18px}
   .pay-den small{display:none}.pay-info b{font-size:13px}.pk{min-height:46px;font-size:23px}
   .pay-pad{grid-template-columns:repeat(4,1fr);grid-auto-rows:minmax(46px,1fr)}.pay-pad .pk{font-size:24px;min-height:46px}.pay-pad .pk.ok{grid-column:span 3}
   .pay-screen{min-height:38px}.pay-screen b{font-size:24px}

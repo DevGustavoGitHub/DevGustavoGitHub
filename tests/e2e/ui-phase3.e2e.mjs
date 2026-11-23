@@ -241,7 +241,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.waitForSelector('.sum-sheet', { timeout: 3000 });
   check(`[${tag}] "Detalhes" mostra o relatório completo`, /Lucro líquido/.test(await page.locator('.sum-sheet').innerText()));
   if (w === 844) await shot(page, `${tag}-summary-details`);
-  await page.locator('#sum-next').click({ force: true });
+  await page.locator('.sum-sheet .rp-foot .btn').click(); // o botão do rodapé dos detalhes também continua
   await page.waitForTimeout(300);
   const after = await page.evaluate(() => ({ phase: window.__game.clock.phase, day: window.__game.state.day, night: !!document.querySelector('.mcard.night, #end-day') }));
   check(`[${tag}] "Continue jogando!" começa o próximo dia`, after.phase === 'prep' && after.day === 2 && !after.night, JSON.stringify(after));

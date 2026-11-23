@@ -32,8 +32,17 @@ try {
   await page.addInitScript(() => { try { localStorage.setItem('mercadinho:settings', JSON.stringify({ quality: 'high', volume: 0, haptics: false })); } catch { /* */ } });
   await page.goto(URL);
   await page.waitForFunction(() => window.__game && window.__world, null, { timeout: 60000 });
-  await page.getByText('Jogar', { exact: true }).first().click({ timeout: 3000 }).catch(() => {});
-  await page.waitForTimeout(500);
+  // fecha o menu inicial/pausa da UI se estiver aberto (o teste dirige o world por eventos)
+  const closeMenus = async () => {
+    for (let i = 0; i < 3; i++) {
+      const open = await page.evaluate(() => !!document.querySelector('.modal-open'));
+      if (!open) return;
+      await page.locator('.menu-btns button').first().click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(300);
+    }
+  };
+  await page.waitForTimeout(800);
+  await closeMenus();
   const frames = (n = 2) => page.evaluate((n) => new Promise((r) => { let k = 0; const f = () => (++k >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
   const shot = async (name) => { if (SHOTS) { await frames(2); await page.screenshot({ path: `${SHOTS}/${name}.png` }); } };
 
@@ -166,6 +175,7 @@ try {
   check('mira do centro acerta a prateleira (pick furniture)', ray?.kind === 'furniture', JSON.stringify(ray));
   const hl = await page.evaluate(async () => {
     const w = window.__game.services.world, g = window.__game;
+    w.highlight(null); // o player pode já ter destacado o alvo da mira
     g.renderer.render(g.scene, g.camera); const c0 = g.renderer.info.render.calls;
     w.highlight({ kind: 'furniture', id: 1 });
     g.renderer.render(g.scene, g.camera); const c1 = g.renderer.info.render.calls;
@@ -233,6 +243,7 @@ try {
   check('prévia segue a mira e é válida', !!bar && bar.pose.valid && Math.abs(bar.pose.z + 0.5 - 6.5) <= 1.5, JSON.stringify(bar?.pose));
   await shot('posicionar-movel');
   const nF0 = await page.evaluate(() => window.__game.state.furniture.length);
+  await closeMenus();
   await page.getByRole('button', { name: 'Girar para a direita' }).click();
   const rot1 = await page.evaluate(() => window.__world.build.pose.rot);
   await page.getByRole('button', { name: 'Colocar' }).click();

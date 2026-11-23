@@ -70,6 +70,10 @@ export class Tablet {
   /** Avisado quando a aba atual muda (marca novidades vistas). */
   onSeen: (() => void) | null = null;
   private heldUntil = 0;
+  /** Produto destacado (`ui:openTablet {productId}`): sobrevive a re-renders por alguns segundos. */
+  private focusId: string | null = null;
+  private focusUntil = 0;
+  private focusScroll = false;
 
   constructor(private kit: UiKit, private layer: HTMLElement) {
     this.api = {
@@ -92,7 +96,7 @@ export class Tablet {
   open(tab?: string, opts: { productId?: string } = {}): void {
     const id = this.resolve(tab);
     if (tab === 'market' || tab === 'products') setMarketSub('products');
-    this.api.focus = opts.productId ?? null;
+    if (opts.productId) { this.focusId = opts.productId; this.focusUntil = performance.now() + 3000; this.focusScroll = true; }
     if (this.overlay) { this.show(id ?? this.current); return; }
     if (this.kit.isModalOpen()) return;
     if (this.guard?.()) return;
@@ -167,12 +171,15 @@ export class Tablet {
       console.error(e);
     }
     this.body.scrollTop = top;
-    const f = this.api.focus;
-    if (f) {
-      this.api.focus = null;
+    const f = this.focusId;
+    if (f && performance.now() < this.focusUntil) {
+      this.api.focus = f;
       const el = this.body.querySelector<HTMLElement>(`[data-product="${CSS.escape(f)}"]`);
-      if (el) { el.classList.add('focus-hl'); el.scrollIntoView({ block: 'center', inline: 'nearest' }); }
-    }
+      if (el) {
+        el.classList.add('focus-hl');
+        if (this.focusScroll) { this.focusScroll = false; el.scrollIntoView({ block: 'center', inline: 'nearest' }); }
+      }
+    } else { this.focusId = null; this.api.focus = null; }
   }
 
   update(dt: number): void {

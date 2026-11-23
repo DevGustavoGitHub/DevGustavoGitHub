@@ -159,17 +159,24 @@ const opened = await until(() => (window.__ev.sfx.includes('boxOpen') && __game.
 if (!opened) console.log('debug', JSON.stringify(await page.evaluate(() => ({ staff: __npc.staff(), side: __game.state.sidewalk, f: __game.state.furniture.map((f) => [f.id, f.type, f.productId]) }))));
 check('repositor abre a caixa (sfx boxOpen) e repõe', !!opened, JSON.stringify(opened));
 
-/* ---------- 8) visual: vários clientes (print) ---------- */
+/* ---------- 8) visual: fila de clientes vista de frente (print) ---------- */
 await page.evaluate(() => {
-  __game.state.employees.cashier = 0; __npc.sync();
-  const cid = __game.state.furniture.find((f) => f.type === 'counter')?.id;
-  if (window.__player?.sit) window.__player.sit(cid);
+  __game.state.employees.cashier = 0; __game.state.employees.stocker = 0; __npc.sync();
   for (const f of __game.state.furniture) if (f.productId) __game.state.shelf[f.productId] = 30;
+  window.__player?.stand?.();
+  if (window.__player?.stand === undefined) Object.defineProperty(__game.services.player, 'seatedAt', { get: () => null, set: () => {}, configurable: true });
   __npc.timeScale = 3; __npc.spawnNow(6);
 });
 await until(() => __npc.lanes()[0]?.line >= 3, undefined, 60000);
-await page.evaluate(() => { __npc.timeScale = 1; });
-await page.waitForTimeout(1200);
+await page.evaluate(() => {
+  __npc.timeScale = 1;
+  __game.uiRoot.style.display = 'none';
+  const c = __game.services.world.counters()[0];
+  const q = c.queue[1] ?? c.queue[0] ?? c.operator;
+  window.__player?.teleport?.(q.x + 2.4, q.z + 0.4);
+  window.__player?.lookAt?.(q.x, 1.25, q.z);
+});
+await page.waitForTimeout(1500);
 await page.screenshot({ path: `${OUT}/03-queue.png` });
 const cap = await page.evaluate(() => ({ cap: __npc.capacity(), api: (() => { try { return __game.state && window.__npc.capacity(); } catch { return null; } })() }));
 check('limite de clientes = min(customerCapacity, desempenho)', cap.cap >= 1 && cap.cap <= 18, JSON.stringify(cap));
