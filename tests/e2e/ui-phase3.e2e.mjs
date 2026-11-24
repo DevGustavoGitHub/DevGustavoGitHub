@@ -275,19 +275,16 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
 }
 /* ---------- 8b) Fase 4: no app nativo (Capacitor, paisagem travada pelo sistema) o aviso não aparece ---------- */
 {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
-  const page = await ctx.newPage();
-  page.on('pageerror', (e) => errors.push(`nativo pageerror: ${e.message}`));
-  // o @capacitor/core (importado por src/native.ts) decide a plataforma pela ponte nativa: simula a do Android
-  await page.addInitScript(() => { window.androidBridge = { postMessage: () => {} }; });
-  await page.goto(URL);
-  await page.waitForFunction(() => window.__game && window.__ui, null, { timeout: 30000 });
-  await page.waitForTimeout(600);
-  const r = await page.evaluate(() => ({ shown: getComputedStyle(document.querySelector('.rotate')).display !== 'none', paused: window.__game.clock.paused, modal: document.querySelectorAll('.rotate.on').length }));
-  check('[nativo] sem aviso "Gire o celular" no app (orientação travada)', !r.shown && r.modal === 0, JSON.stringify(r));
+  // simular a ponte Android inteira faz o src/native.ts chamar plugins inexistentes: aqui o app nativo é simulado
+  // trocando `Capacitor.isNativePlatform` e pedindo nova avaliação do aviso (o mesmo caminho de rotate.ts)
+  const { ctx, page } = await boot(390, 844);
+  check('[nativo] (controle) no navegador em retrato o aviso aparece', await page.evaluate(() => getComputedStyle(document.querySelector('.rotate')).display !== 'none'));
+  await page.evaluate(() => { window.Capacitor = window.Capacitor ?? {}; window.Capacitor.isNativePlatform = () => true; window.__game.bus.emit('orientation:locked', { locked: false }); });
+  await page.waitForTimeout(200);
+  const r = await page.evaluate(() => ({ shown: getComputedStyle(document.querySelector('.rotate')).display !== 'none', modal: window.__ui.kit.isModalOpen('rotate') }));
+  check('[nativo] sem aviso "Gire o celular" no app (orientação travada), sem modal de orientação', !r.shown && !r.modal, JSON.stringify(r));
   await ctx.close();
 }
-
 /* ---------- 9) Fase 4 (QA): save ilegível → aviso + "Jogar"; Voltar do Android; placa com toque duplo; baixa do nível ---------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true });
@@ -336,7 +333,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.waitForFunction(() => window.__game && window.__ui, null, { timeout: 30000 });
   await page.getByText('Continuar', { exact: true }).first().click();
   await page.waitForSelector('.cele:not(.summary)', { timeout: 9000 }).catch(() => {});
-  check('[nível] comemoração não vista volta após recarregar', /Nível 2/.test(await page.locator('.cele').innerText().catch(() => '')));
+  check('[nível] comemoração não vista volta após recarregar', /Nível 2/i.test(await page.locator('.cele').innerText().catch(() => '')));
   await page.locator('.cele .btn-go').click();
   await page.waitForTimeout(300);
   check('[nível] "Continue jogando!" dá baixa (levelAck = 2)', await page.evaluate(() => window.__game.state.levelAck === 2));

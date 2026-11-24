@@ -102,6 +102,7 @@ export default function create(): GameModule {
   }
 
   /** Pedido automático (sim.runAutoOrders): toast resumindo, sfx buy e stateChanged 'sidewalk'. */
+  const lastSkipWarn = new Map<string, number>();
   function runAuto(): { productId: string; boxes: number; cost: number }[] {
     if (autoBroken && !autoImpl) return [];
     let res: { productId: string; boxes: number; cost: number }[] = [];
@@ -112,6 +113,19 @@ export default function create(): GameModule {
       if (msg.startsWith('NOT_IMPLEMENTED')) autoBroken = true; // não insiste enquanto a sim não existe
       else console.warn('[npc] runAutoOrders:', msg);
       return [];
+    }
+    // a sim devolve o que NÃO comprou em `.skipped` (lista não enumerável no array de compras), com motivo e mensagem;
+    // avisa no máximo uma vez por hora de jogo por produto, inclusive quando nada foi comprado (ex.: calçada cheia).
+    const skipped = (res as unknown as { skipped?: { productId: string; reason?: string; message?: string }[] } | undefined)?.skipped ?? [];
+    if (skipped.length > 0) {
+      const now = ctx.clock.minute + ctx.state.day * 24 * 60;
+      const fresh = skipped.filter((k) => now - (lastSkipWarn.get(k.productId) ?? -Infinity) >= 60);
+      if (fresh.length > 0) {
+        for (const k of fresh) lastSkipWarn.set(k.productId, now);
+        const label = (r?: string): string => (r === 'sidewalk-full' ? 'calçada cheia' : r === 'no-money' ? 'sem dinheiro' : 'não comprado');
+        const parts = fresh.map((k) => `${shortName(k.productId)} (${label(k.reason)})`);
+        ctx.bus.emit('toast', { text: `Pedido automático não comprou ${parts.join(', ')}`, kind: 'bad' });
+      }
     }
     if (!res || res.length === 0) return [];
     // a sim informa o motivo das regras que não compraram (ex.: calçada cheia, sem dinheiro): aviso separado

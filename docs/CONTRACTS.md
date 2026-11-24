@@ -50,6 +50,7 @@ tests/       Vitest (sim) e e2e
 | `interact:secondary` | `{label:string\|null, action?:()=>void}` | player → ui (botão secundário 'Mover'; opcional, o primário assume 'Mover' quando não há outra ação) |
 | `camera:override` | `{active:boolean}` | world (build mode) → player (player larga a câmera e o movimento; ao terminar interpola de volta) |
 | `quality:auto` | `{quality:'low'\|'medium', fps:number}` | world → ui (adaptação automática rebaixou a qualidade gráfica; a UI pode atualizar o seletor; o world também grava `quality` em `mercadinho:settings` e emite `toast`) |
+| `checkout:cancel` | `{customerId:number, counterId:number}` | npc → ui (pedido de pagamento pendente foi invalidado — cliente saiu, balcão sumiu ou painel fechou sem resposta; a UI deve fechar o painel de troco/maquininha sem emitir `checkoutResult`) |
 
 Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, uma linha, no fim da tabela).
 
@@ -535,3 +536,21 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   cada 0,25 s); sem objetos/strings/closures por quadro em controls/held/colisão. Medida (`__player.bench`, loja cheia: 26 móveis,
   14 caixas, 6 sujeiras): alocação 2,7–3,8 KB → 0,55–1,8 KB por quadro (resto: números boxados no V8/Three e `isWalkable` ao andar);
   tempo 0,009–0,022 → 0,003–0,017 ms/quadro no laço. Debug: `__player.bench(n, walk, look)`, `perf()`, `perfReset()`, `castNow()`.
+
+## Fase 4 — npc (correções do QA)
+- **Pagamento pendente (bug alto do QA):** com o painel de troco/maquininha aberto (`ui:modal {open:true}`) o cliente não reestende
+  o pagamento e nada expira; o `checkoutResult` do pedido pendente é sempre aceito. Painel fechado sem resposta (2,5 s), UI ausente
+  (90 s) ou jogador fora do caixa (1,5 s, painel fechado): o npc invalida o pedido e emite `checkout:cancel {customerId, counterId}`
+  (**ui: feche o painel ao receber**); resultado de pedido cancelado é ignorado. Teste: `tests/e2e/qa-play-pay-timeout.mjs`.
+- **Agenda:** chegadas determinísticas por (seed, dia) (`dayRand`) e filtradas por `t >= clock.minute`: ao recarregar no meio do dia
+  (core restaurando o minuto) as já ocorridas não se repetem. `__npc.schedule()`.
+- **`state.npcHeld?: {productId, qty}[]`:** soma dos itens com clientes (cestas, esteira, pagamento), reescrita na hora a cada
+  pegar/devolver/vender/abortar (antes de qualquer evento) e zerada no init e em `dayStarted`; a sim devolve às prateleiras ao carregar.
+- **Paciência:** 50–75 s sem caixa contratado (40–60 s com caixa); multiplicadores de idoso/criança/atacado mantidos.
+- **Pedido automático:** entradas com `reason`/`error`/`skipped` (string) geram o toast `bad` "Pedido automático não comprou Arroz
+  (calçada cheia)"; o toast "Pedido automático: N cx …" (contrato da UI) só lista o que foi comprado.
+- **Desempenho:** material próprio para a pele da cabeça (antes o mesmo do `SkinnedMesh`), para o recheio da caixa do repositor e
+  clone próprio do material de produto do world na esteira — eliminam a troca de programa do three a cada quadro
+  (`getProgramCacheKey`/`flatten` ≈ 0,6 ms/quadro no perfil com 10 clientes); itens da cesta invisíveis quando vazia e com
+  culling; LOD: fora da vista ou a mais de 15 m o esqueleto anima a cada 4 ticks. `__npc.perf()` = ms do update do npc/quadro.
+- **Vários caixas contratados:** não implementado (aguarda a sim; hoje 1 caixa contratado no balcão de menor id sem o jogador).
