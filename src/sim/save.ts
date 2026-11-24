@@ -83,6 +83,7 @@ function sanitizeFields(s: StoreState, d: Raw, base: StoreState): void {
       ? { minUnits: intOr(x.minUnits, 0, 0, 9999), boxes: intOr(x.boxes, 1, 1, 24) } : undefined);
   const e = isObj(d.employees) ? d.employees : {};
   s.employees = { cashier: intOr(e.cashier, 0, 0, MAX_EMPLOYEE_LEVEL), stocker: intOr(e.stocker, 0, 0, MAX_EMPLOYEE_LEVEL), janitor: intOr(e.janitor, 0, 0, MAX_EMPLOYEE_LEVEL) };
+  if (s.employees.cashier > 0 && toNum(e.cashierCount) !== undefined) s.employees.cashierCount = intOr(e.cashierCount, 1, 1, 4);
   // ledger: inteiros >= 0; Fase 3 sem happy/angry => atendidos contam felizes e perdidos irritados
   const l = isObj(d.ledger) ? d.ledger : {};
   const L = s.ledger;

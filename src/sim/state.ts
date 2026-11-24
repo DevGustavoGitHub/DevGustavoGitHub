@@ -41,6 +41,8 @@ export interface Employees {
   cashier: number; // nível 0 = não contratado
   stocker: number;
   janitor: number;
+  /** Caixas contratados (ausente = 1 se cashier > 0, senão 0). O nível do caixa vale para todos. */
+  cashierCount?: number;
 }
 
 /** FASE 4 — um nível (prateleira) de uma estante/geladeira/freezer: produto próprio e quantidade própria. */

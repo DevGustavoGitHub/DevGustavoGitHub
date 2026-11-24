@@ -8,7 +8,7 @@ import { DOOR_WIDTH, MAX_EXPANSION, SIDEWALK_DEPTH, STORAGE_DEPTH, doorX, storeB
 import { PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay } from './demand';
 import {
-  addXp, buyBoxes, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
+  addXp, buyBoxes, cashierCount, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
 } from './economy';
 import {
   canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay,
@@ -25,7 +25,7 @@ import { makeRng } from './rng';
 import { INITIAL_NEXT_FURNITURE_ID, emptyLedger, initialFurniture, type AutoOrderRule, type Decor, type Furniture, type ShelfLevel, type StoreState } from './state';
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
-  BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS,
+  BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS, EXTRA_CASHIER,
   MAX_EMPLOYEE_LEVEL, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES, STORAGE, STORE_NAME_MAX,
 } from './tuning';
 
@@ -189,6 +189,29 @@ export function hireOrUpgrade(state: StoreState, role: Role): void {
   if (state.money < c.cost) throw new Error('Dinheiro insuficiente');
   state.money -= c.cost;
   state.employees[role]++;
+}
+/** Caixas adicionais: 2º no nível 9, 3º no 14, 4º no 19; no máx. um por balcão montado. */
+export function extraCashierInfo(state: StoreState): { count: number; max: number; nextMinLevel: number | null; counters: number; cost: Cents | null; dailyWage: Cents; blockedReason?: string } {
+  const count = cashierCount(state);
+  const counters = state.furniture.filter((f) => f.type === 'counter').length;
+  const lvl = state.employees.cashier;
+  const max = EXTRA_CASHIER.max;
+  const dailyWage = lvl > 0 ? EMPLOYEE_TABLE.cashier.wage[lvl - 1] ?? 0 : 0;
+  const base = { count, max, counters, dailyWage };
+  if (count <= 0) return { ...base, nextMinLevel: null, cost: null, blockedReason: 'Contrate o primeiro caixa' };
+  if (count >= max) return { ...base, nextMinLevel: null, cost: null, blockedReason: 'Máximo de caixas' };
+  const nextMinLevel = EXTRA_CASHIER.minLevel[count - 1] ?? 99;
+  const cost = (EMPLOYEE_TABLE.cashier.cost[0] ?? 0) * (EXTRA_CASHIER.costMult[count - 1] ?? 4);
+  const blockedReason = state.level < nextMinLevel ? `Nível ${nextMinLevel}` : counters <= count ? 'Monte outro balcão' : undefined;
+  return blockedReason ? { ...base, nextMinLevel, cost, blockedReason } : { ...base, nextMinLevel, cost };
+}
+export function hireExtraCashier(state: StoreState): void {
+  const i = extraCashierInfo(state);
+  if (i.cost === null) throw new Error(i.blockedReason ?? 'Não é possível contratar outro caixa');
+  if (i.blockedReason) throw new Error(i.blockedReason === 'Monte outro balcão' ? 'Monte outro balcão livre para contratar outro caixa' : `Requer nível ${i.nextMinLevel}`);
+  if (state.money < i.cost) throw new Error('Dinheiro insuficiente');
+  state.money -= i.cost;
+  state.employees.cashierCount = i.count + 1;
 }
 /** Segundos reais que o funcionário leva por ação, por nível (usado pelo módulo npc). Nível é limitado a 1..5. */
 export function employeeSpeed(role: Role, level: number): number {

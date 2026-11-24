@@ -157,7 +157,8 @@ const tmpP = { x: 0, y: 0, z: 0 };
 
 export class CheckoutManager {
   lanes: Lane[] = [];
-  cashier: CashierLike | null = null;
+  /** Caixas contratados (um por balcão, em ordem estável). */
+  cashiers: CashierLike[] = [];
   private availId: number | null = null;
   private acc = 0;
   private refreshT = 0;
@@ -199,15 +200,10 @@ export class CheckoutManager {
     }
     this.lanes.sort((a, b) => a.furnitureId - b.furnitureId);
     // caixa contratado: balcão de menor id em que o jogador não está sentado
-    const hasCashier = this.env.ctx.state.employees.cashier > 0;
     const seat = this.playerSeat();
-    let staffed: Lane | null = null;
-    if (hasCashier) {
-      const cur = this.cashier?.lane ?? null;
-      staffed = cur && this.lanes.includes(cur) && cur.furnitureId !== seat ? cur : (this.lanes.find((l) => l.furnitureId !== seat) ?? null);
-    }
-    for (const l of this.lanes) l.staffed = l === staffed;
-    if (this.cashier) this.cashier.lane = staffed;
+    const free = this.lanes.filter((l) => l.furnitureId !== seat); // já ordenadas por furnitureId
+    this.cashiers.forEach((c, i) => { c.lane = free[i] ?? null; });
+    for (const l of this.lanes) l.staffed = this.cashiers.some((c) => c.lane === l);
   }
 
   private counterFrame(l: Lane): { cx: number; cz: number; c: number; s: number } | null {
@@ -305,7 +301,7 @@ export class CheckoutManager {
     return p.atCounter ?? null;
   }
   private operatorOf(l: Lane, seat: number | null): Op {
-    if (l.staffed) return this.cashier?.atPost(l) ? 'staff' : null;
+    if (l.staffed) return this.cashiers.some((c) => c.lane === l && c.atPost(l)) ? 'staff' : null;
     return seat === l.furnitureId ? 'player' : null;
   }
   private staffSec(s: Service): number {

@@ -230,12 +230,19 @@ export default function create(): GameModule {
     const roles: StaffRole[] = ['cashier', 'stocker', 'janitor'];
     const h = homes();
     for (const role of roles) {
-      const has = staff.find((s) => s.role === role);
+      const have = staff.filter((s) => s.role === role);
+      const has = have[0];
       const lvl = ctx.state.employees[role];
-      if (lvl > 0 && !has) {
+      if (role === 'cashier') {
+        const want = cashierCount(ctx.state);
+        while (have.length > want) { const x = have.pop()!; x.remove(); staff.splice(staff.indexOf(x), 1); }
+        mgr.cashiers = have as Cashier[];
+      }
+      const missing = role === 'cashier' ? cashierCount(ctx.state) - have.length : lvl > 0 && !has ? 1 : 0;
+      for (let k = 0; k < missing; k++) {
         const s = role === 'cashier' ? new Cashier(env) : role === 'stocker' ? new Stocker(env) : new Janitor(env);
         staff.push(s);
-        if (role === 'cashier') mgr.cashier = s as Cashier;
+        if (role === 'cashier') { have.push(s); mgr.cashiers = have as Cashier[]; }
         mgr.refresh();
         const home = h[role];
         s.setHome(home.x, home.z);
@@ -243,12 +250,9 @@ export default function create(): GameModule {
         if (role === 'cashier' && initial && (s as Cashier).lane) (s as Cashier).snapToSeat();
         else if (initial) s.place(home.x, home.z, 0);
         else { const sp = env.world().spawnPoint(); s.place(sp.x, sp.z, 0); s.moveTo(home.x, home.z); }
-      } else if (lvl <= 0 && has) {
-        has.remove(); staff.splice(staff.indexOf(has), 1);
-        if (role === 'cashier') mgr.cashier = null;
-      } else if (has) {
-        has.setHome(h[role].x, h[role].z);
       }
+      if (lvl <= 0 && has && role !== 'cashier') { has.remove(); staff.splice(staff.indexOf(has), 1); }
+      else for (const s of have) if (s !== undefined && !s.removed) s.setHome(h[role].x, h[role].z);
     }
     mgr.refresh();
   }

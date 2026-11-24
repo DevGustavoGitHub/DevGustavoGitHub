@@ -127,11 +127,17 @@ export function recordSale(state: StoreState, productId: string, qty: number): C
 
 /* ---------- Funcionários ---------- */
 
+/** Nº de caixas contratados (ausente = 1 se houver caixa). */
+export function cashierCount(state: StoreState): number {
+  if (state.employees.cashier <= 0) return 0;
+  return Math.max(1, Math.min(4, Math.floor(state.employees.cashierCount ?? 1)));
+}
+
 export function dailyWages(state: StoreState): Cents {
   let sum = 0;
   for (const role of Object.keys(EMPLOYEE_TABLE) as EmployeeRole[]) {
     const lvl = Math.min(MAX_EMPLOYEE_LEVEL, state.employees[role]);
-    if (lvl > 0) sum += EMPLOYEE_TABLE[role].wage[lvl - 1] ?? 0;
+    if (lvl > 0) sum += (EMPLOYEE_TABLE[role].wage[lvl - 1] ?? 0) * (role === 'cashier' ? cashierCount(state) : 1);
   }
   return sum;
 }
@@ -141,7 +147,7 @@ export function checkoutCapacity(state: StoreState): number {
   const c = state.employees.cashier;
   const counters = state.furniture.filter((f) => f.type === 'counter').length;
   const cashier = c > 0 ? Math.round(CHECKOUT.cashierBase * (1 + CHECKOUT.cashierLevelBonus * (c - 1))) : 0;
-  return CHECKOUT.manual + cashier + CHECKOUT.extraCounter * Math.max(0, counters - 1);
+  return CHECKOUT.manual + cashier * Math.max(1, cashierCount(state)) + CHECKOUT.extraCounter * Math.max(0, counters - 1);
 }
 
 /* ---------- Dia ---------- */

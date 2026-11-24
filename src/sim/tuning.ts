@@ -62,6 +62,9 @@ export const EMPLOYEE_TABLE: Record<EmployeeRole, { cost: Cents[]; minLevel: num
   },
 };
 
+/** Caixas adicionais (2º..4º): nível mínimo do jogador e custo = custo de contratar o 1º nível do caixa × mult. */
+export const EXTRA_CASHIER = { max: 4, minLevel: [9, 14, 19], costMult: [2, 3, 4] };
+
 /** Throughput manual do jogador (clientes/dia) e do caixa contratado; +25% por nível do caixa. */
 export const CHECKOUT = { manual: 45, cashierBase: 40, cashierLevelBonus: 0.25, extraCounter: 20 };
 
