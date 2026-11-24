@@ -271,29 +271,34 @@ describe('clientes felizes e irritados no relatório', () => {
 });
 
 describe('economia de início e liberações por nível (Fase 3)', () => {
-  it('R$ 150 iniciais: dá para 1–2 caixas dos produtos mais baratos, não 3', () => {
+  it('dinheiro inicial (QA economia: R$ 250): dá para 3 caixas dos produtos mais baratos, não 4', () => {
     const s = newGame();
-    expect(s.money).toBe(15000);
+    expect(s.money).toBe(START_MONEY);
+    expect(START_MONEY).toBe(25000);
     const cheapest = PRODUCTS.filter((p) => s.licenses.includes(p.category)).map((p) => boxCost(s, p.id)).sort((a, b) => a - b);
-    expect(cheapest[0]! + cheapest[1]!).toBeLessThanOrEqual(s.money);
-    expect(cheapest[0]! * 3).toBeGreaterThan(s.money);
+    expect(cheapest[0]! + 2 * cheapest[1]!).toBeLessThanOrEqual(s.money); // 3 caixas, qualquer combinação dos 2 baratos
+    expect(cheapest[0]! * 4).toBeGreaterThan(s.money); // a 4ª não cabe: as 2 prateleiras não enchem no dia 1
     expect(s.furniture.filter((f) => f.type === 'shelf').map((f) => boxCost(s, f.productId!))).toEqual([cheapest[1], cheapest[0]]);
     expect(s.furnitureStock).toEqual([]);
   });
-  it('aluguel só a partir do nível 3 ou do dia 4, em rampa de 3 passos; sobe com a expansão', () => {
+  it('aluguel só a partir do nível 4 ou do dia 6 (QA economia; era 3/4), em rampa de 3 passos; sobe com a expansão', () => {
     const full = RENT.base;
-    expect(rentFor({ expansion: 0, level: 2, day: 3 })).toBe(0);
-    expect(rentFor({ expansion: 0, level: 3, day: 1 })).toBe(Math.round(full / 3 / 100) * 100);
-    expect(rentFor({ expansion: 0, level: 1, day: 4 })).toBe(Math.round(full / 3 / 100) * 100);
-    expect(rentFor({ expansion: 0, level: 4, day: 2 })).toBe(Math.round((2 * full) / 3 / 100) * 100);
-    expect(rentFor({ expansion: 0, level: 5, day: 1 })).toBe(full);
-    expect(rentFor({ expansion: 0, level: 1, day: 6 })).toBe(full);
+    const third = Math.round(full / 3 / 100) * 100;
+    const twoThirds = Math.round((2 * full) / 3 / 100) * 100;
+    expect([RENT.startLevel, RENT.startDay]).toEqual([4, 6]);
+    expect(rentFor({ expansion: 0, level: 3, day: 5 })).toBe(0);
+    expect(rentFor({ expansion: 0, level: 4, day: 1 })).toBe(third);
+    expect(rentFor({ expansion: 0, level: 1, day: 6 })).toBe(third);
+    expect(rentFor({ expansion: 0, level: 5, day: 2 })).toBe(twoThirds);
+    expect(rentFor({ expansion: 0, level: 1, day: 7 })).toBe(twoThirds);
+    expect(rentFor({ expansion: 0, level: 6, day: 1 })).toBe(full);
+    expect(rentFor({ expansion: 0, level: 1, day: 8 })).toBe(full);
     expect(rentFor({ expansion: 2, level: 9, day: 30 })).toBe(full + 2 * RENT.perExpansion);
     const s = newGame();
     const rents: number[] = [];
-    for (let d = 0; d < 7; d++) rents.push(closeDay(s).rent!);
-    expect(rents).toEqual([0, 0, 0, rentFor({ expansion: 0, level: 1, day: 4 }), rentFor({ expansion: 0, level: 1, day: 5 }), full, full]);
-    const e = at(3);
+    for (let d = 0; d < 9; d++) rents.push(closeDay(s).rent!);
+    expect(rents).toEqual([0, 0, 0, 0, 0, third, twoThirds, full, full]);
+    const e = at(5);
     const r0 = e.rent;
     buyExpansion(e);
     expect(e.rent).toBe(rentFor(e));
