@@ -2,22 +2,27 @@
  * Números de balanceamento centralizados (documentados em docs/GDD.md §4).
  * Dinheiro em centavos. Mudou aqui => rode `npx vitest run` (tests/balance.test.ts valida a progressão).
  *
- * Fase 3: início pobre como no jogo de referência (R$ 150, balcão + 2 prateleiras), aluguel só a partir do nível 3
- * ou do dia 4 (em rampa) e liberações por nível alinhadas ao original (caixa 4, limpador 6, repositor 8, depósito 5,
- * expansões 3/5/6/7/…, 2ª licença no nível 2).
+ * Fase 3: início pobre como no jogo de referência (balcão + 2 prateleiras), aluguel só mais tarde (em rampa) e
+ * liberações por nível alinhadas ao original (caixa 4, limpador 6, repositor 8, depósito 5, expansões 3/5/6/7/…,
+ * 2ª licença no nível 2).
+ * QA de economia (docs/qa/economy.md, bot de ritmo humano em humanBot.ts): R$ 150 → R$ 250, aluguel a partir do nível 4
+ * ou do dia 6 (era 3/4) e limite do empréstimo sem a base de R$ 200 — o iniciante fechava o dia 1 com ~43% de clientes
+ * irritados e sem caixa para abastecer o dia 2; o jogador eficiente quase não muda (é limitado pelo caixa, não pelo dinheiro).
  */
 import type { Cents } from './money';
 
-/** Dinheiro inicial (dá para 1–2 caixas dos produtos mais baratos). */
-export const START_MONEY: Cents = 15000;
+/** Dinheiro inicial: dá para 3 caixas dos produtos mais baratos (4 não cabem), ~70% da procura do dia 1. */
+export const START_MONEY: Cents = 25000;
 /** Produtos das 2 prateleiras iniciais (os 2 mais baratos por caixa da mercearia). */
 export const INITIAL_SHELVES: readonly string[] = ['feijao', 'macarrao'];
 
 /**
  * Aluguel diário = base + porExpansão × expansão, cobrado em closeDay. Começa no nível `startLevel` OU no dia `startDay`
  * (o que vier primeiro) e sobe em `rampSteps` passos (1/3, 2/3, integral). Ver rent.ts.
+ * QA economia: nível 4 / dia 6 (era 3 / 4) — o iniciante (≈ 23 clientes/dia no caixa) chega ao nível 3 no dia 3 e
+ * pagava aluguel com lucro de ~R$ 100–150/dia; o eficiente chega ao nível 4 no dia 4 e quase não sente a diferença.
  */
-export const RENT = { base: 8000 as Cents, perExpansion: 4000 as Cents, startLevel: 3, startDay: 4, rampSteps: 3 };
+export const RENT = { base: 8000 as Cents, perExpansion: 4000 as Cents, startLevel: 4, startDay: 6, rampSteps: 3 };
 
 /** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 6 níveis (layout.MAX_EXPANSION). */
 export const EXPANSIONS: { cost: Cents; minLevel: number }[] = [
@@ -87,8 +92,12 @@ export const DROP = { wallMargin: 0.15, sidewalkSide: 14 };
 export const DECOR_CHANGE_COST: Cents = 1000; // por campo de cor alterado
 export const STORE_NAME_MAX = 24;
 
-/** Empréstimo: limite = base + porNível × nível; juros diários (% do saldo devedor) cobrados em closeDay. */
-export const LOAN = { base: 20000 as Cents, perLevel: 40000 as Cents, dailyRate: 0.004 };
+/**
+ * Empréstimo: limite = base + porNível × nível; juros diários (% do saldo devedor) cobrados em closeDay.
+ * QA economia: base 0 (era R$ 200) — no nível 1 o banco dava R$ 600 a 0,4%/dia (4× o dinheiro inicial, quase de graça) e
+ * anulava o início pobre; R$ 400 ainda tira o jogador de qualquer aperto (≈ 5 caixas).
+ */
+export const LOAN = { base: 0 as Cents, perLevel: 40000 as Cents, dailyRate: 0.004 };
 
 /** Falência: caixa abaixo do piso, sem crédito e sem estoque (liquidado a `stockRecovery` do custo) que cubra o rombo. */
 export const BANKRUPTCY = { floor: 0 as Cents, stockRecovery: 0.5, restartMoney: 30000 as Cents };

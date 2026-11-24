@@ -11,15 +11,16 @@
  *   1,1) s e cobra após max(0,8, 0,3·seg) s; 1 operador por balcão (npc/checkout.ts); rapidez da gorjeta = 0,5·bipagem
  *   + 0,5·painel (ui/pay.ts: par 3 + 1,1·peças no troco, 6 s na maquininha).
  * Tempos do jogador (toque, troco, viagem de reposição) vêm do perfil (HUMAN_PROFILES), estimados em docs/qa/economy.md.
+ * Abastecer antes de abrir e à noite não gasta relógio (o relógio só anda com a loja aberta: core/clock.ts).
  */
 import {
   acceptsPrice, basketTotal, buyExpansion, buyUpgrade, checkoutCart, closeDay, completeSale, customerCapacity, discardBox,
   employeeCost, employeeSpeed, expansionCost, expansionMinLevel, furnitureCatalog, furnitureForProduct, furnitureStock,
-  hireOrUpgrade, isBankrupt, loanInfo, makeShoppingList, orderBoxes, placeFromStock, placeUnits, plannedArrivals,
-  productCapacity, recordLostCustomer, restartAfterBankruptcy, returnToShelf, takeFromShelf, takeLoan, upgradeCatalog,
-  type DayReport,
+  hireOrUpgrade, isBankrupt, loanInfo, makeShoppingList, orderBoxes, placeFromStock, placeUnits, plannedArrivals, priceInfo,
+  productCapacity, recordLostCustomer, repayLoan, restartAfterBankruptcy, returnToShelf, takeFromShelf, takeLoan,
+  upgradeCatalog, type DayReport,
 } from './api';
-import { findSpot, investMorning, restock as botRestock, setMarketPrices, type BotMemory } from './bot';
+import { findSpot, investMorning, reserve, restock as botRestock, setMarketPrices, type BotMemory } from './bot';
 import { LICENSES, PRODUCTS } from './catalog';
 import { buyLicense } from './economy';
 import { customerCashPayment, optimalChange } from './money';
@@ -27,9 +28,8 @@ import { makeRng } from './rng';
 import { newGame, type StoreState } from './state';
 import type { FurnitureType } from '../core/layout';
 
-/** Segundos reais do expediente (core/clock.ts) e última chegada (20:30). */
+/** Segundos reais do expediente (core/clock.ts: 780 min de jogo a 2 min/s). */
 export const DAY_SECONDS = 390;
-const LAST_ARRIVAL = 375;
 const DT = 0.1;
 
 export interface HumanProfile {
@@ -52,37 +52,53 @@ export interface HumanProfile {
   distraction: number;
   /** Repõe no expediente quando um produto exposto cai a ≤ trigger × capacidade (null = nunca). */
   trigger: number | null;
-  /** Abastecimento da manhã: 'fill' enche, número = máx. caixas por produto, 'over' compra o dobro do que cabe. */
-  morning: 'fill' | 'over' | number;
+  /** Abastecimento sem relógio: 'bot' = bot.restock; 'over' = compra o dobro do que cabe; número = máx. caixas/produto. */
+  morning: 'bot' | 'over' | number;
   invest: 'bot' | 'careful' | 'waste' | 'none';
+  /** Usa o banco: pega o limite quando o caixa da manhã fica abaixo de R$ 50 (e paga quando sobra). */
+  bank: boolean;
 }
 
 const BASE: Omit<HumanProfile, 'name'> = {
   priceMult: 1, tap: 0.8, react: 1.2, cash: [2.5, 0.8], card: [2, 0.6], mistake: 0.08, trip: [20, 18], tripBoxes: 3,
-  distraction: 0.05, trigger: 0.25, morning: 'fill', invest: 'careful',
+  distraction: 0.05, trigger: 0.25, morning: Infinity, invest: 'careful', bank: false,
 };
 
 /** Arquétipos de jogador (docs/qa/economy.md §2). */
 export const HUMAN_PROFILES: Record<'cuidadoso' | 'desperdicador' | 'eficiente' | 'preguicoso', HumanProfile> = {
   cuidadoso: { ...BASE, name: 'iniciante cuidadoso', tap: 1.0, react: 1.5, cash: [3, 1.0], card: [2.5, 0.8], mistake: 0.12, trip: [25, 22], tripBoxes: 2, distraction: 0.1, trigger: 0, morning: 2 },
   desperdicador: { ...BASE, name: 'desperdiçador', priceMult: 1.25, trigger: 0.2, tripBoxes: 4, morning: 'over', invest: 'waste' },
-  eficiente: { ...BASE, name: 'eficiente', priceMult: 1.1, tap: 0.6, react: 0.8, cash: [1.5, 0.6], card: [1.2, 0.4], mistake: 0.04, trip: [14, 15], distraction: 0, trigger: 0.35, invest: 'bot' },
+  eficiente: { ...BASE, name: 'eficiente', priceMult: 1.1, tap: 0.6, react: 0.8, cash: [1.5, 0.6], card: [1.2, 0.4], mistake: 0.04, trip: [14, 15], distraction: 0, trigger: 0.35, morning: 'bot', invest: 'bot' },
   preguicoso: { ...BASE, name: 'preguiçoso', trigger: null },
 };
 
+/** Variações de outros módulos para testar propostas (sem mexer neles): duração do dia, paciência, largura dos picos. */
+export interface HumanTweaks {
+  /** Segundos reais do expediente (padrão 390). */
+  daySeconds?: number;
+  /** Paciência-base [mín, máx] em s (padrão [40, 60]). */
+  patience?: [number, number];
+  /** Multiplica o σ dos picos de chegada (padrão 1). */
+  sigma?: number;
+}
+
 /* ---------- tempo de atendimento ---------- */
 
-/** Instantes (s, desde o início da descarga) em que cada um dos `n` itens fica tocável na esteira. */
+/** Instante (s, desde o início da descarga) em que o item i fica tocável na esteira. */
 const avail = (i: number): number => 0.57 + 0.42 * i;
 
-/** Jogador: segundos para bipar `taps` itens (do 1º tocável ao último bipe). */
+/** Jogador: fim da bipagem de `taps` itens e duração (do 1º tocável ao último bipe). */
 export function playerScanSeconds(taps: number, tap: number): { end: number; dur: number } {
   let t = 0;
   for (let i = 0; i < taps; i++) t = Math.max(avail(i), t) + tap;
   return { end: t, dur: Math.max(0, t - avail(0)) };
 }
 
-/** Funcionário caixa (segundos por ação `sec`): duração total do atendimento de `taps` itens (npc/checkout.ts). */
+/** Jogador: atendimento completo (chegar à esteira, bipar, ir pagar, tocar, painel) sem o tempo do painel. */
+export const playerServiceFixed = (taps: number, p: Pick<HumanProfile, 'tap' | 'react'>): number =>
+  1.4 + playerScanSeconds(taps, p.tap).end + 0.38 + 0.95 + p.react;
+
+/** Funcionário caixa (`sec` = segundos por ação do nível): atendimento completo de `taps` itens (npc/checkout.ts). */
 export function staffServiceSeconds(taps: number, sec: number): number {
   const per = Math.min(1.1, Math.max(0.22, (sec * 0.6) / Math.max(1, taps)));
   let t = Math.max(0.8, avail(0));
@@ -91,24 +107,27 @@ export function staffServiceSeconds(taps: number, sec: number): number {
 }
 
 /** Toques no caixa (npc/checkout.ts groupTaps: no máx. ~12 por cliente). */
-const tapsFor = (units: number): number => {
+export const tapsFor = (units: number): number => {
   const per = Math.max(1, Math.ceil(units / 12));
   return Math.ceil(units / per);
 };
-const keysFor = (total: number): number => `${Math.floor(total / 100)},${String(total % 100).padStart(2, '0')}`.length + 1;
+/** Teclas na maquininha: "23,45" + OK. */
+export const keysFor = (total: number): number => `${Math.floor(total / 100)},${String(total % 100).padStart(2, '0')}`.length + 1;
 
 /* ---------- chegadas (npc/index.ts arrivalTimes, em segundos reais) ---------- */
-export function arrivalSeconds(n: number, rand: () => number): number[] {
-  const comps = [{ w: 0.25, m: 0, s: 0 }, { w: 0.2, m: 570, s: 45 }, { w: 0.3, m: 750, s: 50 }, { w: 0.25, m: 1080, s: 55 }];
+export function arrivalSeconds(n: number, rand: () => number, tw: HumanTweaks = {}): number[] {
+  const k = (tw.daySeconds ?? DAY_SECONDS) / 780;
+  const sg = tw.sigma ?? 1;
+  const comps = [{ w: 0.25, m: 0, s: 0 }, { w: 0.2, m: 570, s: 45 * sg }, { w: 0.3, m: 750, s: 50 * sg }, { w: 0.25, m: 1080, s: 55 * sg }];
   const out: number[] = [];
   for (let i = 0; i < n; i++) {
     let r = rand();
     let c = comps[0]!;
-    for (const k of comps) { r -= k.w; if (r <= 0) { c = k; break; } }
+    for (const q of comps) { r -= q.w; if (r <= 0) { c = q; break; } }
     let t: number;
     if (c.s === 0) t = 480 + rand() * (1260 - 40 - 480);
     else t = c.m + Math.sqrt(-2 * Math.log(Math.max(1e-9, rand()))) * Math.cos(2 * Math.PI * rand()) * c.s;
-    out.push((Math.min(1230, Math.max(480, t)) - 480) / 2);
+    out.push((Math.min(1230, Math.max(480, t)) - 480) * k);
   }
   return out.sort((a, b) => a - b);
 }
@@ -120,25 +139,30 @@ interface Item { productId: string; qty: number }
 interface Cust { kind: Kind; patience: number; readyAt: number; list: Item[]; items: Item[]; complaints: number; oos: number; waited: number }
 interface Lane { line: Cust[]; cur: Cust | null; until: number; speed: number; mistakes: number; staff: boolean }
 
-export interface HumanDayStats extends DayReport {
+export interface HumanOpenStats {
   arrivals: number;
   /** Desistiram na fila (paciência) / saíram sem nada (sem estoque ou caro) / nem entraram (loja cheia até fechar). */
   lostQueue: number;
   lostEmpty: number;
   vanished: number;
-  /** Segundos do expediente: sentado no caixa, em viagens de reposição, distraído. */
+  /** Segundos: sentado no caixa, sentado sem ninguém para atender, em viagens de reposição. */
   seated: number;
+  idleSeat: number;
   tripTime: number;
   trips: number;
   maxLine: number;
-  level: number;
-  money: number;
   stockoutItems: number;
+  /** Atendimentos feitos pelo jogador e a soma dos segundos gastos neles. */
+  svcN: number;
+  svcSum: number;
+  stockouts: Record<string, number>;
 }
+export interface HumanDayStats extends DayReport, Omit<HumanOpenStats, 'stockouts'> { level: number; money: number }
 
 const BY_POP = [...PRODUCTS].sort((a, b) => b.popularity - a.popularity);
 const displayed = (s: StoreState) => BY_POP.filter((p) => s.licenses.includes(p.category) && productCapacity(s, p.id) > 0);
 const onFloor = (s: StoreState, id: string): number => s.sidewalk.reduce((a, b) => (b.productId === id && !b.carried ? a + b.units : a), 0);
+const boxCost = (s: StoreState, id: string): number => priceInfo(s, id).wholesale * (PRODUCTS.find((p) => p.id === id)?.boxSize ?? 1);
 
 /** Põe na exposição as caixas do produto que estão no chão e joga fora as vazias. */
 function shelveFloor(s: StoreState, id: string): void {
@@ -149,15 +173,22 @@ function shelveFloor(s: StoreState, id: string): void {
   for (let i = s.sidewalk.length - 1; i >= 0; i--) if (s.sidewalk[i]!.productId === id && s.sidewalk[i]!.units === 0) discardBox(s, i);
 }
 
-/** Abastecimento sem relógio (manhã/noite) conforme o perfil. */
+/** Abastecimento sem relógio (manhã/noite): rodízio de 1 caixa por produto, do mais barato ao mais caro. */
 function morningStock(s: StoreState, prof: HumanProfile): void {
-  if (prof.morning === 'fill') { botRestock(s); return; }
-  for (const p of displayed(s)) {
-    const need = productCapacity(s, p.id) - (s.shelf[p.id] ?? 0) - onFloor(s, p.id);
-    let boxes = prof.morning === 'over' ? Math.ceil((2 * need) / p.boxSize) : Math.min(prof.morning, Math.ceil(need / p.boxSize));
-    for (; boxes > 0; boxes--) { try { orderBoxes(s, p.id, 1); } catch { break; } }
-    shelveFloor(s, p.id);
+  if (prof.morning === 'bot') { botRestock(s); return; }
+  const over = prof.morning === 'over';
+  const cap = typeof prof.morning === 'number' ? prof.morning : Infinity;
+  const items = displayed(s).sort((a, b) => boxCost(s, a.id) - boxCost(s, b.id));
+  const bought: Record<string, number> = {};
+  const need = (id: string): number => (over ? 2 : 1) * productCapacity(s, id) - (s.shelf[id] ?? 0) - onFloor(s, id);
+  for (let round = 0, any = true; any && round < 64; round++) {
+    any = false;
+    for (const p of items) {
+      if (need(p.id) <= 0 || (bought[p.id] ?? 0) >= cap) continue;
+      try { orderBoxes(s, p.id, 1); bought[p.id] = (bought[p.id] ?? 0) + 1; any = true; } catch { /* sem dinheiro */ }
+    }
   }
+  for (const p of items) shelveFloor(s, p.id);
 }
 
 /** Planeja uma viagem de reposição: produtos abaixo do gatilho, caixas do chão primeiro, depois compra. */
@@ -201,25 +232,28 @@ function shoppingList(s: StoreState, kind: Kind, r: () => number): Item[] {
 }
 
 /** Expediente inteiro em segundos reais (sem investir/abastecer: ver playHumanDay). */
-export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () => number): Omit<HumanDayStats, keyof DayReport | 'level' | 'money'> & { stockouts: Record<string, number> } {
-  const times = arrivalSeconds(plannedArrivals(s), rand);
+export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () => number, tw: HumanTweaks = {}): HumanOpenStats {
+  const daySec = tw.daySeconds ?? DAY_SECONDS;
+  const [pMin, pMax] = tw.patience ?? [40, 60];
+  const times = arrivalSeconds(plannedArrivals(s), rand, tw);
   const counters = Math.max(1, s.furniture.filter((f) => f.type === 'counter').length);
   const lanes: Lane[] = Array.from({ length: counters }, () => ({ line: [], cur: null, until: 0, speed: 0, mistakes: 0, staff: false }));
   const cashier = s.employees.cashier;
   const staffN = (cashier > 0 ? 1 : 0) + (s.employees.stocker > 0 ? 1 : 0) + (s.employees.janitor > 0 ? 1 : 0);
   const cap = Math.max(1, Math.min(18 - staffN, customerCapacity(s)));
-  // funcionário no balcão 0; jogador senta no 1 se houver (com 1 balcão e caixa contratado, o jogador só repõe)
+  // funcionário no balcão 0; o jogador senta no 1 se houver (com 1 balcão e caixa contratado, o jogador só repõe)
   if (cashier > 0) lanes[0]!.staff = true;
   const playerLane = cashier > 0 ? (counters > 1 ? 1 : -1) : 0;
-  const breaks = Array.from({ length: Math.round((prof.distraction * DAY_SECONDS) / 20) }, () => 20 + rand() * 340).sort((a, b) => a - b);
+  const breaks = Array.from({ length: Math.round((prof.distraction * daySec) / 20) }, () => 20 + rand() * (daySec - 50)).sort((a, b) => a - b);
   const shopping: Cust[] = [];
-  const st = { lostQueue: 0, lostEmpty: 0, vanished: 0, seated: 0, tripTime: 0, trips: 0, maxLine: 0, stockoutItems: 0, arrivals: times.length };
-  const stockouts: Record<string, number> = {};
+  const st: HumanOpenStats = {
+    arrivals: times.length, lostQueue: 0, lostEmpty: 0, vanished: 0, seated: 0, idleSeat: 0, tripTime: 0, trips: 0, maxLine: 0,
+    stockoutItems: 0, svcN: 0, svcSum: 0, stockouts: {},
+  };
   let next = 0;
   let inStore = 0;
   let player: { mode: 'seat' | 'trip' | 'away' | 'idle'; until: number; plan?: { id: string; boxes: number }[] } = { mode: 'away', until: 6 };
   const sec = cashier > 0 ? employeeSpeed('cashier', cashier) : 10;
-
   const exits: number[] = []; // quem sai ainda anda até a porta (~4 s) e ocupa a vaga
   let now = 0;
   const leave = (): void => { exits.push(now + 4); };
@@ -232,8 +266,7 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
   const start = (l: Lane, t: number): void => {
     const c = l.line.shift()!;
     l.cur = c;
-    const units = c.items.reduce((a, i) => a + i.qty, 0);
-    const taps = tapsFor(units);
+    const taps = tapsFor(c.items.reduce((a, i) => a + i.qty, 0));
     if (l.staff) {
       const k = sec * (c.kind === 'bulk' ? 1.6 : 1);
       l.until = t + staffServiceSeconds(taps, k);
@@ -254,7 +287,10 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
     const scanSp = Math.min(1, Math.max(0.1, 1 - ((scan.dur + prof.react) / Math.max(1, taps) - 0.6) / 2.4));
     const sp = 0.5 * scanSp + 0.5 * paySp;
     l.speed = c.kind === 'bulk' ? (sp >= 0.6 ? Math.min(1, sp * 1.3) : sp * 0.85) : sp;
-    l.until = t + 1.4 + scan.end + 0.38 + 0.95 + prof.react + pay;
+    const dur = playerServiceFixed(taps, prof) + pay;
+    l.until = t + dur;
+    st.svcN++;
+    st.svcSum += dur;
   };
   const finish = (l: Lane): void => {
     const c = l.cur!;
@@ -275,10 +311,9 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
     return best;
   };
 
-  let t = 0;
-  for (; t < DAY_SECONDS + 600; t += DT) {
+  for (let t = 0; t < daySec + 600; t += DT) {
     now = t;
-    const open = t < DAY_SECONDS;
+    const open = t < daySec;
     for (let i = exits.length - 1; i >= 0; i--) if (exits[i]! <= t) { exits.splice(i, 1); inStore--; }
     // chegadas (limite de simultâneos: o excedente espera do lado de fora)
     while (open && next < times.length && times[next]! <= t && inStore < cap) {
@@ -288,7 +323,7 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
       const kind: Kind = kr < 0.05 ? 'bulk' : kr < 0.11 ? 'picky' : kr < 0.18 ? 'kid' : 'normal';
       const elder = kind !== 'kid' && rand() < 0.16;
       const list = shoppingList(s, kind, rand);
-      const patience = (40 + rand() * 20) * (elder ? 1.2 : 1) * (kind === 'kid' ? 0.8 : kind === 'bulk' ? 1.25 : 1);
+      const patience = (pMin + rand() * (pMax - pMin)) * (elder ? 1.2 : 1) * (kind === 'kid' ? 0.8 : kind === 'bulk' ? 1.25 : 1);
       shopping.push({ kind, patience, readyAt: t + (8 + 4 * list.length * (elder ? 1.25 : 1)) * (0.8 + 0.4 * rand()), list, items: [], complaints: 0, oos: 0, waited: 0 });
     }
     if (!open && next < times.length) { st.vanished += times.length - next; next = times.length; }
@@ -299,7 +334,7 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
       shopping.splice(i, 1);
       let units = 0;
       for (const it of c.list) {
-        if ((s.shelf[it.productId] ?? 0) <= 0) { c.oos++; st.stockoutItems++; stockouts[it.productId] = (stockouts[it.productId] ?? 0) + 1; continue; }
+        if ((s.shelf[it.productId] ?? 0) <= 0) { c.oos++; st.stockoutItems++; st.stockouts[it.productId] = (st.stockouts[it.productId] ?? 0) + 1; continue; }
         const a = acceptsPrice(s, it.productId, rand);
         const pickyNo = c.kind === 'picky' && a.ratio > 1.1;
         if (pickyNo || !a.ok) { if (pickyNo || a.ratio > 1.05) c.complaints += pickyNo ? 2 : 1; continue; }
@@ -312,7 +347,7 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
       if (l.line.length >= 6) { giveUp(c); continue; }
       l.line.push(c);
     }
-    // jogador: volta de viagem/pausa; decide sair do caixa só entre um cliente e outro
+    // jogador: volta de viagem/pausa; só sai do caixa entre um cliente e outro
     if ((player.mode === 'trip' || player.mode === 'away') && t >= player.until) {
       if (player.plan) for (const p of player.plan) shelveFloor(s, p.id);
       player = { mode: playerLane >= 0 ? 'seat' : 'idle', until: 0 };
@@ -331,7 +366,10 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
         }
       }
     }
-    if (player.mode === 'seat') st.seated += DT;
+    if (player.mode === 'seat') {
+      st.seated += DT;
+      if (!myLane!.cur && myLane!.line.length === 0) st.idleSeat += DT;
+    }
     if (player.mode === 'trip') st.tripTime += DT;
     // caixas: terminar, começar, paciência
     lanes.forEach((l, i) => {
@@ -347,7 +385,7 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
     });
     if (!open && inStore - exits.length <= 0 && player.mode !== 'trip') break;
   }
-  return { ...st, stockouts };
+  return st;
 }
 
 /* ---------- investimentos por perfil ---------- */
@@ -361,77 +399,77 @@ function buyAndPlace(s: StoreState, type: FurnitureType, productId?: string, var
   placeFromStock(s, furnitureStock(s).length - 1, spot.x, spot.z, 0, productId);
   return true;
 }
-const specCost = (type: FurnitureType): number => furnitureCatalog().find((c) => c.type === type)!.cost;
+const spec = (type: FurnitureType) => furnitureCatalog().find((c) => c.type === type)!;
 
-/** Iniciante cuidadoso/preguiçoso: compra quando sobra uma folga (`buffer`); 1 móvel novo por dia. */
-function investCareful(s: StoreState, mem: BotMemory, buffer: number): void {
-  const can = (cost: number): boolean => s.money - cost >= buffer;
+/** Iniciante cuidadoso/preguiçoso: só compra quando sobra a reserva do bot + R$ 100; 1 móvel novo por dia. */
+function investCareful(s: StoreState): void {
+  const can = (cost: number): boolean => s.money - cost >= reserve(s) + 10000;
   let furniture = false;
   for (const p of BY_POP) {
     if (furniture || !s.licenses.includes(p.category) || productCapacity(s, p.id) > 0) continue;
-    const type = furnitureForProduct(p.id);
-    if (s.level >= furnitureCatalog().find((c) => c.type === type)!.minLevel && can(specCost(type))) furniture = buyAndPlace(s, type, p.id);
+    const f = spec(furnitureForProduct(p.id));
+    if (s.level >= f.minLevel && can(f.cost)) furniture = buyAndPlace(s, f.type, p.id);
   }
   const tip = upgradeCatalog(s).find((u) => u.id === 'tipjar')!;
   if (!tip.owned && s.level >= tip.minLevel && can(tip.cost)) buyUpgrade(s, 'tipjar');
   const cc = employeeCost(s, 'cashier');
   if (cc && s.employees.cashier === 0 && s.level >= cc.minLevel && can(cc.cost + 3 * cc.dailyWage)) hireOrUpgrade(s, 'cashier');
   for (const l of LICENSES) {
-    if (s.licenses.includes(l.id) || s.level < l.minLevel) continue;
+    if (furniture || s.licenses.includes(l.id) || s.level < l.minLevel) continue;
     const first = BY_POP.find((p) => p.category === l.id);
-    if (!first || !can(l.cost + specCost(furnitureForProduct(first.id)))) break;
+    if (!first || !can(l.cost + spec(furnitureForProduct(first.id)).cost)) break;
     buyLicense(s, l.id);
-    if (!furniture) furniture = buyAndPlace(s, furnitureForProduct(first.id), first.id);
+    furniture = buyAndPlace(s, furnitureForProduct(first.id), first.id);
   }
   const ec = expansionCost(s);
-  if (ec !== null && s.level >= (expansionMinLevel(s) ?? 99) && can(ec + 2 * buffer)) buyExpansion(s);
-  const worst = Object.entries(mem.stockouts).sort((a, b) => b[1] - a[1])[0];
-  if (!furniture && worst && worst[1] >= 6) {
-    const type = furnitureForProduct(worst[0]);
-    if (can(specCost(type))) buyAndPlace(s, type, worst[0]);
-  }
+  if (!furniture && ec !== null && s.level >= (expansionMinLevel(s) ?? 99) && can(ec + 30000)) buyExpansion(s);
 }
 
-/** Desperdiçador: planta no dia 1, móvel/licença/expansão/caixa assim que dá (sem reserva) e empréstimo quando aperta. */
+/** Desperdiçador: planta no dia 1, móvel/licença/expansão/caixa assim que dá (sem reserva, móvel antes do estoque). */
 function investWaste(s: StoreState): void {
   if (s.day === 1 && s.money >= 8000) buyAndPlace(s, 'decor', undefined, 'plant');
   for (const p of BY_POP) {
     if (!s.licenses.includes(p.category) || productCapacity(s, p.id) > 0) continue;
-    const type = furnitureForProduct(p.id);
-    if (s.level >= furnitureCatalog().find((c) => c.type === type)!.minLevel && s.money >= specCost(type)) buyAndPlace(s, type, p.id);
+    const f = spec(furnitureForProduct(p.id));
+    if (s.level >= f.minLevel && s.money >= f.cost) buyAndPlace(s, f.type, p.id);
   }
   for (const l of LICENSES) if (!s.licenses.includes(l.id) && s.level >= l.minLevel && s.money >= l.cost) buyLicense(s, l.id);
   const cc = employeeCost(s, 'cashier');
   if (cc && s.employees.cashier === 0 && s.level >= cc.minLevel && s.money >= cc.cost) hireOrUpgrade(s, 'cashier');
   const ec = expansionCost(s);
   if (ec !== null && s.level >= (expansionMinLevel(s) ?? 99) && s.money >= ec) buyExpansion(s);
-  if (s.money < 5000 && loanInfo(s).available > 0) takeLoan(s, loanInfo(s).available);
+}
+
+function useBank(s: StoreState): void {
+  const li = loanInfo(s);
+  if (s.money < 5000 && li.available > 0) takeLoan(s, li.available);
+  else if (s.loan > 0 && s.money > 3 * s.loan + reserve(s)) repayLoan(s, s.loan);
 }
 
 /* ---------- dias ---------- */
 
-export interface HumanRun { state: StoreState; prof: HumanProfile; mem: BotMemory; bankruptcies: number }
+export interface HumanRun { state: StoreState; prof: HumanProfile; mem: BotMemory; bankruptcies: number; tweaks: HumanTweaks }
 
-export function newHumanRun(seed: number, prof: HumanProfile, startMoney?: number): HumanRun {
+export function newHumanRun(seed: number, prof: HumanProfile, startMoney?: number, tweaks: HumanTweaks = {}): HumanRun {
   const state = newGame(seed);
   if (startMoney !== undefined) state.money = startMoney;
-  return { state, prof, mem: { stockouts: {}, arrivals: 0, lostByCapacity: 0, lastNet: 0 }, bankruptcies: 0 };
+  return { state, prof, mem: { stockouts: {}, arrivals: 0, lostByCapacity: 0, lastNet: 0 }, bankruptcies: 0, tweaks };
 }
 
 /** Joga um dia: investe (manhã), precifica, abastece sem relógio, expediente com ritmo humano, fecha o dia. */
 export function playHumanDay(run: HumanRun): HumanDayStats {
   const { state: s, prof } = run;
+  if (prof.bank) useBank(s);
   if (prof.invest === 'bot') investMorning(s, run.mem);
-  else if (prof.invest === 'careful') investCareful(s, run.mem, 15000);
+  else if (prof.invest === 'careful') investCareful(s);
   else if (prof.invest === 'waste') investWaste(s);
   if (prof.priceMult !== 1) setMarketPrices(s, prof.priceMult);
+  else s.prices = {}; // preço sugerido = média de mercado do dia (sem preço próprio)
   morningStock(s, prof);
-  const rand = makeRng(s.seed * 7717 + s.day * 131 + 5);
-  const open = simulateHumanOpen(s, prof, rand);
+  const open = simulateHumanOpen(s, prof, makeRng(s.seed * 7717 + s.day * 131 + 5), run.tweaks);
   const report = closeDay(s);
-  run.mem = { stockouts: open.stockouts, arrivals: open.arrivals, lostByCapacity: open.lostQueue + open.vanished, lastNet: report.netProfit };
   const { stockouts, ...rest } = open;
-  void stockouts;
+  run.mem = { stockouts, arrivals: open.arrivals, lostByCapacity: open.lostQueue + open.vanished, lastNet: report.netProfit };
   const out: HumanDayStats = { ...report, ...rest, level: s.level, money: s.money };
   if (isBankrupt(s)) { restartAfterBankruptcy(s); run.bankruptcies++; }
   return out;

@@ -99,7 +99,7 @@ export interface StoreState {
   /** Custo médio ponderado das unidades em posse (para COGS). */
   costBasis: Record<string, { units: number; avg: Cents }>;
   employees: Employees;
-  /** Aluguel que será cobrado no fechamento de HOJE (rent.ts: 0 no começo, rampa a partir do nível 3 ou do dia 4). */
+  /** Aluguel que será cobrado no fechamento de HOJE (rent.ts: 0 no começo, rampa a partir do nível 4 ou do dia 6). */
   rent: Cents;
   ledger: Ledger;
   storeName: string;
@@ -157,7 +157,7 @@ export function newGame(seed = 1): StoreState {
     version: 1,
     seed,
     day: 1,
-    money: START_MONEY, // R$ 150,00
+    money: START_MONEY, // R$ 250,00
     level: 1,
     xp: 0,
     reputation: 3.5,
@@ -170,7 +170,7 @@ export function newGame(seed = 1): StoreState {
     sidewalk: [],
     costBasis: {},
     employees: { cashier: 0, stocker: 0, janitor: 0 },
-    rent: 0, // recalculado abaixo (rent.ts): grátis no começo, rampa a partir do nível 3 ou do dia 4
+    rent: 0, // recalculado abaixo (rent.ts): grátis no começo, rampa a partir do nível 4 ou do dia 6
     ledger: emptyLedger(),
     storeName: 'Meu Mercadinho',
     expansion: 0,

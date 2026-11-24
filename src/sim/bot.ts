@@ -1,7 +1,7 @@
 /**
  * Bot de balanceamento: joga dias inteiros só pela API pública (mesmas chamadas do jogo interativo).
  * Repõe várias vezes ao dia, precifica por mercado × multiplicador e investe (licenças, móveis, caixa, expansão).
- * Fase 3: começa pobre (R$ 150, 2 prateleiras), compra caixas em rodízio entre os produtos, guarda uma reserva para
+ * Fase 3: começa pobre (START_MONEY, 2 prateleiras), compra caixas em rodízio entre os produtos, guarda uma reserva para
  * repor o estoque e pagar as despesas do dia, e compra móveis pelo carrinho (checkoutCart → placeFromStock).
  * Usado por tests/balance.test.ts e para calibrar docs/GDD.md §4.
  */

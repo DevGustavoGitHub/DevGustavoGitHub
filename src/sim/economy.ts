@@ -245,7 +245,7 @@ export function simulateOpenDay(state: StoreState): void {
 
 /**
  * Fecha o dia: cobra despesas fixas (aluguel do dia em `state.rent` + salários + juros), gera relatório, avança mercado
- * e calendário e recalcula o aluguel do dia seguinte (rent.ts: rampa a partir do nível 3 ou do dia 4).
+ * e calendário e recalcula o aluguel do dia seguinte (rent.ts: rampa a partir do nível 4 ou do dia 6).
  */
 export function endDay(state: StoreState): DayReport {
   const l: Ledger = state.ledger;

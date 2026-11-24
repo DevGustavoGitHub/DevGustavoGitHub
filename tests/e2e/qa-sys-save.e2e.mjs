@@ -1,12 +1,20 @@
 // QA de sistemas — save/recarregar em cada situação, autosave e ciclo de vida (segundo plano).
 // Para cada situação: foto do estado (dinheiro, unidades por produto em níveis+depósito+calçada, caixas, unidades nas cestas
 // dos clientes, móveis por montar) → save (pagehide) → recarregar → nova foto → compara.
-// Uso: npx vite build --outDir <dir> && npx vite preview --outDir <dir> --port 5212 & ; QA_URL=http://localhost:5212/ node tests/e2e/qa-sys-save.e2e.mjs
+// Uso: npx vite build --outDir <dir> && QA_DIST=<dir> node tests/e2e/qa-sys-save.e2e.mjs   (sobe vite preview na porta 5212;
+//      QA_URL usa um servidor já aberto)
 // Sai com código 1 enquanto houver falhas (cada FAIL corresponde a um item de docs/qa/systems.md).
 import { createRequire } from 'node:module';
 const require = createRequire('/opt/node-tools/node_modules/');
 const { chromium } = require('playwright');
-const URL = process.env.QA_URL ?? 'http://localhost:5212/';
+import { spawn } from 'node:child_process';
+const PORT = process.env.QA_PORT ?? '5212';
+const URL = process.env.QA_URL ?? `http://localhost:${PORT}/`;
+let server = null; // sem QA_URL: sobe o próprio `vite preview` (QA_DIST = pasta do build; padrão dist/)
+if (!process.env.QA_URL) {
+  server = spawn('npx', ['vite', 'preview', '--outDir', process.env.QA_DIST ?? 'dist', '--port', PORT, '--strictPort'], { stdio: 'ignore' });
+  for (let i = 0; i < 60; i++) { try { if ((await fetch(URL)).ok) break; } catch { /* aguardando */ } await new Promise((r) => setTimeout(r, 500)); }
+}
 const SAVE_KEY = 'mercadinho-sim:save:v1';
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'] });
@@ -95,7 +103,11 @@ const compare = (tag, A, B, { expectCustUnits = true } = {}) => {
   if (expectCustUnits) for (const [k, n] of Object.entries(A.custP)) want[k] = (want[k] ?? 0) + n;
   check(`[${tag}] dinheiro e empréstimo preservados`, A.money === B.money && A.loan === B.loan, JSON.stringify({ antes: [A.money, A.loan], depois: [B.money, B.loan] }));
   check(`[${tag}] nenhuma unidade some nem duplica (níveis+depósito+calçada${expectCustUnits ? '+cestas' : ''})`, sameUnits(want, B.units), `diferença ${JSON.stringify(diffUnits(want, B.units))} (cestas antes: ${A.cust} un.)`);
-  check(`[${tag}] custo médio coerente após recarregar (costBasis.units = unidades possuídas)`, sameUnits(B.basis, B.units), `diferença ${JSON.stringify(diffUnits(B.units, B.basis))}`);
+  // antes de recarregar, o custo médio ainda conta as unidades das cestas (só sai na venda); depois, nada deveria sobrar
+  const held = { ...A.units };
+  for (const [k, n] of Object.entries(A.custP)) held[k] = (held[k] ?? 0) + n;
+  const driftA = diffUnits(held, A.basis), driftB = diffUnits(B.units, B.basis);
+  check(`[${tag}] custo médio não fica incoerente ao recarregar (costBasis.units = unidades possuídas)`, JSON.stringify(Object.entries(driftA).sort()) === JSON.stringify(Object.entries(driftB).sort()), `costBasis − possuídas: antes ${JSON.stringify(driftA)}, depois ${JSON.stringify(driftB)}`);
   check(`[${tag}] caixas e móveis preservados`, A.boxes === B.boxes && A.furniture === B.furniture && A.stock === B.stock, JSON.stringify({ antes: [A.boxes, A.furniture, A.stock], depois: [B.boxes, B.furniture, B.stock] }));
 };
 
@@ -270,6 +282,10 @@ let autosaved = false;
 while (Date.now() - t0 < 20000) { if ((await savedMoney()) === m0) { autosaved = true; break; } await page.waitForTimeout(500); }
 check('[autosave] intervalo grava em até ~15 s', autosaved, `após ${Math.round((Date.now() - t0) / 1000)} s`);
 // visibilitychange → hidden (o que o WebView do Android dispara ao ir para segundo plano; pagehide não dispara)
+// liga o som e faz um gesto para o AudioContext existir e rodar (senão a checagem de áudio não prova nada)
+await page.evaluate(() => window.__game.bus.emit('settings:changed', { volume: 0.6 }));
+await page.mouse.click(420, 120);
+await page.waitForTimeout(600);
 await page.evaluate(() => { window.__game.state.money += 11; });
 const m1 = await page.evaluate(() => window.__game.state.money);
 const vis = await page.evaluate(async () => {
@@ -282,20 +298,23 @@ const vis = await page.evaluate(async () => {
   return { acs: (window.__acs ?? []).map((a) => a.state), clock: window.__game.clock.minute - t };
 });
 check('[2º plano] save imediato ao ir para segundo plano (visibilitychange hidden / pause do Capacitor)', (await savedMoney()) === m1, `save gravado tem ${await savedMoney()}, estado ${m1}`);
-check('[2º plano] áudio suspenso', vis.acs.length === 0 || vis.acs.every((s) => s !== 'running'), JSON.stringify(vis.acs));
-await page.evaluate(() => {
-  delete document.visibilityState; delete document.hidden;
+check('[2º plano] áudio suspenso (AudioContext criado e não "running")', vis.acs.length > 0 && vis.acs.every((s) => s !== 'running'), JSON.stringify(vis.acs));
+const back = await page.evaluate(async () => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
   document.dispatchEvent(new Event('visibilitychange'));
   document.dispatchEvent(new Event('resume'));
+  await new Promise((r) => setTimeout(r, 600));
+  return (window.__acs ?? []).map((a) => a.state);
 });
+check('[2º plano] áudio volta ao retornar', back.some((s) => s === 'running'), JSON.stringify(back));
 // pagehide salva
 await page.evaluate(() => { window.__game.state.money += 13; });
 const m2 = await page.evaluate(() => window.__game.state.money);
 await saveNow();
 check('[autosave] pagehide grava', (await savedMoney()) === m2);
 
+const errsNormal = errors.slice();
 /* ---------- 9) saves corrompidos e de versões antigas no navegador ---------- */
 // 9a) JSON ilegível: o jogo começa do zero sem aviso e o autosave sobrescreve o save antigo
 await page.evaluate((k) => { const raw = localStorage.getItem(k); window.__game.save = () => {}; localStorage.setItem(k, raw.slice(0, -2)); localStorage.setItem('qa:bad', raw.slice(0, -2)); }, SAVE_KEY);
@@ -351,6 +370,7 @@ check('[migração Fase 3] carrega sem erro', errors.length === errs1, errors.sl
 check('[migração Fase 3] dinheiro, dívida e unidades preservados', p3.before.money === p3.after.money && p3.before.loan === p3.after.loan && sameUnits(p3.before.units, p3.after.units), JSON.stringify({ dif: diffUnits(p3.before.units, p3.after.units), m: [p3.before.money, p3.after.money] }));
 
 await browser.close();
-check('sem erros de console inesperados (fora dos casos de save corrompido)', errors.length <= errs0 + (errors.length - errs0), errors.slice(0, 4).join(' | '));
+check('sem erros de console nas situações normais (1–8)', errsNormal.length === 0, errsNormal.slice(0, 4).join(' | '));
+server?.kill();
 console.log(fails.length ? `FALHAS (${fails.length}): ${fails.join(' ; ')}` : 'OK');
 process.exit(fails.length ? 1 : 0);

@@ -3,13 +3,21 @@
 // (renderer.info), heap JS após GC (CDP), objetos na cena, nós do DOM, ouvintes do bus, conservação de unidades
 // (costBasis.units = níveis+depósito+calçada+cestas) e caixas "carregadas" sem dono. Janela de custo por quadro
 // (CDP Performance.getMetrics: ScriptDuration/TaskDuration ÷ quadros) com a loja cheia em timeScale 1.
-// Uso: QA_URL=http://localhost:5212/ QA_DAYS=9 QA_SAVE=<busy-save.json> node tests/e2e/qa-sys-longrun.e2e.mjs
-// QA_SAVE: save inicial (gerado pela sim); sem ele a loja é montada no próprio teste a partir do jogo novo.
+// Uso: QA_FIXTURE=/tmp/busy.json npx vitest run tests/qa-sys-sim.test.ts -t fixture   (gera o save da loja movimentada)
+//      npx vite build --outDir <dir> && QA_DIST=<dir> QA_DAYS=9 QA_SAVE=/tmp/busy.json node tests/e2e/qa-sys-longrun.e2e.mjs
+// QA_SAVE: save inicial (obrigatório para "loja movimentada"; sem ele roda o jogo novo). QA_OUT: grava as métricas em JSON.
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 const require = createRequire('/opt/node-tools/node_modules/');
 const { chromium } = require('playwright');
-const URL = process.env.QA_URL ?? 'http://localhost:5212/';
+import { spawn } from 'node:child_process';
+const PORT = process.env.QA_PORT ?? '5214';
+const URL = process.env.QA_URL ?? `http://localhost:${PORT}/`;
+let server = null; // sem QA_URL: sobe o próprio `vite preview` (QA_DIST = pasta do build; padrão dist/)
+if (!process.env.QA_URL) {
+  server = spawn('npx', ['vite', 'preview', '--outDir', process.env.QA_DIST ?? 'dist', '--port', PORT, '--strictPort'], { stdio: 'ignore' });
+  for (let i = 0; i < 60; i++) { try { if ((await fetch(URL)).ok) break; } catch { /* aguardando */ } await new Promise((r) => setTimeout(r, 500)); }
+}
 const DAYS = Number(process.env.QA_DAYS ?? 9);
 const OUT = process.env.QA_OUT ?? '';
 const SAVE = process.env.QA_SAVE ? readFileSync(process.env.QA_SAVE, 'utf8') : null;
@@ -147,7 +155,10 @@ console.log('\nTABELA', JSON.stringify(rows.map((r) => ({ day: r.day, served: r.
 check(`${DAYS} dias jogados`, last.day - day0 >= DAYS, `${day0} → ${last.day}`);
 check('sem erros/avisos de console', errors.length === 0, errors.slice(0, 6).join(' | '));
 check('geometrias não crescem dia a dia (±10%)', last.geometries <= first.geometries * 1.1 + 5, `${first.geometries} → ${last.geometries}`);
-check('texturas não crescem dia a dia', last.textures <= first.textures + 2, `${first.textures} → ${last.textures}`);
+// texturas: rostos/roupas dos clientes ficam em cache por variante (npc/looks.ts) e crescem até saturar (~140);
+// o teste exige que estabilizem nos últimos 3 dias (vazamento = crescimento contínuo)
+const tail = rows.slice(-4);
+check('texturas estabilizam (≤ +4 nos últimos 3 dias)', tail.length < 4 || tail[3].textures - tail[0].textures <= 4, `${tail.map((r) => r.textures).join(' → ')} (início ${rows[0].textures})`);
 check('objetos na cena estáveis', last.objs <= first.objs * 1.1 + 20, `${first.objs} → ${last.objs}`);
 check('nós do DOM estáveis', last.dom <= first.dom * 1.15 + 20, `${first.dom} → ${last.dom}`);
 check('ouvintes do bus estáveis', last.listeners <= first.listeners + 5, `${first.listeners} → ${last.listeners}`);
@@ -159,5 +170,6 @@ console.log('atendidos', served, 'perdidos', lost, 'tempo total', Math.round((Da
 console.log('CUSTOS', JSON.stringify(costs));
 if (OUT) writeFileSync(OUT, JSON.stringify({ rows, costs, driftSeen, orphanSeen, errors: errors.slice(0, 50), served, lost }, null, 1));
 await browser.close();
+server?.kill();
 console.log(fails.length ? `FALHAS (${fails.length}): ${fails.join(' ; ')}` : 'OK');
 process.exit(fails.length ? 1 : 0);

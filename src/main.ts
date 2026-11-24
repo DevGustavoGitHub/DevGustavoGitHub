@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { EventBus } from './core/events';
 import { GameClock } from './core/clock';
 import type { GameContext, GameModule } from './core/module';
-import { load, save, type KV } from './sim/save';
+import { SAVE_KEY, load, save, type KV } from './sim/save';
 import { newGame } from './sim/state';
 import createWorld from './world';
 import createPlayer from './player';
@@ -30,6 +30,7 @@ scene.background = new THREE.Color(0x9ec9e8);
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
 camera.position.set(6, 9, 18);
 
+const rawSave = kv.getItem(SAVE_KEY);
 const state = load(kv) ?? newGame(Math.floor(Math.random() * 1e9));
 const bus = new EventBus();
 const clock = new GameClock(bus);
@@ -43,7 +44,24 @@ const ctx: GameContext = {
 
 // Ordem importa: world cria cenário, player usa o cenário, npc usa grade do world, ui por último.
 const modules: GameModule[] = [createWorld(), createPlayer(), createNpc(), createAudio(), createUi()];
-for (const m of modules) m.init(ctx);
+const BOOT_RETRY = 'mercadinho:boot-retry';
+try {
+  for (const m of modules) m.init(ctx);
+  try { sessionStorage.removeItem(BOOT_RETRY); } catch { /* sem sessionStorage */ }
+} catch (err) {
+  // Save incompatível (ex.: APK mais antigo instalado sobre um save mais novo) não pode travar o jogo para sempre:
+  // guarda uma cópia do save, recomeça do zero uma única vez e avisa a UI (chave 'mercadinho:save-recovered').
+  console.error('[boot] falha ao iniciar com o save atual', err);
+  let retried = false;
+  try { retried = sessionStorage.getItem(BOOT_RETRY) === '1'; } catch { /* idem */ }
+  if (rawSave && !retried) {
+    kv.setItem(`${SAVE_KEY}:backup-${Date.now()}`, rawSave);
+    kv.setItem('mercadinho:save-recovered', String(Date.now()));
+    try { localStorage.removeItem(SAVE_KEY); sessionStorage.setItem(BOOT_RETRY, '1'); } catch { /* idem */ }
+    location.reload();
+  }
+  throw err;
+}
 
 function resize(): void {
   const w = window.innerWidth, h = window.innerHeight;
@@ -57,6 +75,8 @@ resize();
 setInterval(() => ctx.save(), 15000); // autosave periódico
 bus.on('dayEnded', () => ctx.save());
 window.addEventListener('pagehide', () => ctx.save());
+// No Android (WebView) minimizar o app não dispara pagehide: salva também ao ficar oculto.
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') ctx.save(); });
 
 let last = performance.now();
 renderer.setAnimationLoop((now) => {
