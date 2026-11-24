@@ -10,7 +10,7 @@ import { xpForLevel } from '../src/sim/economy';
 import { rentFor } from '../src/sim/rent';
 import { deserialize, serialize } from '../src/sim/save';
 import { DEFAULT_DECOR, newGame, type StoreState } from '../src/sim/state';
-import { RENT, UPGRADES } from '../src/sim/tuning';
+import { RENT, START_MONEY, UPGRADES } from '../src/sim/tuning';
 import { SIDEWALK_DEPTH, storeBounds } from '../src/core/layout';
 import { expose } from './helpers';
 

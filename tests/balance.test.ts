@@ -74,14 +74,14 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
     expect(fair).toBeGreaterThan(high30 * 1.5);
     expect(market).toBeGreaterThan(high30 * 1.5); // o preço sugerido (mercado) rende bem mais que +30%
   });
-  it('início pobre: R$ 150 compram 1 caixa de cada produto barato; dia 1 lucra sem aluguel e sobe para o nível 2', () => {
+  it('início pobre: R$ 250 compram 3 caixas baratas (rodízio: 2 de feijão + 1 de macarrão); dia 1 lucra sem aluguel e sobe para o nível 2', () => {
     for (const seed of SEEDS) {
       const s = newGame(seed);
-      restock(s); // abertura do dia 1: só cabem 2 caixas (feijão + macarrão)
-      expect(s.costBasis.feijao?.units).toBe(12);
+      restock(s); // abertura do dia 1: só cabem 3 caixas (as 2 prateleiras não enchem)
+      expect(s.costBasis.feijao?.units).toBe(24);
       expect(s.costBasis.macarrao?.units).toBe(20);
       expect(s.money).toBeGreaterThanOrEqual(0);
-      expect(s.money).toBeLessThan(7000); // não sobra para uma 3ª caixa
+      expect(s.money).toBeLessThan(7000); // não sobra para uma 4ª caixa
       const d1 = playDay(newGame(seed), newBot());
       expect(d1.fixed).toBe(0);
       expect(d1.netProfit).toBeGreaterThan(0);

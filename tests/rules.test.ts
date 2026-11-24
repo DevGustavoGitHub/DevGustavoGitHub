@@ -287,7 +287,7 @@ describe('expansão, depósito, funcionários, personalização', () => {
 describe('caixas e estoque físico', () => {
   it('pedir, repor, descartar', () => {
     const s = newGame();
-    expect(() => orderBoxes(s, 'feijao', 3)).toThrow('Dinheiro insuficiente'); // início pobre: R$ 150
+    expect(() => orderBoxes(s, 'feijao', 4)).toThrow('Dinheiro insuficiente'); // início pobre: R$ 250 (QA economia) não paga 4 caixas
     s.money = 1_000_000;
     const cost = orderBoxes(s, 'feijao', 3);
     expect(cost).toBeGreaterThan(0);
