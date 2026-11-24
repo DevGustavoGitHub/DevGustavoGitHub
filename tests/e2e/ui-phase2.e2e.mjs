@@ -154,15 +154,11 @@ const closeTablet = async (page) => { await page.keyboard.press('Escape'); await
   const { ctx, page } = await boot(1280, 720);
   await page.evaluate(() => {
     const s = __game.state;
-    s.level = 8; s.money = 900000;
+    s.level = 8; s.levelAck = 8; s.money = 900000; // levelAck: sem comemorações de nível nesta seção
     s.history = Array.from({ length: 30 }, (_, i) => ({ day: i + 1, revenue: 90000 + i * 2000, tips: 0, cogs: 50000, purchases: 60000, fixed: 17000, netProfit: (i % 5 === 2 ? -1 : 1) * (8000 + ((i * 7919) % 30000)), cashDelta: 0, served: 20 + i, lost: 3, reputation: 4 }));
     s.stats = [{ day: s.day, p: { arroz: [40, 120000, 30000], feijao: [30, 40000, 9000] } }];
     s.day = 31;
-    __game.clock.paused = true; // sem comemoração/relógio interferindo
   });
-  await page.evaluate(() => __ui.celebrate?.clear?.());
-  await page.waitForTimeout(300);
-  while (await page.locator('.cele .btn-go').count()) { await page.locator('.cele .btn-go').click(); await page.waitForTimeout(200); }
   await openTablet(page, 'finance');
   const svg = page.locator('.chart svg');
   check('finanças: gráfico SVG renderizado com 30 barras', (await svg.locator('rect.bar-pos, rect.bar-neg').count()) === 30);

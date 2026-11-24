@@ -1,12 +1,13 @@
 // E2E da UI (Fase 3): HUD, carrinho (produto e móvel), pagamento em dinheiro e cartão via eventos, noite + Terminar o dia
 // + resumo, comemoração de nível, missões, aberturas do tablet, placa da porta e aviso de orientação.
-// Uso: npx vite build && (npx vite preview --port 5194 &) && node tests/e2e/ui-phase3.e2e.mjs   (UI3_URL e UI3_SHOTS configuráveis)
+// Fase 4: no celular deitado o tablet ocupa a tela inteira; aviso de orientação não aparece no app nativo.
+// Uso: npx vite build && (npx vite preview --port 5204 &) && node tests/e2e/ui-phase3.e2e.mjs   (UI3_URL e UI3_SHOTS configuráveis)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 const require = createRequire('/opt/node-tools/node_modules/');
 const { chromium } = require('playwright');
 
-const URL = process.env.UI3_URL ?? 'http://localhost:5194/';
+const URL = process.env.UI3_URL ?? 'http://localhost:5204/';
 const OUT = process.env.UI3_SHOTS ?? '/tmp/claude-0/-home-user-DevGustavoGitHub/2ed9bbe2-646e-5ae5-8953-b3786c4c1f1e/scratchpad/ui3/';
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -71,8 +72,11 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.locator('.cart-fab').click();
   await page.waitForSelector('.t3', { timeout: 9000 });
   check(`[${tag}] carrinho abre o Mercado`, /Mercado/i.test(await page.locator('.t3-head h2').innerText()));
-  const tr = await rect(page, '.t3-panel');
-  check(`[${tag}] tablet abaixo do HUD e dentro da tela`, !!tr && tr.y >= hb.b - 1 && tr.b <= h + 1 && tr.r <= w + 1, JSON.stringify({ tr, hb }));
+  const tr = await rect(page, '.t3-panel'), t3 = await rect(page, '.t3');
+  if (h <= 520) { // Fase 4: no celular deitado o tablet ocupa a tela inteira e mostra o dinheiro no cabeçalho
+    const cash = await page.locator('.t3-cash').innerText().catch(() => '');
+    check(`[${tag}] tablet em tela inteira no celular, com o dinheiro no cabeçalho`, !!t3 && t3.x <= 1 && t3.y <= 1 && t3.r >= w - 1 && t3.b >= h - 1 && /R\$/.test(cash), JSON.stringify({ t3, cash }));
+  } else check(`[${tag}] tablet abaixo do HUD e dentro da tela`, !!tr && tr.y >= hb.b - 1 && tr.b <= h + 1 && tr.r <= w + 1, JSON.stringify({ tr, hb }));
   check(`[${tag}] cartão de produto: ícone, móvel exigido e unidades por caixa`, (await page.locator('.pcard[data-product="arroz"] .pc-art .pic, .pcard[data-product="arroz"] .pc-furn svg, .pcard[data-product="arroz"] .pc-units').count()) === 3);
   const side0 = await page.evaluate(() => window.__game.state.sidewalk.length);
   await page.locator('.pcard[data-product="arroz"] .qty button[aria-label="Mais"]').click();
@@ -264,6 +268,19 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.setViewportSize({ width: 844, height: 390 });
   await page.waitForTimeout(300);
   check('[844x390] aviso some em paisagem', await page.evaluate(() => getComputedStyle(document.querySelector('.rotate')).display === 'none'));
+  await ctx.close();
+}
+/* ---------- 8b) Fase 4: no app nativo (Capacitor, paisagem travada pelo sistema) o aviso não aparece ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`nativo pageerror: ${e.message}`));
+  await page.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android' }; });
+  await page.goto(URL);
+  await page.waitForFunction(() => window.__game && window.__ui, null, { timeout: 30000 });
+  await page.waitForTimeout(600);
+  const r = await page.evaluate(() => ({ shown: getComputedStyle(document.querySelector('.rotate')).display !== 'none', paused: window.__game.clock.paused, modal: document.querySelectorAll('.rotate.on').length }));
+  check('[nativo] sem aviso "Gire o celular" no app (orientação travada)', !r.shown && r.modal === 0, JSON.stringify(r));
   await ctx.close();
 }
 

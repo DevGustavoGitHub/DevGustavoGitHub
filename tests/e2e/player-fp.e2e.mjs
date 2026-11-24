@@ -71,6 +71,8 @@ const tapSel = async (sel) => {
   return true;
 };
 const holdSel = async (sel, ms) => { const c = await center(sel); if (!c) return false; await touch('touchStart', [c]); await page.waitForTimeout(ms); await touch('touchEnd', []); await page.waitForTimeout(80); return true; };
+/** Segura o seletor (toque CDP) até a condição valer (ou `ms`): independe do FPS do SwiftShader. */
+const holdUntil = async (sel, fn, arg, ms = 6000) => { const c = await center(sel); if (!c) return false; await touch('touchStart', [c]); const ok = await until(fn, arg, ms); await touch('touchEnd', []); await page.waitForTimeout(120); return ok; };
 const evs = (n) => page.evaluate((k) => window.__ev.filter((e) => e.n === k).map((e) => e.p), n);
 const clearEv = () => page.evaluate(() => { window.__ev.length = 0; });
 const act = () => page.evaluate(() => __player.actions());
@@ -91,6 +93,9 @@ const giveBox = (pid, units, open = false) => page.evaluate(([pid, units, open])
   __game.state.sidewalk.push(b); __player.svc.carryingAll.push(b); __game.bus.emit('stateChanged', { what: 'sidewalk' });
 }, [pid, units, open]);
 const dropAll = () => page.evaluate(() => __player.dropAll());
+/** Some com as caixas da mão (tira do estado): nada empilhado na frente das prateleiras bloqueia a mira dos níveis. */
+const discardHeld = () => page.evaluate(() => { for (const b of [...__player.svc.carryingAll]) { const i = __game.state.sidewalk.indexOf(b); if (i >= 0) __game.state.sidewalk.splice(i, 1); } __game.bus.emit('stateChanged', { what: 'sidewalk' }); });
+
 const shelfOf = (pid) => page.evaluate((p) => { const f = __game.state.furniture.find((x) => x.productId === p); return f ? { id: f.id, x: f.x, z: f.z, rot: f.rot } : null; }, pid);
 /** FASE 4: níveis do móvel (teste escreve direto; os derivados se recalculam na próxima mutação da sim). */
 const setLevels = (id, levels) => page.evaluate(([id, levels]) => {
@@ -198,7 +203,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('ação vira "Repor"', (await act()).primary?.label === 'Repor');
   const before = (await lvls(f.id))[0].units;
   await shot('p2-caixa-aberta-repor');
-  await holdSel('.pl-act-btn', 1600);
+  await holdUntil('.pl-act-btn', ([id, b]) => __game.state.furniture.find((x) => x.id === id).levels[0].units >= b + 6, [f.id, before], 6000);
   const L = await lvls(f.id);
   const after = { shelf: L[0].units, units: (await boxNow())?.units, other: L.slice(1).reduce((a, l) => a + l.units, 0), n: L.length };
   check('segurar "Repor" repete no nível mirado (placeUnitsInLevel, 1 un. a cada ~0,12 s)', after.shelf - before >= 4 && after.shelf - before <= 12 && after.other === 0, `${before} → ${after.shelf} (outros níveis ${after.other}; ${after.n} níveis)`);
@@ -211,7 +216,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await page.evaluate(() => __player.look(__player.cam().yaw, 0.15));
   await page.waitForTimeout(150);
   await shot('p3-caixa-fechada');
-  await dropAll();
+  await discardHeld();
 }
 
 // 6) FASE 4 — níveis: Retirar com caixa vazia → repor em outro nível; dois produtos no mesmo móvel; desabilitados; Preço
@@ -227,21 +232,23 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const a = await act();
   check('caixa aberta VAZIA + nível com unidades → "Retirar"', a.primary?.label === 'Retirar' && a.primary.enabled, JSON.stringify(a));
   await clearEv();
-  await holdSel('.pl-act-btn', 1700);
+  await holdUntil('.pl-act-btn', (id) => __game.state.furniture.find((x) => x.id === id).levels[1].units === 0, f.id, 6000);
+  await page.waitForTimeout(300); // segue segurando além do fim: não pode devolver ("Repor")
   const r = { lv: await lvls(f.id), box: await boxNow() };
   check('segurar "Retirar" puxa o nível para a caixa (pullUnitsFromLevel; caixa vira do produto do nível)', r.lv[1].units === 0 && r.lv[0].units === 4 && r.box?.pid === 'feijao' && r.box.units === 6, JSON.stringify(r));
   const ev = await evs('player:action');
   check('player:action pullUnits por unidade e nada devolvido no meio (não vira "Repor")', ev.filter((e) => e.kind === 'pullUnits' && e.level === 1).length === 6 && !ev.some((e) => e.kind === 'placeUnits'), JSON.stringify(ev.map((e) => e.kind)));
   await aimLvl(f, 0);
   check('com a caixa puxada, outro nível → "Repor"', (await act()).primary?.label === 'Repor', JSON.stringify(await act()));
-  await holdSel('.pl-act-btn', 1700);
+  await holdUntil('.pl-act-btn', () => __player.svc.carrying?.units === 0, null, 6000);
   const r2 = { lv: await lvls(f.id), box: await boxNow() };
   check('repor em outro nível (nível 0: 4 → 10, caixa vazia)', r2.lv[0].units === 10 && r2.box?.units === 0, JSON.stringify(r2));
-  await dropAll();
+  await discardHeld();
   await giveBox('arroz', 10, true);
   await aimLvl(f, 1);
   check('nível com outro produto e 0 un. aceita a caixa → "Repor"', (await act()).primary?.label === 'Repor', JSON.stringify(await act()));
-  await holdSel('.pl-act-btn', 2000);
+  await holdUntil('.pl-act-btn', (id) => __game.state.furniture.find((x) => x.id === id).levels[1].units >= 8, f.id, 6000);
+  await page.waitForTimeout(300);
   const r3 = { lv: await lvls(f.id), box: await boxNow() };
   check('dois produtos diferentes na mesma prateleira (nível 0 feijão, nível 1 arroz)', r3.lv[0].productId === 'feijao' && r3.lv[0].units === 10 && r3.lv[1].productId === 'arroz' && r3.lv[1].units === 8 && r3.box?.units === 2, JSON.stringify(r3));
   await shot('p2b-dois-produtos');
@@ -252,17 +259,17 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('nível de outro produto com unidades → "Outro produto" desabilitado', o.primary?.label === 'Outro produto' && o.primary.enabled === false && (await page.locator('.pl-main.disabled').count()) === 1, JSON.stringify(o));
   await page.evaluate(() => __player.press());
   check('ação desabilitada não mexe no nível', JSON.stringify(await lvls(f.id)) === JSON.stringify(r3.lv));
-  await dropAll();
+  await discardHeld();
   await setLevels(g.id, [{ productId: 'macarrao', units: 5 }, { units: 0 }]);
   await giveBox('refri', 6, true);
   await aimLvl(g, 1);
   const nf = await act();
   check('categoria recusada (bebida na prateleira) → "Não cabe aqui" desabilitado', nf.primary?.label === 'Não cabe aqui' && nf.primary.enabled === false, JSON.stringify(nf));
-  await dropAll();
+  await discardHeld();
   await giveBox('feijao', 4, false);
   await aimLvl(g, 1);
   check('caixa fechada + nível vazio sem etiqueta → "Abrir caixa"', (await act()).primary?.label === 'Abrir caixa', JSON.stringify(await act()));
-  await dropAll();
+  await discardHeld();
   await clearEv();
   for (const [lvl, pid] of [[1, 'arroz'], [0, 'feijao']]) {
     await closeModals();
@@ -492,7 +499,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('joystick andando + toque simultâneo em "Abrir caixa" abre a caixa (pointerdown)', walking.stick && walking.my > 0.5 && mid.open, JSON.stringify({ walking, mid, clicks }));
   check('o joystick continua ativo e andando durante/depois do 2º toque', mid.stick && mid.my > 0.5 && Math.hypot(mid.pos.x - p0.x, mid.pos.z - p0.z) > 0.8, JSON.stringify({ p0, p1: mid.pos }));
   console.log(`INFO click do botão nesse multitoque: ${mid.clicks} (o navegador pode nem gerar click com outro dedo na tela)`);
-  await dropAll();
+  await discardHeld();
   // segurar "Repor" com o 2º dedo; soltar o joystick não solta o botão; soltar o dedo do botão para
   const f = await shelfOf('feijao');
   await setLevels(f.id, [{ productId: 'feijao', units: 0 }, { productId: 'arroz', units: 8 }]);
@@ -501,12 +508,13 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('multitoque: alvo pronto ("Repor")', (await act()).primary?.label === 'Repor', JSON.stringify(await act()));
   const M = await center('.pl-act-btn');
   const L0 = async () => (await lvls(f.id))[0].units;
+  const lv0 = (id) => __game.state.furniture.find((x) => x.id === id).levels[0].units;
   await touch('touchStart', [{ x: rest.x, y: rest.y, id: 1 }]); // joystick parado (zona morta)
   await touch('touchStart', [{ x: M.x, y: M.y, id: 2 }]);
-  await page.waitForTimeout(450);
+  await until(`(${lv0})(${f.id}) >= 3`, null, 5000);
   const n1 = await L0();
   await touch('touchEnd', [{ x: rest.x, y: rest.y, id: 1 }]); // solta o joystick; o botão continua seguro
-  await page.waitForTimeout(450);
+  await until(`(${lv0})(${f.id}) >= ${n1 + 2}`, null, 5000);
   const n2 = await L0();
   await touch('touchEnd', []);
   await page.waitForTimeout(150);
@@ -518,7 +526,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('soltar o dedo do botão para de repor', n3 >= n2 && n4 === n3 && n4 < 12, `${n2} → ${n3} → ${n4}`);
   const ta = await page.evaluate(() => [...document.querySelectorAll('[data-player-controls] button')].map((b) => getComputedStyle(b).touchAction));
   check('touch-action:none em todos os botões do player', ta.length >= 5 && ta.every((v) => v === 'none'), ta.join(','));
-  await dropAll();
+  await discardHeld();
 }
 
 // 14) FASE 4 — sensibilidade do olhar (lookSensitivity de mercadinho:settings e settings:changed), toque e mouse

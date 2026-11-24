@@ -88,4 +88,12 @@ export const phase4Css = `
   .btn-go{min-height:48px;font-size:18px}.btn-det{min-height:46px}
 }
 @media (max-height:360px){.c-emb{display:none}}
+
+/* HUD estreito (720 px): o dinheiro não encolhe (a barra de XP cede espaço) */
+.money3{flex:none}
+/* Mercado no celular: aviso + "Encher prateleiras" numa linha só (mais cartões visíveis) */
+@media (max-height:520px){
+  .mk-note{flex-wrap:nowrap;font-size:12px;line-height:1.2;padding:3px 4px 3px 10px}
+  .mk-note .btn{flex:none;padding:0 10px}
+}
 `;
