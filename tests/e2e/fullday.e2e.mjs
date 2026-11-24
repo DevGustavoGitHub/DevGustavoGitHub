@@ -27,8 +27,11 @@ await page.evaluate(() => { __npc.timeScale = 20; __game.bus.emit('store:sign');
 await page.waitForTimeout(400);
 check('placa (store:sign) abre a loja', await page.evaluate(() => __game.clock.phase === 'open'));
 
-// 21:00: noite + botão "Terminar o dia" (o resumo NÃO abre sozinho)
-await page.waitForSelector('#end-day', { timeout: 170000 }).catch(() => {});
+// 21:00: noite + botão "Terminar o dia" (o resumo NÃO abre sozinho). Com SwiftShader lento o relógio anda pouco:
+// depois de ~20 s de dia acelerado, adianta para 20:58 (o fluxo testado é o da noite em diante).
+await page.waitForSelector('#end-day', { timeout: 20000 }).catch(() => {});
+await page.evaluate(() => { const c = __game.clock; if (c.phase === 'open' && c.minute < 20 * 60 + 58) c.minute = 20 * 60 + 58; });
+await page.waitForSelector('#end-day', { timeout: 60000 }).catch(() => {});
 const night = await page.evaluate(() => ({ phase: __game.clock.phase, card: document.querySelector('.mcard.night')?.textContent ?? '', btn: !!document.querySelector('#end-day') }));
 check('noite: aviso e botão "Terminar o dia"', night.btn && night.phase === 'closing' && /Nenhum cliente novo/.test(night.card), JSON.stringify(night));
 const served = await page.evaluate(() => __npc.stats?.served ?? __game.state.ledger.served);

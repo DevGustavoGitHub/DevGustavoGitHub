@@ -162,6 +162,7 @@ const closeTablet = async (page) => { await page.keyboard.press('Escape'); await
     s.day = 31;
   });
   await openTablet(page, 'finance');
+  await page.evaluate(() => __ui.tablet.api.hold(true)); // a aba Finanças é "live": congela o re-render durante o hover
   const svg = page.locator('.chart svg');
   check('finanças: gráfico SVG renderizado com 30 barras', (await svg.locator('rect.bar-pos, rect.bar-neg').count()) === 30);
   await svg.hover({ position: { x: 200, y: 80 }, force: true });

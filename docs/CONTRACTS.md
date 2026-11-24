@@ -386,6 +386,11 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   `tagLevels()` (`{id, level, pid, text}`); `tags()` agrega por produto (`-` se todos os níveis dele esgotaram).
 - **Desempenho (perf.e2e, mesma cena):** draw calls 68–82 dentro (igual à Fase 3), low 54, texturas 16, sem vazamentos;
   triângulos ≈ 117k (low ≈ 110k).
+- **Editar móvel (QA):** VENDER pede confirmação ("Vender a prateleira por R$ X? (metade do preço) N un. voltam em K caixas na
+  calçada (ENTREGAS)" / "vão para o depósito", simulado numa cópia do estado) com VENDER/VOLTAR (Enter/Delete confirmam, Esc volta);
+  vender/GUARDAR avisam no toast para onde foram as unidades. Prévia de caixa vazia diz "(vazia)".
+- **CPU:** `sync` sai cedo por hash numérico sem alocação (só reconstrói o que mudou); preços só quando `prices/market` mudam;
+  matrizes de objetos estáticos congeladas (95 → 14 automáticos). Perfil opt-in: `__world.profile(true)` / `__world.profile()`.
 
 ## Fase 4 — sim (implementado; números em docs/GDD.md §4.1, §4.4 e §4.5)
 - **Níveis:** prateleira 4, geladeira 4, freezer 3 (`FurnitureSpec.slots`). `Furniture.levels: ShelfLevel[]` é a fonte da verdade
@@ -519,3 +524,14 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   `{productId, boxes, reason: 'sidewalk-full'|'no-money', message}` (pt-BR). **npc** — mostre `message` (toast `bad`), no máx. 1×/hora por produto.
 - **QA de economia (mantido):** dinheiro inicial R$ 250, aluguel a partir do nível 4 ou dia 6, empréstimo R$ 400 × nível; GDD §1/§4 atualizados.
 - **Pendente:** um caixa contratado por balcão (proposta P1 de docs/qa/economy.md) não foi implementado nesta rodada.
+- **Adendo QA (gameplay.md):** ações que ABREM painel/modo (Preço, Usar computador, Depósito (licença), Abrir/Fechar loja,
+  Mover) rodam no `pointerup` do MESMO dedo, se ele for solto sobre o botão (folga de 24 px). Repor/Retirar/Pegar/joystick seguem no
+  `pointerdown`. O `touchend` de cada botão do player cancela o `click` sintético (sem clique fantasma no tablet). Teclado (E/Espaço,
+  Enter) age na hora. Placa com intervalo de 0,6 s (toque duplo não abre e fecha). Ao esvaziar a caixa no Repor, o mesmo nível não
+  oferece "Retirar" por 1 s ("Caixa vazia"). Toque no 3D sentado (esteira, dinheiro): até 800 ms com o dedo a menos de 14 px do início.
+- **Desempenho:** mira (raycast) a cada 2 quadros com câmera/posição mudando, a cada 6 parado e na hora após `stateChanged`;
+  teste próprio sem alocação contra a caixa envolvente de cada proxy (sem objetos `Intersection` do Three; a matriz da câmera é
+  atualizada antes, então a mira não fica um quadro atrasada); `resolve` das ações só quando alvo/estado/caixas/fase mudam (ou a
+  cada 0,25 s); sem objetos/strings/closures por quadro em controls/held/colisão. Medida (`__player.bench`, loja cheia: 26 móveis,
+  14 caixas, 6 sujeiras): alocação 2,7–3,8 KB → 0,55–1,8 KB por quadro (resto: números boxados no V8/Three e `isWalkable` ao andar);
+  tempo 0,009–0,022 → 0,003–0,017 ms/quadro no laço. Debug: `__player.bench(n, walk, look)`, `perf()`, `perfReset()`, `castNow()`.

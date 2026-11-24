@@ -278,7 +278,8 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`nativo pageerror: ${e.message}`));
-  await page.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android' }; });
+  // o @capacitor/core (importado por src/native.ts) decide a plataforma pela ponte nativa: simula a do Android
+  await page.addInitScript(() => { window.androidBridge = { postMessage: () => {} }; });
   await page.goto(URL);
   await page.waitForFunction(() => window.__game && window.__ui, null, { timeout: 30000 });
   await page.waitForTimeout(600);
