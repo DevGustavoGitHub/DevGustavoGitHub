@@ -59,6 +59,17 @@ export class PayPanel {
 
   constructor(private kit: UiKit, private layer: HTMLElement) {}
   get isOpen(): boolean { return this.el !== null; }
+  /** Cliente do pagamento aberto (null sem painel). */
+  get customerId(): number | null { return this.req?.customerId ?? null; }
+
+  /** O npc cancelou (cliente cansou/desistiu, `checkout:cancel`): fecha sem "Pago!" e avisa. */
+  abort(msg: string): void {
+    if (!this.el) return;
+    const wasDone = this.done;
+    this.done = true;
+    this.close();
+    if (!wasDone) { this.kit.toast(msg, 'bad'); this.kit.sfx('error'); }
+  }
 
   open(req: PayRequest): void {
     if (this.el) return;

@@ -11,6 +11,9 @@ import { makeRng } from '../src/sim/rng';
 import { deserialize, serialize } from '../src/sim/save';
 import { newGame, type Furniture, type StoreState } from '../src/sim/state';
 import { levelUnits } from './helpers';
+import { canPlace, moveFurniture, runAutoOrders, setAutoOrder } from '../src/sim/api';
+import { load, save, SAVE_KEY, SAVE_RECOVERED_KEY, type KV } from '../src/sim/save';
+import { CLOSE_MIN, OPEN_MIN } from '../src/sim/state';
 
 const rich = (level = 12): StoreState => {
   const s = newGame(4);
@@ -249,5 +252,91 @@ describe('Fase 4 — preço sugerido e curva de aceitação', () => {
     let ok = 0;
     for (let i = 0; i < 4000; i++) if (acceptsPrice(s, 'arroz', r).ok) ok++;
     expect(ok / 4000).toBeGreaterThan(0.93); // cliente quase sempre aceita o preço sugerido
+  });
+});
+
+describe('Fase 4 — correções do QA (save, relógio, cestas, operador do caixa, pedido automático)', () => {
+  const kvOf = (raw?: string): KV & { data: Record<string, string> } => {
+    const data: Record<string, string> = raw === undefined ? {} : { [SAVE_KEY]: raw };
+    return { data, getItem: (k) => data[k] ?? null, setItem: (k, v) => { data[k] = v; } };
+  };
+  it('hora/fase do dia persistem; ausente ou inválida = preparação às 08:00', () => {
+    const s = newGame(2);
+    expect(s.clock).toEqual({ minute: OPEN_MIN, phase: 'prep' });
+    s.clock = { minute: 700.5, phase: 'open' };
+    expect(deserialize(serialize(s)).clock).toEqual({ minute: 700.5, phase: 'open' });
+    const raw = JSON.parse(serialize(s)) as Record<string, unknown>;
+    delete raw.clock;
+    expect(deserialize(JSON.stringify(raw)).clock).toEqual({ minute: OPEN_MIN, phase: 'prep' });
+    raw.clock = { minute: 99999, phase: 'closing' };
+    expect(deserialize(JSON.stringify(raw)).clock).toEqual({ minute: CLOSE_MIN, phase: 'closing' });
+    raw.clock = { minute: null, phase: 'dormindo' };
+    expect(deserialize(JSON.stringify(raw)).clock).toEqual({ minute: OPEN_MIN, phase: 'prep' });
+  });
+  it('itens nas cestas dos clientes (npcHeld) voltam à exposição ao carregar, sem perder unidades nem o custo médio', () => {
+    const s = rich();
+    const fe = shelfOf(s, 'feijao');
+    orderBoxes(s, 'feijao', 1);
+    placeUnitsInLevel(s, 0, fe.id, 0, 12);
+    expect(takeFromLevel(s, fe.id, 0, 5)).toBe(5); // cliente com 5 na cesta
+    s.npcHeld = [{ productId: 'feijao', qty: 5 }, { productId: 'xyz', qty: 2 }, { productId: 'macarrao', qty: -1 }];
+    expect(s.costBasis.feijao!.units).toBe(12); // ainda não vendidas
+    const t = deserialize(serialize(s));
+    expect(t.npcHeld).toEqual([]);
+    expect(t.shelf.feijao).toBe(12);
+    expect(t.costBasis.feijao).toEqual(s.costBasis.feijao);
+    checkDerived(t);
+    const u = deserialize(serialize(newGame(2)));
+    expect(u.npcHeld).toBeUndefined();
+  });
+  it('o tile do operador de cada balcão (cadeira do caixa) fica livre e alcançável: comprar, montar, mover', () => {
+    const s = rich();
+    expect(canPlace(s, 'shelf', 8, 5, 0)).toBe(false); // (9,5) = operador do balcão (8,6)
+    expect(canPlace(s, 'decor', 9, 5, 0)).toBe(false);
+    expect(canPlace(s, 'shelf', 6, 5, 0)).toBe(true);
+    expect(() => buyFurniture(s, 'shelf', 8, 5, 0)).toThrow('Posição inválida');
+    const sh = buyFurniture(s, 'shelf', 6, 5, 0);
+    expect(() => moveFurniture(s, sh.id, 9, 5, 90)).toThrow('Posição inválida');
+    checkoutCart(s, [{ kind: 'furniture', id: 'decor', qty: 1, variant: 'plant' }]);
+    expect(() => placeFromStock(s, 0, 9, 5, 0)).toThrow('Posição inválida');
+    // balcão novo: operador dentro do salão e livre; rot 180 → operador em (x, z+2)
+    expect(canPlace(s, 'counter', 1, 0, 0)).toBe(false); // operador cairia em z = −1 (fora do salão)
+    expect(canPlace(s, 'counter', 1, 6, 0)).toBe(true);
+    expect(canPlace(s, 'counter', 0, 3, 180)).toBe(true); // operador (0,5) livre
+    buyFurniture(s, 'decor', 0, 5, 0, 'plant');
+    expect(canPlace(s, 'counter', 0, 3, 180)).toBe(false); // operador (0,5) ocupado pela planta
+    // fechar o último caminho até a cadeira é recusado: (9,5) cercado por (8,5), (10,5), (9,4) e o balcão
+    buyFurniture(s, 'decor', 8, 5, 0, 'plant');
+    buyFurniture(s, 'decor', 10, 5, 0, 'plant');
+    expect(canPlace(s, 'decor', 9, 4, 0)).toBe(false);
+    expect(canPlace(s, 'decor', 9, 3, 0)).toBe(true);
+  });
+  it('save ilegível: backup do texto original + aviso para a UI (uma vez por conteúdo); depois o autosave não apaga o original', () => {
+    const kv = kvOf('{"version":1,"money":');
+    expect(load(kv)).toBeNull();
+    const rec = JSON.parse(kv.data[SAVE_RECOVERED_KEY]!) as { key: string; at: number; error: string };
+    expect(rec.key.startsWith(`${SAVE_KEY}:corrupt-`)).toBe(true);
+    expect(kv.data[rec.key]).toBe('{"version":1,"money":');
+    expect(load(kv)).toBeNull();
+    expect(Object.keys(kv.data).filter((k) => k.includes(':corrupt-'))).toHaveLength(1); // não duplica
+    save(kv, newGame(1));
+    expect(kv.data[rec.key]).toBe('{"version":1,"money":');
+    expect(load(kvOf())).toBeNull(); // sem save: nada de backup
+  });
+  it('pedido automático informa por que não comprou (calçada cheia / sem dinheiro) sem mudar o array de compras', () => {
+    const s = rich();
+    setAutoOrder(s, 'arroz', { minUnits: 50, boxes: 2 });
+    setAutoOrder(s, 'feijao', { minUnits: 50, boxes: 1 });
+    for (let i = 0; i < 47; i++) s.sidewalk.push({ productId: 'macarrao', units: 0 });
+    s.costBasis.macarrao = { units: 0, avg: 350 };
+    const r = runAutoOrders(s); // 47 + 2 > 48: arroz não cabe; feijão (1 cx) cabe
+    expect(r.map((x) => x.productId)).toEqual(['feijao']);
+    expect(r.skipped).toEqual([expect.objectContaining({ productId: 'arroz', boxes: 2, reason: 'sidewalk-full' })]);
+    s.sidewalk.length = 0;
+    s.money = 100;
+    const r2 = runAutoOrders(s);
+    expect(r2).toEqual([]); // `skipped` não é enumerável: comparações antigas continuam valendo
+    expect(r2.skipped.map((x) => x.reason)).toEqual(['no-money', 'no-money']);
+    expect(r2.skipped[0]!.message).toContain('Arroz');
   });
 });

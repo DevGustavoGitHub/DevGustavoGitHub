@@ -7,7 +7,7 @@
  */
 import type { GameContext, GameModule } from '../core/module';
 import type { Vec2, WorldService } from '../core/services';
-import { CLOSE_MIN, OPEN_MIN } from '../sim/state';
+import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
 import * as api from '../sim/api';
 import { Agent } from './agent';
 import { disposeBubbles } from './bubbles';
@@ -19,6 +19,21 @@ import { stockForTest } from './helpers';
 import { type CustomerKind, disposeModels, pickKind } from './model';
 import { type AgentLike, type BubbleKey, type Env, clamp, safe } from './shared';
 import { Cashier, Janitor, Staff, Stocker, type StaffRole } from './staff';
+
+/** RNG determinístico (mulberry32) por (seed, dia): a agenda do dia é a mesma ao recarregar. */
+export function dayRand(seed: number, day: number): () => number {
+  let a = (Math.imul(seed | 0, 0x9e3779b1) ^ Math.imul((day | 0) + 1, 0x85ebca6b)) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Itens com clientes (cestas, esteira, pagamento): a sim devolve às prateleiras ao carregar um save. */
+type HeldState = StoreState & { npcHeld?: { productId: string; qty: number }[] };
 
 /** Minutos de jogo das chegadas: base uniforme + picos (manhã, almoço, fim de tarde). */
 export function arrivalTimes(n: number, rand: () => number): number[] {
@@ -60,6 +75,8 @@ export default function create(): GameModule {
   let timeScale = 1;
   const stats = { spawned: 0, sold: 0, gaveUp: 0, left: 0, kinds: { normal: 0, bulk: 0, picky: 0, kid: 0 } as Record<CustomerKind, number>, autoOrders: 0 };
   let lastAutoHour = -1;
+  /** Custo do update do npc (ms acumulados / quadros) para __npc.perf(). */
+  const perf = { ms: 0, frames: 0 };
   let autoBroken = false;
   /** Gancho de teste: substitui api.runAutoOrders (útil enquanto a sim não implementa). */
   let autoImpl: ((s: typeof ctx.state) => { productId: string; boxes: number; cost: number }[]) | null = null;
@@ -68,6 +85,15 @@ export default function create(): GameModule {
     const n = safe('productById', () => productById(id).name, id);
     return n.replace(/\s+[\d(].*$/, '');
   };
+
+  /** state.npcHeld = soma dos itens de todos os clientes (síncrono: um save a qualquer momento fica coerente). */
+  function syncHeld(): void {
+    const m = new Map<string, number>();
+    for (const c of customers) for (const it of c.items) if (it.qty > 0) m.set(it.productId, (m.get(it.productId) ?? 0) + it.qty);
+    const out: { productId: string; qty: number }[] = [];
+    for (const [productId, qty] of m) out.push({ productId, qty });
+    (ctx.state as HeldState).npcHeld = out;
+  }
 
   /** Pedido automático (sim.runAutoOrders): toast resumindo, sfx buy e stateChanged 'sidewalk'. */
   function runAuto(): { productId: string; boxes: number; cost: number }[] {
@@ -82,12 +108,26 @@ export default function create(): GameModule {
       return [];
     }
     if (!res || res.length === 0) return [];
-    const parts = res.map((r) => `${r.boxes} cx ${shortName(r.productId)}`);
-    stats.autoOrders += res.length;
+    // a sim informa o motivo das regras que não compraram (ex.: calçada cheia, sem dinheiro): aviso separado
+    // (o prefixo "Pedido automático:" é contrato da UI e fica só para o que foi comprado)
+    const why = (r: object): string | null => {
+      const o = r as { reason?: unknown; error?: unknown; skipped?: unknown };
+      const v = o.reason ?? o.error ?? o.skipped;
+      return typeof v === 'string' && v ? v : v === true ? 'não comprado' : null;
+    };
+    const ok = res.filter((r) => !why(r) && r.boxes > 0);
+    const bad = res.filter((r) => why(r));
+    if (bad.length > 0) {
+      const parts = bad.map((r) => `${shortName(r.productId)} (${why(r)!.replace(/\.$/, '').toLowerCase()})`);
+      ctx.bus.emit('toast', { text: `Pedido automático não comprou ${parts.join(', ')}`, kind: 'bad' });
+    }
+    if (ok.length === 0) return ok;
+    const parts = ok.map((r) => `${r.boxes} cx ${shortName(r.productId)}`);
+    stats.autoOrders += ok.length;
     ctx.bus.emit('toast', { text: `Pedido automático: ${parts.join(', ')}`, kind: 'info' });
     ctx.bus.emit('sfx', { name: 'buy' });
     ctx.bus.emit('stateChanged', { what: 'sidewalk' });
-    return res;
+    return ok;
   }
 
   /** Dispara na abertura e a cada hora cheia de jogo enquanto aberta. */
@@ -105,6 +145,7 @@ export default function create(): GameModule {
     agents,
     say(a, key: BubbleKey, seconds = 2) { (a as Agent).bubble.show(key, seconds); },
     changed(what) { ctx.bus.emit('stateChanged', { what }); },
+    heldChanged() { syncHeld(); },
     sfx(name, x, z) {
       if (x !== undefined && z !== undefined) { ctx.bus.emit('sfx', { name, x, z }); return; }
       const b = ctx.state.expansion * 4 + 12;
@@ -144,7 +185,10 @@ export default function create(): GameModule {
   function buildSchedule(): void {
     schedDay = ctx.state.day;
     const n = safe('plannedArrivals', () => api.plannedArrivals(ctx.state), 0);
-    sched = arrivalTimes(n, ctx.rand).filter((t) => t >= ctx.clock.minute - 1);
+    // determinística por (seed, dia) e retomada do minuto atual: ao recarregar no meio do dia (o core restaura
+    // clock.minute) as chegadas já ocorridas não se repetem
+    const now = ctx.clock.minute;
+    sched = arrivalTimes(n, dayRand(ctx.state.seed, ctx.state.day)).filter((t) => t >= now);
     schedIdx = 0;
     emptyEmitted = false;
   }
@@ -229,9 +273,12 @@ export default function create(): GameModule {
         for (const cu of customers) { cu.abort(); cu.remove(); }
         lastAutoHour = -1;
         customers.length = 0; schedDay = -1; sched = []; emptyEmitted = false;
+        syncHeld();
       }));
       unsub.push(ctx.bus.on('checkoutResult', (r) => { if (r) mgr.onResult(r); }));
+      unsub.push(ctx.bus.on('ui:modal', (m) => mgr.setModal(!!m?.open)));
       syncStaff(true);
+      syncHeld(); // a sim já devolveu às prateleiras o que estava com clientes no save
       (window as unknown as { __npc: unknown }).__npc = {
         spawnNow: (n = 1, kind?: CustomerKind) => { let k = 0; for (let i = 0; i < n; i++) if (spawnCustomer(kind)) k++; return k; },
         /** Amostra a distribuição de tipos sorteados (não cria clientes). */
@@ -256,10 +303,16 @@ export default function create(): GameModule {
         stock: (n = 30, productId?: string) => stockForTest(ctx.state, n, productId),
         /** Teste (Fase 4): onde o cliente encontra o produto (api.locateProduct; null = API de níveis indisponível). */
         locate: (productId: string) => safe('locateProduct', () => api.locateProduct(ctx.state, productId), null),
+        /** Agenda de chegadas restante (minutos) e itens com clientes (state.npcHeld). */
+        schedule: () => ({ day: schedDay, next: sched.slice(schedIdx), done: schedIdx }),
+        /** ms médios de JS do update do npc por quadro desde a última leitura (zera). */
+        perf: () => { const r = { ms: +(perf.ms / Math.max(1, perf.frames)).toFixed(3), frames: perf.frames, people: customers.length + staff.length }; perf.ms = 0; perf.frames = 0; return r; },
+        held: () => ((ctx.state as HeldState).npcHeld ?? []).map((h) => ({ ...h })),
       };
     },
     update(dt) {
       if (ctx.clock.paused) return;
+      const t0 = performance.now();
       syncT += dt;
       if (syncT > 1) { syncT = 0; syncStaff(false); }
       if (timeScale > 1) ctx.clock.update(dt * (timeScale - 1));
@@ -267,6 +320,7 @@ export default function create(): GameModule {
       const n = Math.max(1, Math.ceil(total / 0.05));
       const h = total / n;
       for (let i = 0; i < n; i++) tick(h);
+      perf.ms += performance.now() - t0; perf.frames++;
     },
     dispose() {
       for (const u of unsub) u();

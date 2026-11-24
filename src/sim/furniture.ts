@@ -75,13 +75,32 @@ export function storageUsed(state: StoreState): number {
 
 /* ---------- colocação ---------- */
 
-interface Rect { x: number; z: number; w: number; d: number; type: FurnitureType }
+interface Rect { x: number; z: number; w: number; d: number; type: FurnitureType; rot: Rot }
 
 const key = (x: number, z: number): number => (z + 64) * 256 + x;
 
 function rectOf(f: { type: FurnitureType; x: number; z: number; rot: Rot }): Rect {
   const { w, d } = footprintOf(f.type, f.rot);
-  return { x: f.x, z: f.z, w, d, type: f.type };
+  return { x: f.x, z: f.z, w, d, type: f.type, rot: f.rot };
+}
+
+/**
+ * Tile do operador de um balcão (cadeira do caixa): atrás do balcão — mesma conta do world (`counters().operator`:
+ * ponto local (0,5; −1,5) a partir do centro do footprint). rot 0 → (x+1, z−1); 90 → (x−1, z); 180 → (x, z+2); 270 → (x+2, z+1).
+ */
+export function operatorTile(f: { x: number; z: number; rot: Rot }): [number, number] {
+  const { w, d } = footprintOf('counter', f.rot);
+  const t = (f.rot * Math.PI) / 180;
+  const c = Math.round(Math.cos(t));
+  const s = Math.round(Math.sin(t));
+  return [Math.floor(f.x + w / 2 + 0.5 * c - 1.5 * s), Math.floor(f.z + d / 2 - 0.5 * s - 1.5 * c)];
+}
+
+/** Tiles que nenhum móvel pode ocupar: antessala/passagem (keepTiles) + tile do operador de cada balcão (exceto `exceptId`). */
+export function reservedTiles(state: StoreState, exceptId?: number): [number, number][] {
+  const out = keepTiles(state);
+  for (const f of state.furniture) if (f.type === 'counter' && f.id !== exceptId) out.push(operatorTile(f));
+  return out;
 }
 
 export function canPlace(state: StoreState, type: FurnitureType, x: number, z: number, rot: Rot, ignoreId?: number): boolean {
@@ -101,7 +120,7 @@ export function canPlace(state: StoreState, type: FurnitureType, x: number, z: n
   } else if (z < 0 || z + d > b.depth) return false;
 
   const others = state.furniture.filter((f) => f.id !== ignoreId).map(rectOf);
-  const all: Rect[] = [...others, { x, z, w, d, type }];
+  const all: Rect[] = [...others, { x, z, w, d, type, rot }];
   const occ = new Set<number>();
   for (const r of all) {
     for (let i = 0; i < r.w; i++) {
@@ -120,6 +139,13 @@ export function canPlace(state: StoreState, type: FurnitureType, x: number, z: n
   const mine = new Set<number>();
   for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) mine.add(key(x + i, z + j));
   for (const [xx, zz] of keep) if (mine.has(key(xx, zz))) return false;
+  // Fase 4 (QA): o tile do operador de cada balcão (cadeira do caixa) fica livre; o do balcão novo, dentro do salão
+  const ops = all.filter((r) => r.type === 'counter').map((r) => ({ r, k: key(...operatorTile(r)) }));
+  for (const o of ops) if (mine.has(o.k)) return false;
+  if (type === 'counter') {
+    const [ox, oz] = operatorTile({ x, z, rot });
+    if (ox < 0 || ox >= b.width || oz < 0 || oz >= b.depth || occ.has(key(ox, oz))) return false;
+  }
 
   // Alcançabilidade: BFS a partir da porta; todo móvel (exceto decor) precisa de um vizinho livre alcançado.
   // Móveis que JÁ estavam inalcançáveis sem o novo (ex.: porta mudou de lugar numa expansão) não bloqueiam novas compras.
@@ -130,7 +156,7 @@ export function canPlace(state: StoreState, type: FurnitureType, x: number, z: n
     if ((z0 === 0 && z1 === -1) || (z0 === -1 && z1 === 0)) return x0 >= pass.x0 && x0 < pass.x1;
     return true;
   };
-  const unreachable = (rects: Rect[], occupied: Set<number>): Set<Rect> => {
+  const unreachable = (rects: Rect[], occupied: Set<number>): { bad: Set<Rect>; seen: Set<number> } => {
     const seen = new Set<number>();
     const stack: [number, number][] = [[dx - 1, b.depth - 1]];
     seen.add(key(dx - 1, b.depth - 1));
@@ -160,17 +186,19 @@ export function canPlace(state: StoreState, type: FurnitureType, x: number, z: n
       }
       if (!ok) bad.add(r);
     }
-    return bad;
+    return { bad, seen };
   };
   const added = all[all.length - 1]!;
   const after = unreachable(all, occ);
-  if (after.size === 0) return true;
-  if (after.has(added)) return false;
-  // algum móvel antigo ficou inalcançável: só aceita se já estava assim antes (sem o novo)
+  const lostOps = ops.filter((o) => !after.seen.has(o.k)); // operador sem caminho até a cadeira
+  if (after.bad.size === 0 && lostOps.length === 0) return true;
+  if (after.bad.has(added) || lostOps.some((o) => o.r === added)) return false;
+  // algum móvel/operador antigo ficou inalcançável: só aceita se já estava assim antes (sem o novo)
   const occBefore = new Set<number>();
   for (const r of others) for (let i = 0; i < r.w; i++) for (let j = 0; j < r.d; j++) occBefore.add(key(r.x + i, r.z + j));
   const before = unreachable(others, occBefore);
-  for (const r of after) if (!before.has(r)) return false;
+  for (const r of after.bad) if (!before.bad.has(r)) return false;
+  for (const o of lostOps) if (before.seen.has(o.k)) return false;
   return true;
 }
 
@@ -186,13 +214,15 @@ export function keepTiles(state: StoreState): [number, number][] {
 }
 
 /**
- * Após uma expansão a porta muda de lugar: móveis que caíram na nova antessala/passagem são movidos para o
- * ponto válido mais próximo (mesma rotação, ou girados). Sem lugar válido, o móvel fica onde está.
+ * Após uma expansão a porta muda de lugar (e ao desbloquear o depósito surge a passagem): móveis que caíram na
+ * antessala/passagem ou no tile do operador de um balcão são movidos para o ponto válido mais próximo (mesma rotação,
+ * ou girados). Devolve os ids dos que ficaram sem lugar válido (continuam onde estão; a api os desmonta).
  */
-export function relocateBlocking(state: StoreState): void {
-  const keep = new Set(keepTiles(state).map(([x, z]) => key(x, z)));
+export function relocateBlocking(state: StoreState): number[] {
   const b = storeBounds(state.expansion);
+  const failed: number[] = [];
   for (const f of [...state.furniture]) {
+    const keep = new Set(reservedTiles(state, f.id).map(([x, z]) => key(x, z)));
     const { w, d } = footprintOf(f.type, f.rot);
     let hit = false;
     for (let i = 0; i < w && !hit; i++) for (let j = 0; j < d && !hit; j++) if (keep.has(key(f.x + i, f.z + j))) hit = true;
@@ -209,8 +239,9 @@ export function relocateBlocking(state: StoreState): void {
         }
       }
     }
-    if (best) { f.x = best.x; f.z = best.z; f.rot = best.rot; }
+    if (best) { f.x = best.x; f.z = best.z; f.rot = best.rot; } else failed.push(f.id);
   }
+  return failed;
 }
 
 export function furnitureById(state: StoreState, id: number): Furniture {

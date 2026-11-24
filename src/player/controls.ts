@@ -2,14 +2,18 @@
  * Controles de jogo na tela (dono: player, z-index 30): mira central, botão de AÇÃO grande (mão + rótulo, anel verde
  * quando há alvo), Arremessar / Largar / Abrir-Fechar caixa (com caixa na mão), Mover (secundário) e o botão laranja
  * "Sair do caixa" (sentado). O contêiner não captura toques; só os botões (≥ 48 px) capturam.
- * Fase 4: todos agem no `pointerdown` (multitoque independente do joystick), `touch-action:none` em todos.
+ * Fase 4: agem no `pointerdown` (multitoque independente do joystick), `touch-action:none` em todos. Ações que ABREM
+ * painel/modo (Preço, computador, depósito, placa, Mover) rodam no `pointerup` do mesmo dedo, e o `touchend` dos botões
+ * cancela o `click` sintético: o toque nunca "cai" no tablet que acabou de abrir (clique fantasma).
  */
 import { ICON_BOX_CLOSE, ICON_BOX_OPEN, ICON_DROP, ICON_EXIT, ICON_HAND, ICON_MOVE, ICON_THROW } from './icons';
 
 export type ActState = 'none' | 'ready' | 'disabled';
 export interface ControlHandlers {
-  actionDown(): void;
-  actionUp(): void;
+  /** `'pointer'`: ações que abrem painel esperam o `actionUp` (pointerup do mesmo dedo). */
+  actionDown(src?: 'pointer' | 'key'): void;
+  /** `inside`: o dedo foi solto sobre o botão (false = saiu dele ou toque cancelado). */
+  actionUp(inside?: boolean): void;
   throwBox(): void;
   dropBox(): void;
   toggleBox(): void;
@@ -65,6 +69,14 @@ const CSS = `
 .pl-ctrl.rm .pl-main.shake .pl-btn{animation:none}
 `;
 
+/** O ponteiro foi solto sobre o botão (com folga de 24 px para dedo que escorrega)? */
+const inside = (b: HTMLElement, e: PointerEvent): boolean => {
+  const r = b.getBoundingClientRect();
+  return e.clientX >= r.left - 24 && e.clientX <= r.right + 24 && e.clientY >= r.top - 24 && e.clientY <= r.bottom + 24;
+};
+/** Cancela o `click` sintético do toque que começou no botão (só este alvo; os outros dedos não são afetados). */
+const noGhost = (b: HTMLElement): void => { b.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false }); };
+
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, html = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
   e.className = cls;
@@ -85,8 +97,10 @@ export class Controls {
   private readonly exitBtn: HTMLButtonElement;
   private badgeT = 0;
   private shakeT = 0;
-  private lastAct = '';
-  private lastSlots = '';
+  private lastLabel: string | null = null;
+  private lastSt: ActState | null = null;
+  private lastSlots: [boolean, boolean | null, boolean, string | null] | null = null;
+  private lastView = -1;
   private boxIsOpen: boolean | null = null;
   /** pointerId que está segurando o botão de ação (null = solto). */
   private holdId: number | null = null;
@@ -143,31 +157,41 @@ export class Controls {
       this.holdId = e.pointerId;
       try { b.setPointerCapture(e.pointerId); } catch { /* ponteiro sintético */ }
       b.classList.add('pressed');
-      this.h.actionDown();
+      this.h.actionDown('pointer');
     });
     const release = (e: PointerEvent): void => {
       if (e.pointerId !== this.holdId) return;
       this.holdId = null;
       b.classList.remove('pressed');
-      this.h.actionUp();
+      this.h.actionUp(e.type === 'pointerup' && inside(b, e));
     };
     b.addEventListener('pointerup', release);
     b.addEventListener('pointercancel', release);
     b.addEventListener('lostpointercapture', release);
+    noGhost(b);
     b.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); this.h.actionDown(); } });
     b.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') this.h.actionUp(); });
     b.addEventListener('contextmenu', (e) => e.preventDefault());
-    const tapBtn = (btn: HTMLButtonElement, fn: () => void): void => {
+    const tapBtn = (btn: HTMLButtonElement, fn: () => void, onUp = false): void => {
+      let id: number | null = null;
       btn.addEventListener('pointerdown', (e) => {
         if (e.button > 0) return;
         e.preventDefault();
         btn.classList.add('pressed');
-        fn();
+        if (!onUp) { fn(); return; }
+        id = e.pointerId; // abre modo/painel: só ao soltar o mesmo dedo em cima do botão
+        try { btn.setPointerCapture(e.pointerId); } catch { /* ponteiro sintético */ }
       });
-      const up = (): void => btn.classList.remove('pressed');
+      const up = (e: PointerEvent): void => {
+        btn.classList.remove('pressed');
+        if (e.pointerId !== id) return;
+        id = null;
+        if (e.type === 'pointerup' && inside(btn, e)) fn();
+      };
       btn.addEventListener('pointerup', up);
       btn.addEventListener('pointercancel', up);
-      btn.addEventListener('pointerleave', up);
+      btn.addEventListener('pointerleave', () => { if (id === null) btn.classList.remove('pressed'); });
+      noGhost(btn);
       // teclado/leitor de tela (click sem ponteiro, detail 0); o click de um toque/clique (detail ≥ 1) já agiu no pointerdown
       btn.addEventListener('click', (e) => { if (e.detail === 0) fn(); });
       btn.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -175,7 +199,7 @@ export class Controls {
     tapBtn(this.slots.throw.btn, () => this.h.throwBox());
     tapBtn(this.slots.drop.btn, () => this.h.dropBox());
     tapBtn(this.slots.box.btn, () => this.h.toggleBox());
-    tapBtn(this.slots.move.btn, () => this.h.secondary());
+    tapBtn(this.slots.move.btn, () => this.h.secondary(), true);
     tapBtn(this.exitBtn, () => this.h.exitSeat());
   }
 
@@ -191,11 +215,10 @@ export class Controls {
     put(this.slots.move, 292, 82);
   }
 
-  /** Rótulo e estado do botão de ação. */
+  /** Rótulo e estado do botão de ação (sem alocar quando nada mudou). */
   setAction(label: string | null, st: ActState): void {
-    const key = `${st}|${label ?? ''}`;
-    if (key === this.lastAct) return;
-    this.lastAct = key;
+    if (label === this.lastLabel && st === this.lastSt) return;
+    this.lastLabel = label; this.lastSt = st;
     this.main.classList.toggle('ready', st === 'ready');
     this.main.classList.toggle('disabled', st === 'disabled');
     this.label.textContent = label ?? '';
@@ -205,9 +228,9 @@ export class Controls {
 
   /** Botões extras: caixa na mão (arremessar/largar/abrir-fechar) e secundário (Mover). */
   setExtras(carrying: boolean, open: boolean | null, busy: boolean, secondary: string | null): void {
-    const key = `${carrying}|${open}|${busy}|${secondary ?? ''}`;
-    if (key === this.lastSlots) return;
-    this.lastSlots = key;
+    const l = this.lastSlots;
+    if (l && l[0] === carrying && l[1] === open && l[2] === busy && l[3] === secondary) return;
+    if (l) { l[0] = carrying; l[1] = open; l[2] = busy; l[3] = secondary; } else this.lastSlots = [carrying, open, busy, secondary];
     const show = (s: { wrap: HTMLDivElement }, v: boolean): void => { s.wrap.style.display = v ? '' : 'none'; };
     show(this.slots.throw, carrying);
     show(this.slots.drop, carrying);
@@ -225,10 +248,13 @@ export class Controls {
   }
 
   /** Visibilidade geral: `off` (modal/câmera tomada) esconde tudo; `noAct` (posicionamento) esconde as ações. */
-  setView(v: { off: boolean; noAct: boolean; seated: boolean }): void {
-    this.root.classList.toggle('off', v.off);
-    this.root.classList.toggle('noact', v.noAct);
-    this.root.classList.toggle('seated', v.seated);
+  setView(off: boolean, noAct: boolean, seated: boolean): void {
+    const k = (off ? 1 : 0) | (noAct ? 2 : 0) | (seated ? 4 : 0);
+    if (k === this.lastView) return;
+    this.lastView = k;
+    this.root.classList.toggle('off', off);
+    this.root.classList.toggle('noact', noAct);
+    this.root.classList.toggle('seated', seated);
   }
 
   setPrefs(p: { fontScale: number; colorblind: boolean; reduceMotion: boolean }): void {

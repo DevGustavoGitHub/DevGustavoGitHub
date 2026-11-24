@@ -525,7 +525,10 @@ export class HeldView {
   }
 
   /** Alguma aba ainda animando? */
-  busy(): boolean { return this.cartons.some((c) => c.root.parent && c.animating); }
+  busy(): boolean {
+    for (let i = 0; i < this.cartons.length; i++) { const c = this.cartons[i]!; if (c.root.parent && c.animating) return true; }
+    return false;
+  }
 
   update(cam: THREE.Camera, dt: number, s: HeldState): void {
     this.t += dt;

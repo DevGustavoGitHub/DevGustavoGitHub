@@ -56,7 +56,9 @@ export class Customer extends Agent {
     this.age = age;
     const r = env.ctx.rand;
     this.list = this.buildList(r);
-    this.patience = (40 + r() * 20) * (age === 'elder' ? 1.2 : 1) * (kind === 'kid' ? 0.8 : kind === 'bulk' ? 1.25 : 1);
+    // QA economia: 50–75 s enquanto não há caixa contratado (jogador sozinho), 40–60 s com caixa
+    const solo = env.ctx.state.employees.cashier <= 0;
+    this.patience = (solo ? 50 + r() * 25 : 40 + r() * 20) * (age === 'elder' ? 1.2 : 1) * (kind === 'kid' ? 0.8 : kind === 'bulk' ? 1.25 : 1);
     this.baseSpeed = (age === 'kid' ? 1.6 : age === 'elder' ? 0.85 : 1.15 + r() * 0.35);
     this.maxSpeed = this.baseSpeed;
     this.arriveR = 0.18;
@@ -375,6 +377,7 @@ export class Customer extends Agent {
     const ex = this.items.find((i) => i.productId === e.productId);
     if (ex) ex.qty += got; else this.items.push({ productId: e.productId, qty: got });
     this.units += got;
+    this.env.heldChanged();
     this.refreshBasket();
     this.env.sfx('pop', this.x, this.z);
     this.env.changed('shelf');
@@ -436,9 +439,11 @@ export class Customer extends Agent {
   /** Devolve os itens e vai embora bravo. */
   giveUp(_why: string): void {
     const { state } = this.env.ctx;
+    const had = this.items.length > 0;
     for (const it of this.items) safe('returnToShelf', () => api.returnToShelf(state, it.productId, it.qty), undefined);
-    if (this.items.length > 0) this.env.changed('shelf');
     this.items.length = 0; this.units = 0;
+    this.env.heldChanged(); // antes do evento: um save síncrono não vê os itens na prateleira E com o cliente
+    if (had) this.env.changed('shelf');
     this.person.setBasketItems([]);
     this.person.setBasket(false);
     this.person.clearReach();
@@ -488,9 +493,11 @@ export class Customer extends Agent {
     const sp = this.kind === 'bulk' ? (speed >= 0.6 ? Math.min(1, speed * 1.3) : speed * 0.85) : speed;
     const res = safe('completeSale', () => api.completeSale(state, items, sp, sat), null);
     this.recorded = true;
+    // vendido: sai de npcHeld ANTES de qualquer evento (um save síncrono não pode ver os itens duas vezes)
+    this.items.length = 0; this.units = 0;
+    this.env.heldChanged();
     this.env.changed('money');
     this.env.say(this, sat >= 4 ? (res && res.tip > 0 ? 'coin' : 'obrigado') : sat >= 3 ? 'happy' : 'neutral', 2.2);
-    this.items.length = 0; this.units = 0;
     this.person.setBasketItems([]);
     this.person.setBag(true);
     this.depart();
@@ -503,6 +510,7 @@ export class Customer extends Agent {
       const { state } = this.env.ctx;
       for (const it of this.items) safe('returnToShelf', () => api.returnToShelf(state, it.productId, it.qty), undefined);
       this.items.length = 0;
+      this.env.heldChanged();
       this.env.changed('shelf');
     }
     if (this.lane) this.mgr.remove(this.lane, this);

@@ -21,7 +21,8 @@ export const furnRect = (f: Furniture): { x0: number; z0: number; x1: number; z1
 };
 
 export class Collider {
-  private wallKey = '';
+  private wallExp = NaN;
+  private wallSto: boolean | null = null;
   private wallList: Rect[] = [];
 
   constructor(private readonly state: () => StoreState, private readonly world: () => WorldService | undefined) {}
@@ -46,9 +47,8 @@ export class Collider {
   /** Paredes finas (retângulos em planta, altura h). Cache por expansão/depósito. */
   walls(): Rect[] {
     const s = this.state();
-    const key = `${s.expansion}|${s.storageUnlocked}`;
-    if (key === this.wallKey) return this.wallList;
-    this.wallKey = key;
+    if (s.expansion === this.wallExp && s.storageUnlocked === this.wallSto) return this.wallList; // sem alocar por quadro
+    this.wallExp = s.expansion; this.wallSto = s.storageUnlocked;
     const b = storeBounds(s.expansion);
     const gx0 = doorX(b) - DOOR_WIDTH / 2, gx1 = doorX(b) + DOOR_WIDTH / 2;
     const list: Rect[] = [

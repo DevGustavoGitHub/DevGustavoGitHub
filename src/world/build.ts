@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { GameContext } from '../core/module';
 import { FURNITURE_FOOTPRINT, STORAGE_DEPTH, type Bounds, type FurnitureType } from '../core/layout';
-import type { Box, Furniture } from '../sim/state';
+import type { Box, Furniture, StoreState } from '../sim/state';
 import * as api from '../sim/api';
 import { productById } from '../sim/catalog';
 import { chairGeos, furnitureGeos, levelCountOf, SEAT } from './furniture';
@@ -42,6 +42,23 @@ const NAMES: Record<FurnitureType, string> = {
   shelf: 'Prateleira', fridge: 'Geladeira', freezer: 'Freezer', counter: 'Caixa registradora', rack: 'Estante do depósito', decor: 'Decoração',
 };
 const FEM: Record<FurnitureType, boolean> = { shelf: true, fridge: true, freezer: false, counter: true, rack: true, decor: true };
+/** Para onde foram as unidades expostas ao vender/guardar (diferença do depósito e das caixas novas na calçada). */
+interface Moves { storage: number; sidewalk: number; boxes: number }
+const stockSnap = (s: StoreState): { storage: Record<string, number>; n: number } => ({ storage: { ...s.storage }, n: s.sidewalk.length });
+function stockMoves(b: { storage: Record<string, number>; n: number }, s: StoreState): Moves {
+  let storage = 0;
+  for (const k of Object.keys(s.storage)) storage += Math.max(0, (s.storage[k] ?? 0) - (b.storage[k] ?? 0));
+  const added = s.sidewalk.slice(b.n);
+  return { storage, sidewalk: added.reduce((a, x) => a + x.units, 0), boxes: added.length };
+}
+const un = (n: number): string => `${n} un.`;
+/** "17 un. vão para o depósito e 5 un. voltam em 1 caixa na calçada (ENTREGAS)." (`future` = pergunta de confirmação). */
+function movesText(m: Moves, future: boolean): string {
+  const parts: string[] = [];
+  if (m.storage > 0) parts.push(`${un(m.storage)} ${future ? 'vão' : 'foram'} para o depósito`);
+  if (m.sidewalk > 0) parts.push(`${un(m.sidewalk)} ${future ? 'voltam' : 'voltaram'} em ${m.boxes} caixa${m.boxes === 1 ? '' : 's'} na calçada (ENTREGAS)`);
+  return parts.length ? `${parts.join(' e ')}.` : '';
+}
 const ghostCache = new Map<string, THREE.BufferGeometry>();
 /** Fantasma: todas as geometrias do móvel numa só (1 draw call), cadeira incluída no balcão. */
 function ghostGeometry(f: Furniture): THREE.BufferGeometry {
@@ -72,6 +89,8 @@ export class BuildMode {
   private x = 0; private z = 0; private rot: Rot = 0;
   private bx = 0; private bz = 0; private by = 0; private brot = 0;
   private valid = false;
+  /** VENDER aguardando confirmação. */
+  private asking = false;
   private cost: number | null = null;
 
   private ghost: THREE.Mesh | null = null;
@@ -160,7 +179,7 @@ export class BuildMode {
     if (this.mode === 'edit') this.d.hide(null);
     this.clearPreview();
     if (this.grid) { this.d.root.remove(this.grid); this.grid.geometry.dispose(); (this.grid.material as THREE.Material).dispose(); this.grid = null; }
-    this.ui?.remove(); this.ui = null; this.info = null; this.placeBtn = null;
+    this.ui?.remove(); this.ui = null; this.info = null; this.placeBtn = null; this.asking = false;
     const kind = this.kind;
     this.box = null;
     if (emit) {
@@ -327,19 +346,65 @@ export class BuildMode {
     }
   }
 
+  /** VENDER: 1º toque pede confirmação (valor e destino dos produtos, simulados numa cópia do estado); 2º vende. */
   sell(): void {
     if (!this.active || this.mode !== 'edit') return;
+    if (this.asking) { this.doSell(); return; }
+    const { ctx } = this.d;
+    let refund = 0, moves: Moves = { storage: 0, sidewalk: 0, boxes: 0 };
+    try {
+      const copy: StoreState = typeof structuredClone === 'function' ? structuredClone(ctx.state) : JSON.parse(JSON.stringify(ctx.state));
+      const before = stockSnap(copy);
+      refund = api.sellFurniture(copy, this.editId);
+      moves = stockMoves(before, copy);
+    } catch (e) {
+      ctx.bus.emit('toast', { text: errMsg(e), kind: 'bad' });
+      ctx.bus.emit('sfx', { name: 'error' });
+      return;
+    }
+    const dest = movesText(moves, true);
+    this.ask(`Vender ${FEM[this.type] ? 'a' : 'o'} ${NAMES[this.type].toLowerCase()} por ${brl(refund)}? (metade do preço)${dest ? ` ${dest}` : ''}`);
+  }
+  private doSell(): void {
     const { ctx } = this.d;
     try {
+      const before = stockSnap(ctx.state);
       const got = api.sellFurniture(ctx.state, this.editId);
-      ctx.bus.emit('toast', { text: `${NAMES[this.type]} vendid${FEM[this.type] ? 'a' : 'o'} por ${brl(got)}.`, kind: 'info' });
+      const dest = movesText(stockMoves(before, ctx.state), false);
+      ctx.bus.emit('toast', { text: `${NAMES[this.type]} vendid${FEM[this.type] ? 'a' : 'o'} por ${brl(got)}.${dest ? ` ${dest}` : ''}`, kind: 'info' });
       ctx.bus.emit('sfx', { name: 'coin' });
       ctx.bus.emit('stateChanged', { what: 'furniture' });
       this.end(true, true);
     } catch (e) {
+      this.back();
       ctx.bus.emit('toast', { text: errMsg(e), kind: 'bad' });
       ctx.bus.emit('sfx', { name: 'error' });
     }
+  }
+  /** Troca a barra pela pergunta de confirmação (CONFIRMAR / VOLTAR). */
+  private ask(text: string): void {
+    if (!this.ui) return;
+    this.asking = true;
+    for (const r of this.ui.querySelectorAll<HTMLElement>('.wb-row')) r.style.display = 'none';
+    if (this.info) { this.info.textContent = text; this.info.classList.add('wb-ask'); }
+    const row = document.createElement('div'); row.className = 'wb-row wb-askrow';
+    const mk = (label: string, cls: string, aria: string, fn: () => void): void => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = cls; b.textContent = label; b.setAttribute('aria-label', aria);
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      row.appendChild(b);
+    };
+    mk('VENDER', 'wb-small wb-sell', 'Confirmar venda', () => this.doSell());
+    mk('VOLTAR', 'wb-small', 'Voltar', () => this.back());
+    this.ui.appendChild(row);
+  }
+  private back(): void {
+    this.asking = false;
+    this.ui?.querySelector('.wb-askrow')?.remove();
+    this.ui?.querySelectorAll<HTMLElement>('.wb-row').forEach((r) => { r.style.display = ''; });
+    this.info?.classList.remove('wb-ask');
+    this.updateInfo();
   }
 
   /** Desmonta o móvel de volta para o estoque de montagem. */
@@ -347,8 +412,10 @@ export class BuildMode {
     if (!this.active || this.mode !== 'edit') return;
     const { ctx } = this.d;
     try {
+      const before = stockSnap(ctx.state);
       api.storeFurniture(ctx.state, this.editId);
-      ctx.bus.emit('toast', { text: `${NAMES[this.type]} guardad${FEM[this.type] ? 'a' : 'o'} no estoque de móveis.`, kind: 'info' });
+      const dest = movesText(stockMoves(before, ctx.state), false);
+      ctx.bus.emit('toast', { text: `${NAMES[this.type]} guardad${FEM[this.type] ? 'a' : 'o'} no estoque de móveis.${dest ? ` ${dest}` : ''}`, kind: 'info' });
       ctx.bus.emit('sfx', { name: 'box' });
       ctx.bus.emit('stateChanged', { what: 'furniture' });
       this.end(true, true);
@@ -358,7 +425,7 @@ export class BuildMode {
     }
   }
 
-  cancel(): void { this.end(true, false); }
+  cancel(): void { if (this.asking) this.back(); else this.end(true, false); }
 
   /** Testes: estado da prévia. */
   get pose(): { kind: BuildKind; mode: string; x: number; z: number; rot: Rot; bx: number; bz: number; brot: number; valid: boolean; type: FurnitureType } {
@@ -372,7 +439,7 @@ export class BuildMode {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.key === 'r' || e.key === 'R') { this.rotate(e.shiftKey ? -1 : 1); e.preventDefault(); }
-      else if (e.key === 'Enter') { this.confirm(); e.preventDefault(); }
+      else if (e.key === 'Enter') { if (this.asking) this.doSell(); else this.confirm(); e.preventDefault(); }
       else if (e.key === 'Escape') { this.cancel(); e.preventDefault(); }
       else if (e.key === 'Delete') { this.sell(); e.preventDefault(); }
     };
@@ -395,7 +462,8 @@ export class BuildMode {
       [data-world-build] .wb-place.bad{background:#7d8a80}
       [data-world-build] .wb-small{min-width:104px;height:48px;border-radius:10px;font-size:16px;padding:0 14px;background:#5a6270}
       [data-world-build] .wb-sell{background:#d8862a}[data-world-build] .wb-store{background:#7a56c2}
-      [data-world-build] .wb-info{padding:4px 12px;border-radius:10px;background:rgba(20,24,32,.72);color:#fff;font-size:13px;font-weight:700;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}`;
+      [data-world-build] .wb-info{padding:4px 12px;border-radius:10px;background:rgba(20,24,32,.72);color:#fff;font-size:13px;font-weight:700;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+      [data-world-build] .wb-info.wb-ask{white-space:normal;text-align:center;font-size:15px;line-height:1.3;max-width:min(92vw,560px);padding:8px 14px;background:rgba(20,24,32,.88)}`;
     wrap.appendChild(css);
     this.info = document.createElement('div');
     this.info.className = 'wb-info';
@@ -426,12 +494,12 @@ export class BuildMode {
 
   private updateInfo(): void {
     if (this.placeBtn) this.placeBtn.classList.toggle('bad', !this.valid);
-    if (!this.info) return;
+    if (!this.info || this.asking) return;
     let label: string;
     if (this.kind === 'box' && this.box) {
       let n = this.box.productId;
       try { n = productById(this.box.productId).name; } catch { /* */ }
-      label = `Caixa ${this.box.open ? 'aberta' : 'fechada'} · ${n}`;
+      label = `Caixa ${this.box.open ? 'aberta' : 'fechada'}${this.box.units <= 0 ? ' (vazia)' : ''} · ${n}`;
     } else {
       label = NAMES[this.type];
       if (this.productId) { try { label += ` · ${productById(this.productId).name}`; } catch { /* */ } }

@@ -6,6 +6,9 @@
  * Multitoque (Fase 4): joystick e olhar são rastreados cada um pelo seu `pointerId` (sem captura e sem
  * `preventDefault` em toques de outros alvos), então um dedo no joystick não impede o toque nos botões.
  */
+/** Toque curto no 3D: duração máxima e afastamento máximo do dedo. */
+export const TAP_MS = 800, TAP_PX = 14;
+
 export class Input {
   /** Eixos de movimento no espaço da tela: x = direita, y = frente (−1..1, comprimento ≤ 1). */
   moveX = 0;
@@ -21,6 +24,8 @@ export class Input {
   actionKeys = true;
   /** FASE 4: sensibilidade do olhar (toque e mouse), `lookSensitivity` das opções (0,4–2,0; padrão 1). */
   sensitivity = 1;
+  /** Só testes/benchmark (`__player.bench`): eixos fixos no lugar do teclado/joystick. */
+  forceMove: { x: number; y: number } | null = null;
   onActionDown: () => void = () => {};
   onActionUp: () => void = () => {};
   onThrow: () => void = () => {};
@@ -36,7 +41,9 @@ export class Input {
   private lookId = -1;
   private lx = 0;
   private ly = 0;
-  private lookDist = 0;
+  private lookMax = 0; // maior afastamento do ponto inicial (toque "parado" mesmo com tremidinha)
+  private lookX0 = 0;
+  private lookY0 = 0;
   private lookT0 = 0;
   private lookMouse = false;
   private actionKey = '';
@@ -163,7 +170,8 @@ export class Input {
     if (this.lookId >= 0) return;
     this.lookId = e.pointerId;
     this.lx = e.clientX; this.ly = e.clientY;
-    this.lookDist = 0;
+    this.lookX0 = e.clientX; this.lookY0 = e.clientY;
+    this.lookMax = 0;
     this.lookT0 = performance.now();
     this.lookMouse = !touchy;
   }
@@ -193,7 +201,7 @@ export class Input {
     if (this.lookMouse && e.buttons === 0) { this.lookId = -1; return; }
     const dx = e.clientX - this.lx, dy = e.clientY - this.ly;
     this.lx = e.clientX; this.ly = e.clientY;
-    this.lookDist += Math.hypot(dx, dy);
+    this.lookMax = Math.max(this.lookMax, Math.hypot(e.clientX - this.lookX0, e.clientY - this.lookY0));
     if (this.locked) return;
     const k = (this.lookMouse ? 0.0042 : 0.0058 * Math.min(1.4, Math.max(0.55, 390 / Math.max(1, window.innerHeight)))) * this.sensitivity;
     this.dYaw -= dx * k;
@@ -208,13 +216,15 @@ export class Input {
     }
     if (e.pointerId === this.lookId) {
       this.lookId = -1;
-      const quick = performance.now() - this.lookT0 < 380 && this.lookDist < 10;
+      // toque no 3D (sentado: esteira, dinheiro): até 800 ms (celular lento / quadros longos) com o dedo quase parado
+      const quick = performance.now() - this.lookT0 < TAP_MS && this.lookMax < TAP_PX;
       if (real && quick && !this.locked) this.onTap(e.clientX, e.clientY);
     }
   }
 
   /** Atualiza eixos a partir do teclado quando o joystick não está em uso. */
   poll(): void {
+    if (this.forceMove) { this.moveX = this.forceMove.x; this.moveY = this.forceMove.y; return; } // só benchmark
     if (this.stickId >= 0) return;
     if (this.locked) { this.moveX = this.moveY = 0; return; }
     const k = this.keys;

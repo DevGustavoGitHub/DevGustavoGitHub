@@ -66,11 +66,16 @@ export default function create(): GameModule {
   };
 
   /** Placa da porta (`store:sign`, do player) e menu de pausa: abre; fecha com confirmação; à noite, orienta. */
+  let signAt = -1e9;
   const storeSign = (): void => {
     const { clock } = kit.ctx;
+    // toque duplo na placa (QA): a 2ª ação em menos de 1 s é ignorada (abria e já perguntava "Fechar a loja?")
+    const now = performance.now();
+    if (now - signAt < 1000) return;
+    signAt = now;
     if (clock.phase === 'prep') { clock.openStore(); kit.sfx('sign'); kit.toast('Loja aberta! Os clientes já podem entrar.', 'good'); }
     else if (clock.phase === 'open') {
-      void kit.confirm({ title: 'Fechar a loja agora?', text: 'Nenhum cliente novo vai entrar. Quem já está na loja termina as compras.', ok: 'Fechar loja' })
+      void kit.confirm({ title: 'Fechar a loja agora?', text: 'Nenhum cliente novo vai entrar e não dá para reabrir hoje. Quem já está na loja termina as compras.', ok: 'Fechar loja' })
         .then((ok) => { if (ok && clock.phase === 'open') { clock.closeStore(); kit.sfx('sign'); } });
     } else if (clock.phase === 'closing') kit.toast('A loja está fechada. Toque em "Terminar o dia" quando quiser.', 'info');
   };
@@ -87,11 +92,50 @@ export default function create(): GameModule {
     legacyPending = null;
     checkout.open(r);
   };
-  /** A sim não emite eventos: a UI consome os níveis novos e emite `levelUp` (o audio toca 'levelup'). */
+  /**
+   * A sim não emite eventos: a UI anuncia cada nível acima de `levelAck` (emite `levelUp`; o audio toca o som) e só dá
+   * baixa (`api.consumeLevelUps`) depois do "Continue jogando!" da comemoração — recarregar antes disso mostra de novo.
+   */
+  let emittedLv = -1;
   const pollLevels = (): void => {
-    let lv: number[] = [];
-    try { lv = api.consumeLevelUps(kit.ctx.state); } catch { /* sim em desenvolvimento */ }
-    for (const l of lv) kit.ctx.bus.emit('levelUp', { level: l });
+    const s = kit.ctx.state;
+    const ack = Number.isFinite(s.levelAck) ? s.levelAck : s.level;
+    if (emittedLv < 0) emittedLv = ack;
+    for (let l = Math.max(ack, emittedLv) + 1; l <= s.level; l++) { emittedLv = l; kit.ctx.bus.emit('levelUp', { level: l }); }
+  };
+  const ackLevel = (lv: number): void => {
+    const s = kit.ctx.state;
+    if (lv < s.level) return; // ainda há comemoração na fila: a baixa vem na última
+    try { api.consumeLevelUps(s); kit.ctx.save(); } catch { /* sim antiga */ }
+  };
+
+  /** HUD tocado com o pagamento aberto (QA): dá retorno em vez de ignorar em silêncio. */
+  const busyPay = (): boolean => {
+    if (!kit.isModalOpen('pay')) return false;
+    kit.toast('Termine o pagamento primeiro (ou toque em × para cancelar).', 'info');
+    kit.sfx('error');
+    kit.settings.buzz(30);
+    return true;
+  };
+
+  /**
+   * Voltar do Android (`ui:back`, emitido pelo APK): cancela o diálogo de cima; fecha o painel/modal de cima (tablet,
+   * Opções, nível, comemoração, pagamento → confirma cancelar, detalhes do resumo); sem modal → menu de pausa (no
+   * posicionamento, cancela como o Esc); na pausa ou na tela inicial → "Sair do jogo?" → salva e emite `app:exit`.
+   */
+  let building = false;
+  const back = (): void => {
+    if (kit.closeTopConfirm()) return;
+    const top = kit.topModal();
+    if (top === 'pause' || top === 'title') {
+      void kit.confirm({ title: 'Sair do jogo?', text: 'Seu progresso fica salvo e você continua de onde parou.', ok: 'Sair', cancel: 'Continuar jogando', danger: true })
+        .then((ok) => { if (ok) { kit.ctx.save(); kit.ctx.bus.emit('app:exit'); } });
+      return;
+    }
+    if (top === 'report') { report.closeDetails(); return; } // o resumo só sai com "Continue jogando!"
+    if (top) { kit.runCloser(top); return; } // falência e aviso de orientação não têm fechador: sem ação
+    if (building) { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' })); return; }
+    menus.showPause();
   };
 
   return {
@@ -107,9 +151,9 @@ export default function create(): GameModule {
       kit.settings.bindRoot(root);
 
       hud = new Hud(kit, root, {
-        openTablet: (tab) => tablet.open(tab),
-        openMenu: () => menus.showPause(),
-        openLevel: () => { levelSheet.open(); hud.setDot(unseenTabs(ctx.state).size > 0); },
+        openTablet: (tab) => { if (!busyPay()) tablet.open(tab); },
+        openMenu: () => { if (!busyPay()) menus.showPause(); },
+        openLevel: () => { if (busyPay()) return; levelSheet.open(); hud.setDot(unseenTabs(ctx.state).size > 0); },
       });
       tablet = new Tablet(kit, root);
       bankrupt = new Bankruptcy(kit, root);
@@ -122,6 +166,7 @@ export default function create(): GameModule {
       missions = new Missions(kit, hud, root);
       night = new Night(kit, hud, root, missions, endDay);
       celebrate = new Celebrate(kit, root);
+      celebrate.onAck = ackLevel;
       levelSheet = new LevelSheet(kit, root, (tab) => tablet.open(tab));
       menus = new Menus(kit, root, {
         endDay,
@@ -141,6 +186,14 @@ export default function create(): GameModule {
         bus.on('storeEmpty', () => night.empty()), // o resumo NÃO abre sozinho (Fase 3)
         bus.on('dayStarted', () => { night.hide(); report.snapshotDay(); }),
         bus.on('levelUp', (p?: { level: number }) => { if (p) celebrate.push(p.level); }),
+        bus.on('ui:back', back),
+        bus.on('build:state', (p?: { active?: boolean }) => { building = !!p?.active; }),
+        bus.on('build:end', () => { building = false; }),
+        // o npc cancela o pagamento (cliente cansou/desistiu): fecha o painel com aviso, sem "Pago!"
+        bus.on('checkout:cancel', (p?: { customerId?: number }) => {
+          if (payPending && payPending.customerId === p?.customerId) payPending = null;
+          if (pay.isOpen && pay.customerId === p?.customerId) pay.abort('O cliente cansou de esperar e o pagamento foi cancelado.');
+        }),
         bus.on('checkoutAvailable', (p?: { customerId: number | null }) => { if (p?.customerId === null && !checkout.isOpen) legacyPending = null; }),
         bus.on('checkoutRequest', (req?: PayRequest) => {
           if (!req) return;
@@ -168,6 +221,13 @@ export default function create(): GameModule {
       hud.setDot(unseenTabs(ctx.state).size > 0);
       kit.settings.emit();
       menus.showTitle();
+      // save danificado/incompatível (main.ts guardou uma cópia e começou um jogo novo): aviso claro, uma vez
+      try {
+        if (localStorage.getItem('mercadinho:save-recovered') !== null) {
+          localStorage.removeItem('mercadinho:save-recovered');
+          void kit.notice('Save recuperado', 'Seu save não pôde ser carregado; guardamos uma cópia e começamos um jogo novo.');
+        }
+      } catch { /* sem localStorage */ }
       ctx.bus.emit('toast', { text: `Bem-vindo à ${ctx.state.storeName}!`, kind: 'info' });
     },
     update(dt: number) {
@@ -190,6 +250,7 @@ export default function create(): GameModule {
       if (keyHandler) window.removeEventListener('keydown', keyHandler);
       missions.dispose();
       rotate.dispose();
+      kit.dispose();
       root?.remove();
       document.getElementById('mx-style')?.remove();
     },

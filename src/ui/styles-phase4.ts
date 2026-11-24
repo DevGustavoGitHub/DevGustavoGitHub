@@ -96,4 +96,9 @@ export const phase4Css = `
   .mk-note{flex-wrap:nowrap;font-size:12px;line-height:1.2;padding:3px 4px 3px 10px}
   .mk-note .btn{flex:none;padding:0 10px}
 }
+
+/* selo de reposição do player (.pl-badge) fora do cartão de missão no celular (QA): centrado na área livre à esquerda */
+@media (max-height:520px){
+  body:has(.mx-root.has-card) .pl-badge{left:29vw;max-width:calc(58vw - 24px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
 `;

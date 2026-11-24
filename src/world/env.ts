@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CLOSE_MIN, OPEN_MIN } from '../sim/state';
 import { SIDEWALK_DEPTH, STORAGE_DEPTH, deliveryZone, trashBinPos, type Bounds } from '../core/layout';
-import { Tracker, icoGeo, stdMat, scaleUV, hash01, planeGeo } from './kit';
+import { Tracker, icoGeo, stdMat, scaleUV, hash01, planeGeo, freezeStatic } from './kit';
 import { Batch, kindMaterial, meshesOf, type Spec } from './batch';
 import { uvToCell, type Cell } from './atlas';
 import { DECAL, asphaltTex, drawDelivery, paverTex, windowTex } from './tex';
@@ -279,6 +279,7 @@ export class Env {
     sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 5; sc.far = 160; sc.updateProjectionMatrix();
     this.sun.target.position.set(W / 2, 0, (D - STORAGE_DEPTH) / 2);
     this.lastT = -1;
+    freezeStatic(this.group, [this.sun, ...this.cars.map((c) => c.g)]); // só sol (setTime) e carros se movem
   }
 
   private writeClouds(): void {

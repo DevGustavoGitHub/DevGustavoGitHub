@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Decor } from '../sim/state';
 import { DOOR_WIDTH, STORAGE_DEPTH, WALL_HEIGHT, type Bounds } from '../core/layout';
-import { Tracker, scaleUV, hex, planeGeo } from './kit';
+import { Tracker, scaleUV, hex, planeGeo, freezeStatic } from './kit';
 import { Batch, meshesOf, type Spec } from './batch';
 import { uvToCell, type Cell } from './atlas';
 import { DECAL, brickTex, decalMaterial, drawSign, tileTex, woodTex } from './tex';
@@ -175,6 +175,7 @@ export class Shop {
       if (m.material === decalMaterial()) { this.decalGeo = m.geometry; m.renderOrder = 2; }
     }
     this.signOpen = null;
+    freezeStatic(this.group, [this.doorL, this.doorR]); // só as portas de vidro se movem
   }
 
   private buildFront(wb: WallBuilder, sb: Batch, W: number, D: number, decor: Decor, name: string): void {

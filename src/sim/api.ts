@@ -146,7 +146,22 @@ export function buyExpansion(state: StoreState): void {
   state.money -= e.cost;
   state.expansion++;
   state.rent = rentFor(state); // aluguel cheio sobe RENT.perExpansion (já vale para o fechamento de hoje)
-  relocateBlocking(state); // a porta muda de lugar: tira móveis da nova antessala/passagem
+  clearReserved(state); // a porta muda de lugar: tira móveis da nova antessala/passagem
+}
+/**
+ * Tira móveis da antessala da porta, da passagem do depósito e do tile do operador dos balcões: realoca para o ponto
+ * válido mais próximo; sem lugar, desmonta para o estoque de montagem (unidades expostas → depósito/calçada). O último
+ * balcão nunca é desmontado.
+ */
+function clearReserved(state: StoreState): void {
+  for (const id of relocateBlocking(state)) {
+    const f = state.furniture.find((x) => x.id === id);
+    if (!f || (f.type === 'counter' && state.furniture.filter((x) => x.type === 'counter').length <= 1)) continue;
+    state.furniture.splice(state.furniture.indexOf(f), 1);
+    for (const l of f.levels ?? []) if (l.productId !== undefined) returnUnits(state, l.productId, l.units);
+    state.furnitureStock.push(f.variant !== undefined ? { type: f.type, variant: f.variant } : { type: f.type });
+  }
+  reconcile(state);
 }
 export function storageCost(): { cost: Cents; minLevel: number } { return { cost: STORAGE.cost, minLevel: STORAGE.minLevel }; }
 export function unlockStorage(state: StoreState): void {
@@ -155,6 +170,7 @@ export function unlockStorage(state: StoreState): void {
   if (state.money < STORAGE.cost) throw new Error('Dinheiro insuficiente');
   state.money -= STORAGE.cost;
   state.storageUnlocked = true;
+  clearReserved(state); // a passagem salão ↔ depósito passa a ser reservada: tira o que estiver no vão
 }
 
 /* ---------- Funcionários ---------- */
@@ -519,20 +535,30 @@ export function autoOrderRules(state: StoreState): Record<string, AutoOrderRule>
   for (const [k, v] of Object.entries(state.autoOrders)) out[k] = { ...v };
   return out;
 }
-/** Para cada regra com (shelf+storage+sidewalk) < minUnits, compra `boxes` caixas se houver dinheiro. Retorna o que comprou. */
-export function runAutoOrders(state: StoreState): { productId: string; boxes: number; cost: Cents }[] {
+/** Fase 4 (QA): regra de pedido automático que precisava comprar e não comprou, com o motivo (para o npc avisar). */
+export interface AutoOrderSkip { productId: string; boxes: number; reason: 'sidewalk-full' | 'no-money'; message: string }
+/** O array é o que foi comprado (como antes); `skipped` (não enumerável: não aparece em toEqual/JSON) lista o que faltou. */
+export type AutoOrderResult = { productId: string; boxes: number; cost: Cents }[] & { readonly skipped: AutoOrderSkip[] };
+/**
+ * Para cada regra com (shelf+storage+sidewalk) < minUnits, compra `boxes` caixas se houver dinheiro e lugar na calçada
+ * (tudo ou nada por regra). Retorna o que comprou; `.skipped` diz o que não comprou e por quê ('sidewalk-full' | 'no-money').
+ */
+export function runAutoOrders(state: StoreState): AutoOrderResult {
   const out: { productId: string; boxes: number; cost: Cents }[] = [];
+  const skipped: AutoOrderSkip[] = [];
   for (const p of PRODUCTS) {
     const rule = state.autoOrders[p.id];
     if (!rule || !state.licenses.includes(p.category)) continue;
     if (unitsOwned(state, p.id) >= rule.minUnits) continue;
-    try {
+    if (state.sidewalk.length + rule.boxes > SIDEWALK_MAX_BOXES) {
+      skipped.push({ productId: p.id, boxes: rule.boxes, reason: 'sidewalk-full', message: `Calçada cheia: pedido automático de ${p.name} não foi feito` });
+    } else if (state.money < wholesale(state, p.id) * p.boxSize * rule.boxes) {
+      skipped.push({ productId: p.id, boxes: rule.boxes, reason: 'no-money', message: `Dinheiro insuficiente: pedido automático de ${p.name} não foi feito` });
+    } else {
       out.push({ productId: p.id, boxes: rule.boxes, cost: orderBoxes(state, p.id, rule.boxes) });
-    } catch {
-      /* sem dinheiro ou calçada cheia: pula esta regra */
     }
   }
-  return out;
+  return Object.defineProperty(out, 'skipped', { value: skipped, enumerable: false }) as AutoOrderResult;
 }
 /** Compra o necessário para encher cada prateleira até `fillRatio` (default 1). Só licenciados com móvel atribuído. */
 export function buyMissing(state: StoreState, fillRatio = 1): { cost: Cents; boxes: number } {

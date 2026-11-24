@@ -78,6 +78,10 @@ class Service {
   shown = false;
   pendingT = 0;
   awayT = 0;
+  /** checkoutRequest emitido e ainda sem checkoutResult (o painel da UI pode estar aberto). */
+  reqPending = false;
+  /** o painel (ui:modal) chegou a abrir depois do pedido */
+  modalSeen = false;
   payTap: () => void = () => {};
   constructor(readonly c: Customer, readonly method: 'cash' | 'card', readonly taps: { pid: string; n: number }[]) {}
 }
@@ -162,6 +166,8 @@ export class CheckoutManager {
   private readonly regs = new Map<THREE.Object3D, PickService>();
   private readonly pool = new Map<string, THREE.Object3D[]>();
   private readonly dimCache = new Map<string, { sx: number; sz: number; y0: number }>();
+  /** ui:modal aberto (painel de pagamento ou outro modal da UI). */
+  private modalOpen = false;
   private readonly tmp: Vec2 = { x: 0, z: 0 };
 
   constructor(private env: Env, private onSale: () => void) {
@@ -502,10 +508,14 @@ export class CheckoutManager {
         }
         break;
       case 'paying':
+        // pedido pendente com o painel de troco/maquininha aberto (ui:modal): nada expira — paciência e prazos
+        // congelados; o checkoutResult correspondente é sempre aceito (QA: venda perdida após ~90 s de painel)
+        if (this.modalOpen) { s.modalSeen = true; s.pendingT = 0; s.awayT = 0; break; }
         s.pendingT += dt;
         s.awayT = op === 'player' ? 0 : s.awayT + dt;
-        // jogador saiu do caixa ou a UI não respondeu: o cliente estende o pagamento de novo (sem castigo)
-        if (s.awayT > 1.5 || s.pendingT > 90) { s.phase = 'pay'; s.t = 0; s.shown = false; }
+        // painel fechado sem resposta, UI ausente ou jogador fora do caixa: invalida o pedido (checkout:cancel para a UI)
+        // e o cliente estende o pagamento de novo, sem castigo
+        if (s.awayT > 1.5 || s.pendingT > (s.modalSeen ? 2.5 : 90)) { this.cancelRequest(l, s); s.phase = 'pay'; s.t = 0; s.shown = false; }
         break;
     }
     if (l.svc === s) this.animate(l, s, dt);
@@ -651,6 +661,7 @@ export class CheckoutManager {
     this.hidePay(l, s);
     s.payTapAt = this.clock;
     s.phase = 'paying'; s.pendingT = 0; s.awayT = 0;
+    s.reqPending = true; s.modalSeen = this.modalOpen;
     this.env.ctx.bus.emit('checkoutRequest', {
       customerId: c.id, counterId: l.furnitureId, items: c.items.map((i) => ({ productId: i.productId, qty: i.qty })),
       total: s.reqTotal, method: s.method, paid: s.method === 'cash' ? s.paid : s.reqTotal, stage: 'pay',
@@ -696,7 +707,16 @@ export class CheckoutManager {
   }
 
   /** Remove tudo do atendimento (itens, tocáveis, contornos, notas/cartão). */
+  /** Pedido pendente invalidado (cliente saiu, balcão sumiu, reapresentação): avisa a UI para fechar o painel. */
+  private cancelRequest(l: Lane, s: Service): void {
+    if (!s.reqPending) return;
+    s.reqPending = false;
+    this.env.ctx.bus.emit('checkout:cancel', { customerId: s.c.id, counterId: l.furnitureId });
+  }
+  setModal(open: boolean): void { this.modalOpen = open; }
+
   private clear(l: Lane, s: Service): void {
+    this.cancelRequest(l, s);
     for (const it of s.belt) this.release(it);
     s.belt.length = 0;
     for (const it of s.flying) this.release(it);
@@ -711,7 +731,9 @@ export class CheckoutManager {
     for (const l of this.lanes) {
       const s = l.svc;
       if (!s || s.c.id !== r.customerId) continue;
-      if (s.phase !== 'paying') return; // resposta atrasada ou duplicada
+      if (!s.reqPending) return; // resposta atrasada, duplicada ou de pedido já cancelado (checkout:cancel)
+      s.reqPending = false;
+      if (s.shown) this.hidePay(l, s);
       if (r.ok) {
         const pay = clamp(Number.isFinite(r.speed) ? r.speed : 0.5, 0, 1);
         this.finish(l, s, 0.5 * this.scanSpeed(s) + 0.5 * pay, Math.max(0, Math.round(r.mistakes) || 0));

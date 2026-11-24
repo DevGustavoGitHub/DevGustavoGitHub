@@ -3,7 +3,7 @@ import {
   assignProduct, autoOrderRules, buyExpansion, buyFurniture, buyMissing, buyUpgrade, canPlace, carryCapacity, closeDay, completeSale,
   decorCatalog, dayHistory, employeeCost, furnitureCatalog, isBankrupt, loanInfo, orderBoxes, productCapacity, repayLoan,
   restartAfterBankruptcy, runAutoOrders, sellFurniture, setAutoOrder, takeLoan, takeFromShelf, topProducts, unlockStorage, upgradeCatalog,
-  expansionCost, expansionMinLevel, storageCost,
+  expansionCost, expansionMinLevel, storageCost, placeUnits,
 } from '../src/sim/api';
 import { LICENSES, PRODUCTS } from '../src/sim/catalog';
 import { XP_BASE, XP_EXP, addXp, xpForLevel } from '../src/sim/economy';
@@ -299,7 +299,9 @@ describe('save: migração e persistência', () => {
     takeLoan(s, 300000);
     setAutoOrder(s, 'arroz', { minUnits: 7, boxes: 3 });
     buyUpgrade(s, 'dolly');
-    expose(s, 'arroz', 5);
+    buyFurniture(s, 'shelf', 7, 2, 0, 'arroz');
+    orderBoxes(s, 'arroz', 1);
+    expect(placeUnits(s, s.sidewalk.length - 1, 5)).toBe(5);
     expect(takeFromShelf(s, 'arroz', 3)).toBe(3);
     completeSale(s, [{ productId: 'arroz', qty: 3 }], 0.5, 4);
     closeDay(s);

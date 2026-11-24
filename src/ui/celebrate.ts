@@ -30,8 +30,12 @@ export class Celebrate {
   private building = false;
   private shownMax: number;
   private queuedAt = 0;
+  /** Chamado ao tocar "Continue jogando!" no nível N (a UI dá baixa com `api.consumeLevelUps` no último). */
+  onAck: ((level: number) => void) | null = null;
+  private showing = 0;
   constructor(private kit: UiKit, private layer: HTMLElement) {
-    this.shownMax = kit.ctx.state.level;
+    const s = kit.ctx.state;
+    this.shownMax = Number.isFinite(s.levelAck) ? Math.min(s.levelAck, s.level) : s.level; // não vistos voltam ao recarregar
     kit.ctx.bus.on('build:state', (p?: { active: boolean }) => { this.building = !!p?.active; });
   }
   get isOpen(): boolean { return this.el !== null; }
@@ -52,6 +56,7 @@ export class Celebrate {
   show(level: number): void {
     const { ctx } = this.kit;
     this.shownMax = Math.max(this.shownMax, level);
+    this.showing = level;
     const items = unlocksAt(ctx.state, level);
     const nxt = nextUnlocks(ctx.state, level);
     const go = h('button', { class: 'btn-go', on: { click: () => this.next() } }, 'Continue jogando!');
@@ -74,9 +79,11 @@ export class Celebrate {
   }
 
   private next(): void {
-    this.el?.remove();
+    if (!this.el) return;
+    this.el.remove();
     this.el = null;
     this.kit.modalClose('celebrate');
+    this.onAck?.(this.showing);
     const lv = this.queue.shift();
     if (lv !== undefined) this.show(lv);
   }

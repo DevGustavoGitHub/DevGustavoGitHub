@@ -127,7 +127,21 @@ export interface StoreState {
   bankruptcies: number;
   /** Fase 3: móveis comprados no carrinho e ainda não montados (api.checkoutCart → api.placeFromStock). */
   furnitureStock: StockedFurniture[];
+  /**
+   * Fase 4 (QA): hora/fase do dia salvas (main.ts/core/clock gravam e restauram). Ausente em saves antigos =
+   * preparação às 08:00 (OPEN_MIN). `deserialize` saneia (minuto em [OPEN_MIN, CLOSE_MIN]).
+   */
+  clock?: SavedClock;
+  /**
+   * Fase 4 (QA): unidades nas mãos/cestas/esteira dos clientes (já saíram dos níveis e ainda não foram vendidas);
+   * o npc mantém a lista. Ao carregar o save, `deserialize` devolve tudo à exposição (`returnToShelf`: níveis do
+   * produto, níveis livres, depósito/calçada) e zera a lista: nada some e o custo médio continua coerente.
+   */
+  npcHeld?: { productId: string; qty: number }[];
 }
+
+export type SavedDayPhase = 'prep' | 'open' | 'closing' | 'report';
+export interface SavedClock { minute: number; phase: SavedDayPhase }
 
 /**
  * Layout inicial (Fase 3, como no original): o balcão e 2 prateleiras de mercearia barata já atribuídas (feijão e
@@ -187,6 +201,7 @@ export function newGame(seed = 1): StoreState {
     stats: [],
     bankruptcies: 0,
     furnitureStock: [],
+    clock: { minute: OPEN_MIN, phase: 'prep' },
   };
   s.rent = rentFor(s);
   syncShelf(s);

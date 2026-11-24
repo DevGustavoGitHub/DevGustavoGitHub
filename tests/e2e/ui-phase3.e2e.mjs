@@ -222,6 +222,9 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
     check('[missões] mais 5 clientes', /0\/5/.test(await mtx()));
     for (let i = 0; i < 5; i++) await page.evaluate((i) => window.__game.bus.emit('checkout:done', { customerId: 9100 + i, counterId: 1, total: 100, tip: 0, method: 'card', happy: true }), i);
     await page.waitForTimeout(200);
+    check('[missões] dica de preço: até 10% acima do mercado', /10% acima do mercado/.test(await mtx()));
+    await page.evaluate(() => { const s = window.__game.state; s.prices.arroz = 99900; window.__game.bus.emit('stateChanged', { what: 'price' }); });
+    await page.waitForTimeout(600);
     check('[missões] tutorial concluído', await page.evaluate(() => localStorage.getItem('mercadinho:tutorial') === 'done' && !document.querySelector('.mcard.mission')));
     // fechar pela placa pede confirmação
     await page.evaluate(() => window.__game.bus.emit('store:sign'));
@@ -281,6 +284,61 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   await page.waitForTimeout(600);
   const r = await page.evaluate(() => ({ shown: getComputedStyle(document.querySelector('.rotate')).display !== 'none', paused: window.__game.clock.paused, modal: document.querySelectorAll('.rotate.on').length }));
   check('[nativo] sem aviso "Gire o celular" no app (orientação travada)', !r.shown && r.modal === 0, JSON.stringify(r));
+  await ctx.close();
+}
+
+/* ---------- 9) Fase 4 (QA): save ilegível → aviso + "Jogar"; Voltar do Android; placa com toque duplo; baixa do nível ---------- */
+{
+  const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`qa pageerror: ${e.message}`));
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seeded')) return;
+    sessionStorage.setItem('seeded', '1');
+    localStorage.setItem('mercadinho:settings', JSON.stringify({ reduceMotion: true, quality: 'low' }));
+    localStorage.setItem('mercadinho-sim:save:v1', '{"version":1, quebrado');
+  });
+  await page.goto(URL);
+  await page.waitForFunction(() => window.__game && window.__ui, null, { timeout: 30000 });
+  await page.waitForTimeout(500);
+  const rec = await page.evaluate(() => ({ dlg: document.querySelector('.mx-dialog')?.textContent ?? '', key: localStorage.getItem('mercadinho:save-recovered'), btns: [...document.querySelectorAll('.title-screen .btn')].map((b) => b.textContent.trim()) }));
+  check('[save] save ilegível: aviso claro e a chave some', /não pôde ser carregado/.test(rec.dlg) && /cópia/.test(rec.dlg) && rec.key === null, JSON.stringify(rec));
+  check('[save] tela inicial sem "Continuar" quando o save é inválido', rec.btns.some((t) => /Jogar/.test(t)) && !rec.btns.some((t) => /Continuar/.test(t)), JSON.stringify(rec.btns));
+  await page.locator('.mx-dialog .btn').click();
+  await page.getByText('Jogar', { exact: true }).first().click();
+  await page.waitForFunction(() => !document.querySelector('.title-screen'), null, { timeout: 15000 });
+  await page.evaluate(() => { window.__exit = 0; window.__game.bus.on('app:exit', () => { window.__exit++; }); });
+  const backEv = () => page.evaluate(() => window.__game.bus.emit('ui:back'));
+  await backEv(); await page.waitForTimeout(150);
+  check('[voltar] sem painel: abre o menu de pausa', (await page.locator('.menu-card').count()) === 1);
+  await backEv(); await page.waitForTimeout(150);
+  check('[voltar] na pausa: pergunta "Sair do jogo?"', /Sair do jogo/.test(await page.locator('.mx-dialog').innerText().catch(() => '')));
+  await backEv(); await page.waitForTimeout(150);
+  check('[voltar] no diálogo: cancela (a pausa continua)', (await page.locator('.mx-dialog').count()) === 0 && (await page.locator('.menu-card').count()) === 1);
+  await backEv(); await page.waitForTimeout(150);
+  await page.locator('.mx-dialog .btn.danger').click();
+  await page.waitForTimeout(150);
+  check('[voltar] confirmar "Sair" emite app:exit', await page.evaluate(() => window.__exit === 1));
+  await page.locator('.menu-card .btn.primary').first().click(); // Continuar
+  await page.evaluate(() => window.__game.bus.emit('ui:openTablet', { tab: 'prices' }));
+  await page.waitForSelector('.t3');
+  await backEv(); await page.waitForTimeout(200);
+  check('[voltar] com o tablet aberto: fecha o tablet', (await page.locator('.t3').count()) === 0 && (await page.locator('.menu-card').count()) === 0);
+  await page.evaluate(() => { window.__game.bus.emit('store:sign'); window.__game.bus.emit('store:sign'); });
+  await page.waitForTimeout(300);
+  check('[placa] toque duplo abre a loja sem perguntar "Fechar a loja?"', await page.evaluate(() => window.__game.clock.phase === 'open' && !document.querySelector('.mx-dialog')));
+  // baixa do nível só depois de "Continue jogando!"
+  await page.evaluate(() => { window.__game.state.level = 2; });
+  await page.waitForSelector('.cele:not(.summary)', { timeout: 9000 });
+  check('[nível] sem baixa antes de "Continue jogando!"', await page.evaluate(() => window.__game.state.levelAck === 1));
+  await page.reload();
+  await page.waitForFunction(() => window.__game && window.__ui, null, { timeout: 30000 });
+  await page.getByText('Continuar', { exact: true }).first().click();
+  await page.waitForSelector('.cele:not(.summary)', { timeout: 9000 }).catch(() => {});
+  check('[nível] comemoração não vista volta após recarregar', /Nível 2/.test(await page.locator('.cele').innerText().catch(() => '')));
+  await page.locator('.cele .btn-go').click();
+  await page.waitForTimeout(300);
+  check('[nível] "Continue jogando!" dá baixa (levelAck = 2)', await page.evaluate(() => window.__game.state.levelAck === 2));
   await ctx.close();
 }
 

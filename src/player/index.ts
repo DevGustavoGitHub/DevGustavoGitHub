@@ -18,8 +18,8 @@ import * as api from '../sim/api';
 import { Input } from './input';
 import { Controls } from './controls';
 import { Collider, furnRect } from './collide';
-import { BOX_H, CartonKit, CartonView, HeldView, ProductTemplates, disposeShared, type HeldBox } from './hands';
-import { FallbackHighlight, FallbackPicks, localToWorld, pickOf } from './picking';
+import { BOX_H, CartonKit, CartonView, HeldView, ProductTemplates, disposeShared, type HeldBox, type HeldState } from './hands';
+import { FallbackHighlight, FallbackPicks, localToWorld, pickNode } from './picking';
 import { setupLandscape } from './landscape';
 
 const EYE = 1.6, RADIUS = 0.3, FOV = 70;
@@ -30,8 +30,9 @@ const BIN_R = 0.8, GRAV = 9.8, DROP_R = 0.26;
 const SEAT_YAW = Math.PI / 3;
 const PITCH_MIN = -1.35, PITCH_MAX = 1.2;
 
-interface Target { pick: PickInfo; key: string; base: string; obj: THREE.Object3D | null; point: THREE.Vector3 | null; dist: number }
-interface Act { key: string; label: string; enabled: boolean; hold: boolean; run?: () => boolean | void; box?: Box }
+interface Target { pick: PickInfo; key: string; base: string; obj: THREE.Object3D | null; point: THREE.Vector3; hasPoint: boolean; dist: number }
+/** `up`: abre painel/modo (Preço, computador, depósito, placa, Mover) → roda no pointerup do mesmo dedo (sem clique fantasma). */
+interface Act { key: string; label: string; enabled: boolean; hold: boolean; run?: () => boolean | void; box?: Box; up?: boolean }
 interface Flying { box: Box; view: CartonView; pos: THREE.Vector3; vel: THREE.Vector3; spin: THREE.Vector3; t: number; bounces: number }
 interface Seat { counterId: number; pos: THREE.Vector3; yaw0: number; pitch0: number }
 
@@ -89,9 +90,25 @@ export default function create(): GameModule {
   const tapTargets = new Map<THREE.Object3D, () => void>();
   const prefs = { reduceMotion: false, haptics: true, fontScale: 1, colorblind: false, look: 1 };
   let landLock: ReturnType<typeof setupLandscape> | null = null;
-  const lvlPicks = new Map<string, PickInfo>(); // PickInfo com nível (cache; nunca muta o userData.pick do world)
+  const lvlPicks = new Map<number, PickInfo[]>(); // PickInfo com nível por móvel (cache; nunca muta o userData.pick do world)
+  // custo por quadro: mira a cada 2 quadros com câmera/posição mudando, a cada 6 parado, na hora após mudança de estado;
+  // ações (resolve) só quando algo muda (alvo, estado, caixas, fase) ou a cada 0,25 s. Nada é alocado por quadro.
+  let castAge = 99, castDt = 0, castDirty = true, castX = 0, castZ = 0, castYaw = 0, castPitch = 0;
+  let resolveDirty = true, resolveT = 0, lastPhase = '', lastN = -1, lastTop: Box | null = null, lastCap = 0;
+  let fbDirty = true, fbAge = 0;
+  let upKey: string | null = null; // ação de painel esperando o pointerup
+  let signCool = 0; // toque duplo na placa não abre e fecha
+  let emptied: { box: Box; fid: number; l: number; t: number } | null = null; // caixa esvaziada no Repor: sem "Retirar" por 1 s
+  const mkTarget = (): Target => ({ pick: { kind: 'trash' }, key: '', base: '', obj: null, point: new THREE.Vector3(), hasPoint: false, dist: 0 });
+  const T0 = mkTarget(), T1 = mkTarget(), TF = mkTarget(); // dois alternados para o raycast + o forçado (testes)
+  interface Keys { kind: string; id: number | undefined; level: number | undefined; key: string; base: string }
+  const keyCache = new WeakMap<PickInfo, Keys>();
+  const invM = new THREE.Matrix4(), lray = new THREE.Ray(), hitL = new THREE.Vector3(), cW = new THREE.Vector3(), nearPoint = new THREE.Vector3();
+  const stack: THREE.Object3D[] = [];
+  let nearNode: THREE.Object3D | null = null, nearDist = 0;
   let catalog: api.FurnitureSpec[] | null = null;
   const heldList: HeldBox[] = [];
+  const heldState: HeldState = { boxes: heldList, dolly: false, hideTop: false, walk: 0, lookYaw: 0, lookPitch: 0, reduce: false, mop: null };
   let stickShown = true;
   let probe: THREE.Mesh | null = null; // só testes (window.__player.tapProbe)
   let probeHits = 0;
@@ -251,29 +268,71 @@ export default function create(): GameModule {
     const w = world();
     const g = w?.pickGroup;
     if (g && g.children.length) { if (!g.parent) g.updateMatrixWorld(true); return g; }
-    fbPicks.sync(st(), w);
+    if (fbDirty || ++fbAge > 30) { fbPicks.sync(st(), w); fbDirty = false; fbAge = 0; }
     return fbPicks.group;
   };
-  const cast = (): Target | null => {
+  /** Chaves do alvo (cache por PickInfo; recalcula se o world mudar kind/id/level no mesmo objeto). */
+  const keysOf = (p: PickInfo): Keys => {
+    let k = keyCache.get(p);
+    if (!k || k.kind !== p.kind || k.id !== p.id || k.level !== p.level) {
+      k = { kind: p.kind, id: p.id, level: p.level, key: keyOf(p), base: baseOf(p) };
+      keyCache.set(p, k);
+    }
+    return k;
+  };
+  /**
+   * Proxy (com userData.pick) mais próximo no raio, sem alocar: esfera envolvente como filtro e entrada na caixa
+   * envolvente local (as proxies são caixas); por dentro da caixa não conta (como as faces de trás no raycast padrão).
+   */
+  const rayNearest = (root: THREE.Object3D): boolean => {
+    const r = ray.ray;
+    nearNode = null; nearDist = ray.far;
+    stack.length = 0;
+    stack.push(root);
+    while (stack.length) {
+      const o = stack.pop()!;
+      if (!o.layers.test(ray.layers)) continue;
+      for (let i = 0; i < o.children.length; i++) stack.push(o.children[i]!);
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.geometry) continue;
+      const node = pickNode(m);
+      if (!node) continue;
+      const g = m.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      if (!g.boundingBox) g.computeBoundingBox();
+      const bs = g.boundingSphere!, rad = bs.radius * m.matrixWorld.getMaxScaleOnAxis();
+      cW.copy(bs.center).applyMatrix4(m.matrixWorld);
+      const lim = nearDist + rad;
+      if (cW.distanceToSquared(r.origin) > lim * lim || r.distanceSqToPoint(cW) > rad * rad) continue;
+      invM.copy(m.matrixWorld).invert();
+      lray.copy(r).applyMatrix4(invM);
+      const bb = g.boundingBox!;
+      if (bb.containsPoint(lray.origin) || !lray.intersectBox(bb, hitL)) continue;
+      hitL.applyMatrix4(m.matrixWorld);
+      const d = hitL.distanceTo(r.origin);
+      if (d < ray.near || d >= nearDist) continue;
+      nearNode = node; nearDist = d; nearPoint.copy(hitL);
+    }
+    return nearNode !== null;
+  };
+  /** Raycast do centro da tela → preenche `out` (um dos alvos reaproveitados) ou null. */
+  const cast = (out: Target): Target | null => {
     const cam = ctx.camera;
     v2.set(0, 0);
     ray.setFromCamera(v2, cam);
     ray.near = 0.05;
     ray.far = RANGE_FAR + RANGE_HYST;
-    hits.length = 0;
-    ray.intersectObject(pickRoot(), true, hits);
-    for (const h of hits) {
-      const p = pickOf(h.object);
-      if (!p) continue;
-      const base = baseOf(p.info);
-      const far = p.info.kind === 'sign' || p.info.kind === 'computer';
-      const lim = (far ? RANGE_FAR : RANGE) + (target?.base === base ? RANGE_HYST : 0);
-      if (h.distance > lim) return null; // o mais próximo está longe: nada atrás dele conta
-      if (collider.blocked(cam.position.x, cam.position.z, h.point.x, h.point.z)) return null;
-      const info = p.info.kind === 'furniture' && p.info.id != null ? withLevel(p.info, h.point) : p.info;
-      return { pick: info, key: keyOf(info), base, obj: p.obj, point: h.point, dist: h.distance };
-    }
-    return null;
+    if (!rayNearest(pickRoot())) return null;
+    const node = nearNode!, pinfo = node.userData.pick as PickInfo;
+    const base = keysOf(pinfo).base;
+    const far = pinfo.kind === 'sign' || pinfo.kind === 'computer';
+    const lim = (far ? RANGE_FAR : RANGE) + (target?.base === base ? RANGE_HYST : 0);
+    if (nearDist > lim) return null; // o mais próximo está longe: nada atrás dele conta
+    if (collider.blocked(cam.position.x, cam.position.z, nearPoint.x, nearPoint.z)) return null;
+    const info = pinfo.kind === 'furniture' && pinfo.id != null ? withLevel(pinfo, nearPoint) : pinfo;
+    out.pick = info; out.key = keysOf(info).key; out.base = base; out.obj = node;
+    out.point.copy(nearPoint); out.hasPoint = true; out.dist = nearDist;
+    return out;
   };
   /** Nível do móvel no ponto do raycast: `world.levelAt` (fora dos níveis — tampo, base — o mais próximo na vertical). */
   const levelAtPoint = (f: Furniture, pt: THREE.Vector3): number | null => {
@@ -300,14 +359,13 @@ export default function create(): GameModule {
     return clamp(n - 1 - Math.floor(((pt.y - y0) / (y1 - y0)) * n), 0, n - 1);
   };
   const withLevel = (info: PickInfo, pt: THREE.Vector3): PickInfo => {
-    const f = st().furniture.find((x) => x.id === info.id);
+    const f = furnById(info.id!);
     if (!f || !isDisplay(f)) return info;
     const l = levelAtPoint(f, pt);
     if (l == null) return info;
-    const k = `${f.id}:${l}`;
-    let pi = lvlPicks.get(k);
-    if (!pi) { pi = { kind: 'furniture', id: f.id, level: l }; lvlPicks.set(k, pi); }
-    return pi;
+    let arr = lvlPicks.get(f.id);
+    if (!arr) { arr = []; lvlPicks.set(f.id, arr); }
+    return (arr[l] ??= { kind: 'furniture', id: f.id, level: l });
   };
   const highlight = (t: Target | null): void => {
     const w = world();
@@ -319,15 +377,18 @@ export default function create(): GameModule {
   const setTarget = (t: Target | null): void => {
     target = t; lostT = 0; pendKey = ''; pendT = 0;
     const k = t?.key ?? '';
-    if (k !== hlKey) { hlKey = k; highlight(t); }
+    if (k !== hlKey) { hlKey = k; highlight(t); resolveDirty = true; }
   };
   const updateTarget = (dt: number): void => {
     if (forced) {
-      const k = keyOf(forced);
-      if (target?.key !== k) setTarget({ pick: forced, key: k, base: baseOf(forced), obj: null, point: null, dist: 1 });
+      const k = keysOf(forced);
+      if (target?.key !== k.key) {
+        TF.pick = forced; TF.key = k.key; TF.base = k.base; TF.obj = null; TF.hasPoint = false; TF.dist = 1;
+        setTarget(TF);
+      }
       return;
     }
-    const c = cast();
+    const c = cast(target === T0 ? T1 : T0);
     const ck = c?.key ?? '';
     if (target && ck === target.key) { target = c; lostT = 0; pendKey = ''; return; }
     if (!c) { if (target) { lostT += dt; if (lostT > 0.16) setTarget(null); } return; }
@@ -340,8 +401,8 @@ export default function create(): GameModule {
     const s = st();
     const ok = (o: Box | undefined): o is Box => !!o && !o.carried && o.x != null && o.z != null;
     const b = t.pick.id != null ? s.sidewalk[t.pick.id] : undefined;
-    if (ok(b) && (!t.point || Math.hypot(b.x! - t.point.x, b.z! - t.point.z) < 0.9)) return b;
-    if (!t.point) return null;
+    if (ok(b) && (!t.hasPoint || Math.hypot(b.x! - t.point.x, b.z! - t.point.z) < 0.9)) return b;
+    if (!t.hasPoint) return null;
     let best: Box | null = null, bd = 0.9;
     for (const o of s.sidewalk) {
       if (!ok(o)) continue;
@@ -354,8 +415,8 @@ export default function create(): GameModule {
     const s = st();
     const id = t.pick.id;
     const d = id != null ? s.dirt[id] : undefined;
-    if (d && (!t.point || Math.hypot(d.x - t.point.x, d.z - t.point.z) < 0.8)) return id!;
-    if (!t.point) return -1;
+    if (d && (!t.hasPoint || Math.hypot(d.x - t.point.x, d.z - t.point.z) < 0.8)) return id!;
+    if (!t.hasPoint) return -1;
     let bi = -1, bd = 0.8;
     for (let i = 0; i < s.dirt.length; i++) {
       const o = s.dirt[i]!;
@@ -368,6 +429,7 @@ export default function create(): GameModule {
   /* ---------------- tabela de ações ---------------- */
   const A = (key: string, label: string, run: () => boolean | void, hold = false, box?: Box): Act => ({ key, label, enabled: true, hold, run, box });
   const D = (key: string, label: string): Act => ({ key, label, enabled: false, hold: false });
+  const U = (key: string, label: string, run: () => boolean | void): Act => ({ key, label, enabled: true, hold: false, run, up: true });
 
   /** `api.canStockLevel` (ordem da sim: box-empty, not-accepted, other-product, full, box-closed, ok). */
   const levelCheck = (b: Box, f: Furniture, l: number): api.LevelCheck => {
@@ -387,7 +449,7 @@ export default function create(): GameModule {
     const lv: ShelfLevel | undefined = l != null ? f.levels?.[l] : undefined;
     if (!carried.length) {
       const pid = l != null ? lv?.productId : (f.levels?.find((x) => x.productId)?.productId ?? f.productId);
-      return A('price', 'Preço', () => { emit('ui:openTablet', pid ? { tab: 'prices', productId: pid } : { tab: 'prices' }); });
+      return U('price', 'Preço', () => { emit('ui:openTablet', pid ? { tab: 'prices', productId: pid } : { tab: 'prices' }); });
     }
     if (l == null) return D('nolevel', 'Mire uma prateleira');
     const lvUnits = lv?.units ?? 0, lvPid = lv?.productId;
@@ -399,7 +461,8 @@ export default function create(): GameModule {
     for (let i = carried.length - 1; i >= 0; i--) {
       const b = carried[i]!;
       if (b.units <= 0) {
-        if (lvUnits > 0) { if (isOpen(b)) pullBox ??= b; else openPull ??= b; } else why ??= 'box-empty';
+        const just = emptied && emptied.box === b && emptied.fid === f.id && emptied.l === l && performance.now() - emptied.t < 1000;
+        if (lvUnits > 0 && !just) { if (isOpen(b)) pullBox ??= b; else openPull ??= b; } else why ??= 'box-empty';
         continue;
       }
       const r = levelCheck(b, f, l);
@@ -442,7 +505,7 @@ export default function create(): GameModule {
       case 'furniture': {
         const f = s.furniture.find((x) => x.id === t.pick.id);
         if (!f) return;
-        const mover = carried.length ? null : A('move', 'Mover', () => { emit('build:edit', { furnitureId: f.id }); act('move', { furnitureId: f.id }); });
+        const mover = carried.length ? null : U('move', 'Mover', () => { emit('build:edit', { furnitureId: f.id }); act('move', { furnitureId: f.id }); });
         if (isDisplay(f)) { primary = displayAct(f, t.pick.level ?? null); secondary = mover; }
         else if (f.type === 'rack') { primary = rackAct(f); secondary = mover; }
         else if (f.type === 'counter') { primary = seatAct(f.id); secondary = mover; }
@@ -464,17 +527,17 @@ export default function create(): GameModule {
       }
       case 'sign': {
         const ph = ctx.clock.phase;
-        if (ph === 'prep' || ph === 'open') primary = A('sign', ph === 'prep' ? 'Abrir loja' : 'Fechar loja', signAct);
+        if (ph === 'prep' || ph === 'open') primary = U('sign', ph === 'prep' ? 'Abrir loja' : 'Fechar loja', signAct);
         return;
       }
       case 'computer':
-        primary = A('pc', 'Usar computador', () => { emit('ui:openTablet', {}); act('useComputer'); });
+        primary = U('pc', 'Usar computador', () => { emit('ui:openTablet', {}); act('useComputer'); });
         return;
       case 'seat':
         if (t.pick.id != null) primary = seatAct(t.pick.id);
         return;
       case 'storageDoor':
-        if (!s.storageUnlocked) primary = A('sdoor', 'Depósito (licença)', () => { emit('ui:openTablet', { tab: 'services' }); });
+        if (!s.storageUnlocked) primary = U('sdoor', 'Depósito (licença)', () => { emit('ui:openTablet', { tab: 'services' }); });
         return;
     }
   };
@@ -503,7 +566,11 @@ export default function create(): GameModule {
     return true;
   };
   const toggleTop = (): void => { const b = top(); if (b && canAct()) setOpen(b, !isOpen(b)); };
-  const furnById = (id: number): Furniture | undefined => st().furniture.find((x) => x.id === id);
+  const furnById = (id: number): Furniture | undefined => {
+    const fs = st().furniture;
+    for (let i = 0; i < fs.length; i++) if (fs[i]!.id === id) return fs[i];
+    return undefined;
+  };
   /** Selo "Produto  n/capacidade · caixa: k" do nível. */
   const levelBadge = (fid: number, l: number, b: Box): void => {
     const lv = furnById(fid)?.levels?.[l];
@@ -522,6 +589,7 @@ export default function create(): GameModule {
     let moved = 0;
     try { moved = api.placeUnitsInLevel(s, idxOf(b), fid, l, 1); } catch (e) { toastErr(e); return false; }
     if (moved <= 0) { toast('Nível cheio'); return false; }
+    if (b.units <= 0) emptied = { box: b, fid, l, t: performance.now() };
     sfx('pop'); haptic(5);
     act('placeUnits', { productId: b.productId, furnitureId: fid, level: l });
     if (furnById(fid)?.levels?.[l]?.productId !== before) changed('furniture'); // etiqueta do nível mudou
@@ -606,6 +674,8 @@ export default function create(): GameModule {
     act('clean'); changed('dirt');
   };
   const signAct = (): void => {
+    if (signCool > 0) return;
+    signCool = 0.6;
     const wasPrep = ctx.clock.phase === 'prep';
     emit('store:sign');
     act('sign');
@@ -847,17 +917,28 @@ export default function create(): GameModule {
   };
 
   /* ---------------- botão de ação (tocar / segurar) ---------------- */
-  const actionDown = (): void => {
+  /** `src='pointer'`: ações que abrem painel/modo esperam o pointerup do mesmo dedo (o tablet não abre embaixo do dedo). */
+  const actionDown = (src: 'pointer' | 'key' = 'key'): void => {
     pressed = true;
+    upKey = null;
     if (!canAct()) return;
     resolve();
     const a = primary;
     if (!a) return;
     if (!a.enabled) { controls.denied(); sfx('error'); haptic(25); return; }
+    if (a.up && src === 'pointer') { upKey = a.key; return; }
     const r = a.run?.();
     if (a.hold && r !== false) holding = { key: a.key, t: 0, box: a.box ?? null };
   };
-  const actionUp = (): void => { pressed = false; holding = null; };
+  /** `inside=false`: o dedo saiu do botão (ou o toque foi cancelado) → a ação de painel pendente não roda. */
+  const actionUp = (inside = true): void => {
+    pressed = false; holding = null;
+    const k = upKey;
+    upKey = null;
+    if (!k || !inside || !canAct()) return;
+    resolve();
+    if (primary?.key === k && primary.enabled) primary.run?.();
+  };
   const tickHold = (dt: number): void => {
     if (!holding) return;
     if (!pressed || !canAct()) { holding = null; return; }
@@ -869,6 +950,84 @@ export default function create(): GameModule {
       resolve();
     }
   };
+
+  /* ---------------- quadro ---------------- */
+  const frame = (dtIn: number): void => {
+    const dt = clamp(dtIn, 0, 0.1);
+    const s = ctx.state;
+    for (let i = carried.length - 1; i >= 0; i--) {
+      const b = carried[i]!;
+      if (b === placingBox) continue;
+      if (!b.carried || !s.sidewalk.includes(b)) carried.splice(i, 1);
+    }
+    syncTop();
+    capNow = readCap();
+    input.actionKeys = !building && !seat;
+    input.poll();
+    applyLook();
+    if (!seat) updateMove(dt);
+    updateCamera(dt);
+    if (!seat) svc.position.set(pos.x, 0, pos.z);
+
+    tickFlying(dt);
+    tickMop(dt);
+    if (pendingBox) {
+      pendingBox.t += dt;
+      if (building) { placingBox = pendingBox.box; pendingBox = null; }
+      else if (pendingBox.t > 0.3) { // o world não abriu a prévia: solta à frente
+        const b = pendingBox.box;
+        pendingBox = null;
+        if (carried.includes(b)) dropFront(b);
+      }
+    }
+    if (signCheck >= 0) {
+      signCheck += dt;
+      if (signCheck > 0.4) {
+        signCheck = -1;
+        if (ctx.clock.phase === 'prep' && !locked) { ctx.clock.openStore(); sfx('door'); }
+      }
+    }
+
+    if (signCool > 0) signCool -= dt;
+    castAge++; castDt += dt;
+    if (canAct() || holding) {
+      const moved = Math.abs(pos.x - castX) + Math.abs(pos.z - castZ) > 0.01 || Math.abs(wrapAngle(yaw - castYaw)) + Math.abs(pitch - castPitch) > 0.003;
+      if (castDirty || castAge >= (moved ? 2 : 6)) {
+        updateTarget(castDt);
+        castAge = 0; castDt = 0; castDirty = false; castX = pos.x; castZ = pos.z; castYaw = yaw; castPitch = pitch;
+      }
+    } else { if (target || hlKey) setTarget(null); castDirty = true; }
+    resolveT += dt;
+    const ph = ctx.clock.phase, tb0 = top() ?? null;
+    if (resolveDirty || resolveT >= 0.25 || ph !== lastPhase || carried.length !== lastN || tb0 !== lastTop || capNow !== lastCap) {
+      resolve();
+      resolveDirty = false; resolveT = 0; lastPhase = ph; lastN = carried.length; lastTop = tb0; lastCap = capNow;
+    }
+    tickHold(dt);
+
+    heldList.length = carried.length;
+    for (let i = 0; i < carried.length; i++) {
+      const b = carried[i]!;
+      const h = heldList[i] ?? (heldList[i] = { ref: b, pid: '', units: 0, open: false });
+      h.ref = b; h.pid = b.productId; h.units = b.units; h.open = isOpen(b);
+    }
+    const tb = top();
+    const hs = heldState;
+    hs.dolly = capNow > 1; hs.hideTop = !!placingBox && placingBox === tb;
+    hs.walk = seat ? 0 : bobAmp; hs.lookYaw = lookYawFrame; hs.lookPitch = lookPitchFrame;
+    hs.reduce = prefs.reduceMotion; hs.mop = mopping ? mopping.t / MOP_TIME : null;
+    held.update(ctx.camera, dt, hs);
+
+    const off = locked || override;
+    controls.setView(off, building || !!mopping || !!pendingBox, !!seat);
+    controls.setAction(primary?.label ?? null, primary ? (primary.enabled ? 'ready' : 'disabled') : 'none');
+    controls.setExtras(carried.length > 0 && !placingBox, tb ? isOpen(tb) : null, held.busy(), secondary?.label ?? null);
+    const showStick = !seat && !off;
+    if (showStick !== stickShown) { stickShown = showStick; input.setStickVisible(showStick); }
+    controls.update(dt);
+  };
+  /** Custo do update (ms reais, todos os quadros desde o último reset). */
+  const perfStat = { n: 0, sum: 0, max: 0 };
 
   /* ---------------- módulo ---------------- */
   return {
@@ -962,6 +1121,7 @@ export default function create(): GameModule {
         } else endBuild(e?.placed);
       });
       on('build:end', (e?: { placed?: boolean }) => { if (building || placingBox) endBuild(e?.placed); });
+      on('stateChanged', () => { castDirty = true; resolveDirty = true; fbDirty = true; });
       on('settings:changed', (p?: { reduceMotion?: unknown; haptics?: unknown; fontSize?: unknown; colorblind?: unknown; lookSensitivity?: unknown }) => applyPrefs(p));
       landLock = setupLandscape();
 
@@ -995,15 +1155,27 @@ export default function create(): GameModule {
             yaw = Math.atan2(-dx, -dz); pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), PITCH_MIN, PITCH_MAX);
             desiredPose();
             ctx.camera.position.copy(wantPos); ctx.camera.quaternion.copy(wantQuat); ctx.camera.updateMatrixWorld(true);
-            const c = cast();
+            const c = cast(target === T0 ? T1 : T0);
             if (c && c.pick.kind === 'furniture' && c.pick.id === fid && c.pick.level === level) { setTarget(c); return true; }
           }
           return false;
         },
         landscape: () => landLock?.info() ?? null,
         prefs: () => ({ ...prefs, sensitivity: input.sensitivity }),
+        /** Custo médio/máximo do update real desde o último `perfReset()`. */
+        perf: () => ({ frames: perfStat.n, avgMs: perfStat.n ? perfStat.sum / perfStat.n : 0, maxMs: perfStat.max }),
+        perfReset: () => { perfStat.n = 0; perfStat.sum = 0; perfStat.max = 0; },
+        /** Micro-benchmark: `n` quadros seguidos (dt 1/60), andando (`walk`) e girando (`look` rad/quadro). Devolve ms/quadro. */
+        bench: (n = 300, walk = false, look = 0): number => {
+          input.forceMove = walk ? { x: 0, y: 1 } : null;
+          const t0 = performance.now();
+          for (let i = 0; i < n; i++) { input.dYaw += look; frame(1 / 60); }
+          const ms = (performance.now() - t0) / n;
+          input.forceMove = null;
+          return ms;
+        },
         actions: () => ({ primary: primary ? { label: primary.label, enabled: primary.enabled } : null, secondary: secondary?.label ?? null }),
-        forceTarget: (p: PickInfo | null) => { forced = p; setTarget(null); },
+        forceTarget: (p: PickInfo | null) => { forced = p; setTarget(null); castDirty = true; },
         press: () => { actionDown(); actionUp(); },
         actionDown, actionUp,
         throwBox: throwTop, dropBox: dropTop, toggleBox: toggleTop, secondary: doSecondary,
@@ -1047,65 +1219,10 @@ export default function create(): GameModule {
     },
 
     update(dtIn) {
-      const dt = clamp(dtIn, 0, 0.1);
-      const s = ctx.state;
-      for (let i = carried.length - 1; i >= 0; i--) {
-        const b = carried[i]!;
-        if (b === placingBox) continue;
-        if (!b.carried || !s.sidewalk.includes(b)) carried.splice(i, 1);
-      }
-      syncTop();
-      capNow = readCap();
-      input.actionKeys = !building && !seat;
-      input.poll();
-      applyLook();
-      if (!seat) updateMove(dt);
-      updateCamera(dt);
-      if (!seat) svc.position.set(pos.x, 0, pos.z);
-
-      tickFlying(dt);
-      tickMop(dt);
-      if (pendingBox) {
-        pendingBox.t += dt;
-        if (building) { placingBox = pendingBox.box; pendingBox = null; }
-        else if (pendingBox.t > 0.3) { // o world não abriu a prévia: solta à frente
-          const b = pendingBox.box;
-          pendingBox = null;
-          if (carried.includes(b)) dropFront(b);
-        }
-      }
-      if (signCheck >= 0) {
-        signCheck += dt;
-        if (signCheck > 0.4) {
-          signCheck = -1;
-          if (ctx.clock.phase === 'prep' && !locked) { ctx.clock.openStore(); sfx('door'); }
-        }
-      }
-
-      if (canAct() || holding) updateTarget(dt); else if (target || hlKey) setTarget(null);
-      resolve();
-      tickHold(dt);
-
-      heldList.length = carried.length;
-      for (let i = 0; i < carried.length; i++) {
-        const b = carried[i]!;
-        const h = heldList[i] ?? (heldList[i] = { ref: b, pid: '', units: 0, open: false });
-        h.ref = b; h.pid = b.productId; h.units = b.units; h.open = isOpen(b);
-      }
-      const tb = top();
-      held.update(ctx.camera, dt, {
-        boxes: heldList, dolly: capNow > 1, hideTop: !!placingBox && placingBox === tb,
-        walk: seat ? 0 : bobAmp, lookYaw: lookYawFrame, lookPitch: lookPitchFrame,
-        reduce: prefs.reduceMotion, mop: mopping ? mopping.t / MOP_TIME : null,
-      });
-
-      const off = locked || override;
-      controls.setView({ off, noAct: building || !!mopping || !!pendingBox, seated: !!seat });
-      controls.setAction(primary?.label ?? null, primary ? (primary.enabled ? 'ready' : 'disabled') : 'none');
-      controls.setExtras(carried.length > 0 && !placingBox, tb ? isOpen(tb) : null, held.busy(), secondary?.label ?? null);
-      const showStick = !seat && !off;
-      if (showStick !== stickShown) { stickShown = showStick; input.setStickVisible(showStick); }
-      controls.update(dt);
+      const t0 = performance.now();
+      frame(dtIn);
+      const ms = performance.now() - t0;
+      perfStat.n++; perfStat.sum += ms; if (ms > perfStat.max) perfStat.max = ms;
     },
 
     dispose() {

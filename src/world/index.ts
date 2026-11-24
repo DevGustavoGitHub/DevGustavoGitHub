@@ -23,7 +23,7 @@ import { combine, meshesOf } from './batch';
 import { TIERS, ORDER, initialTier, isTier, isMobileDevice, persistTier, storedTier, type Tier } from './quality';
 import { NavGrid, footprintOf } from './nav';
 import { BuildMode } from './build';
-import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup } from './kit';
+import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup, freezeSelf } from './kit';
 import { Picks } from './pick';
 import { CheckoutScreens, type Display } from './screens';
 import { PriceTags } from './tags';
@@ -84,6 +84,37 @@ function demoView(b: Bounds, storage: boolean): View {
   };
 }
 
+/* Hash numérico SEM alocação (FNV-1a) do que a sincronização lê: se não mudou, `sync` sai sem montar chaves/strings. */
+let H = 0;
+const hInt = (n: number): void => { H = Math.imul(H ^ (n | 0), 16777619); };
+const hNum = (n: number | undefined): void => { hInt(typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 1024) : -7); };
+const hStr = (t: string | undefined): void => { if (typeof t !== 'string') { hInt(-3); return; } for (let i = 0; i < t.length; i++) hInt(t.charCodeAt(i)); hInt(t.length); };
+function stateHash(s: StoreState, extra: number): number {
+  H = 0x811c9dc5 | 0;
+  hInt(extra); hNum(s.expansion); hInt(s.storageUnlocked ? 1 : 0);
+  hStr(s.decor?.wallColor); hStr(s.decor?.floorColor); hStr(s.decor?.signColor); hStr(s.storeName);
+  const fs = s.furniture;
+  for (let i = 0; i < fs.length; i++) {
+    const f = fs[i]!;
+    hInt(f.id); hStr(f.type); hNum(f.x); hNum(f.z); hNum(f.rot); hStr(f.variant); hStr(f.productId);
+    const lv = f.levels;
+    if (Array.isArray(lv)) { hInt(lv.length); for (let j = 0; j < lv.length; j++) { hStr(lv[j]?.productId); hNum(lv[j]?.units); } }
+    else if (f.productId) { hNum(s.shelf[f.productId]); hNum(s.slots[f.productId]); }
+  }
+  for (let i = 0; i < PRODUCTS.length; i++) { const id = PRODUCTS[i]!.id; hNum(s.storage[id]); hNum(s.prices[id]); hNum(s.market[id]); }
+  const sw = s.sidewalk;
+  for (let i = 0; i < sw.length; i++) { const b = sw[i]!; hStr(b.productId); hNum(b.units); hNum(b.x); hNum(b.z); hNum(b.rot); hInt((b.carried ? 1 : 0) + (b.open ? 2 : 0)); }
+  const d = s.dirt;
+  for (let i = 0; i < d.length; i++) { hNum(d[i]!.x); hNum(d[i]!.z); }
+  return H;
+}
+/** Hash só das entradas de preço (prices/market): etiquetas recalculam `priceInfo` apenas quando muda. */
+function priceHash(s: StoreState): number {
+  H = 0x2c1b3c6d | 0;
+  for (let i = 0; i < PRODUCTS.length; i++) { const id = PRODUCTS[i]!.id; hNum(s.prices[id]); hNum(s.market[id]); }
+  return H;
+}
+
 /** Cores legadas (saves antigos) → paleta da Fase 3 (parede azul-clara, piso de madeira). */
 function effectiveDecor(d: Decor): Decor {
   return {
@@ -119,8 +150,14 @@ export default function create(): GameModule {
   let bounds: Bounds = storeBounds(0);
   let shellKey = '', decorKey = '', navKey = '', rackKey = '', boxKey = '', dirtKey = '';
   let picksDirty = true;
-  let acc = 0, priceAcc = 0;
-  let doorTimer = 0;
+  let acc = 0;
+  /** Perfil de CPU opt-in (`__world.profile(true)` liga/zera; `__world.profile()` lê médias em ms). Desligado = só um teste de booleano. */
+  const prof = { on: false, t0: 0, frames: 0, upd: 0, sync: 0, syncs: 0, ev: 0, evs: 0, prices: 0, pricesN: 0, env: 0, max: 0 };
+  const pnow = (): number => (prof.on ? performance.now() : 0);
+  const sec: Record<string, number> = {};
+  const lap = (k: string, t0: number): void => { if (prof.on) sec[k] = (sec[k] ?? 0) + performance.now() - t0; };
+  let doorTimer = 0, drawerAnim = false;
+  let doorAt: Vec2 = doorPos(bounds);
   let lastMinute = -1;
   const offs: (() => void)[] = [];
   /** Cadeiras desenhadas (balcões com o tile do operador livre). */
@@ -260,6 +297,7 @@ export default function create(): GameModule {
       group.position.set(cx, 0.01, cz);
       group.rotation.y = (f.rot * Math.PI) / 180;
       group.userData.furnitureId = f.id;
+      freezeSelf(group); // a gaveta (filho) continua animada
       e = { geoSig, group, drawerBaseZ: 0, drawerT: 0 };
       if (f.type === 'counter') {
         const d = makeDrawer(group); d.drawer.renderOrder = 2;
@@ -282,13 +320,13 @@ export default function create(): GameModule {
     if (fk !== furniKey) {
       furniKey = fk;
       placeDesk(v);
-      rebuildStatic(v, lvls);
+      const t = pnow(); rebuildStatic(v, lvls); lap('static', t);
       picksDirty = true;
     }
     // etiquetas por nível (a malha só é refeita quando produto/esgotado de algum nível muda)
     tags.rebuild(v.furniture.filter((f) => f.id !== hiddenId && lvls.has(f.id)).map((f) => ({ f, levels: lvls.get(f.id)!.map((l) => ({ pid: l.pid, empty: !(l.fill > 0) })) })));
     const ik = fk + '|' + v.furniture.map((f) => (lvls.get(f.id) ?? []).map((l, i, a) => levelVisible(f.type, a.length, i, l.pid, l.fill)).join('/')).join(',');
-    if (ik !== itemsKey) { itemsKey = ik; rebuildItems(v, lvls); }
+    if (ik !== itemsKey) { itemsKey = ik; const t = pnow(); rebuildItems(v, lvls); lap('items', t); }
     const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|${desk ? `${desk.tx},${desk.tz}` : '-'}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
   }
@@ -313,7 +351,7 @@ export default function create(): GameModule {
       }
     }
     const merged = combine(parts);
-    for (const mesh of meshesOf(merged, furniStatic, { order: 2 })) staticGeos.push(mesh.geometry);
+    for (const mesh of meshesOf(merged, furniStatic, { order: 2 })) { staticGeos.push(mesh.geometry); freezeSelf(mesh); }
   }
   /** Itens expostos POR NÍVEL (cada nível só com o seu produto), 1 InstancedMesh por produto na ItemLayer. */
   function rebuildItems(v: View, lvls: Map<number, LevelView[]>): void {
@@ -360,9 +398,10 @@ export default function create(): GameModule {
     desk = c.wall === 'front' ? { tx: c.tx, tz: c.tz, x: c.tx + 0.5, z: D - h, ry: Math.PI }
       : c.wall === 'left' ? { tx: c.tx, tz: c.tz, x: h, z: c.tz + 0.5, ry: Math.PI / 2 }
       : { tx: c.tx, tz: c.tz, x: W - h, z: c.tz + 0.5, ry: -Math.PI / 2 };
-    if (!deskGroup.children.length) meshesOf(deskGeos(), deskGroup, { order: 2 });
+    if (!deskGroup.children.length) for (const m of meshesOf(deskGeos(), deskGroup, { order: 2 })) freezeSelf(m);
     deskGroup.position.set(desk.x, 0.01, desk.z);
     deskGroup.rotation.y = desk.ry;
+    deskGroup.updateMatrix();
     deskGroup.visible = true;
   }
 
@@ -464,7 +503,9 @@ export default function create(): GameModule {
   /* ---------------- etiquetas de preço ---------------- */
   const priceCache = new Map<string, number>();
   function refreshPrices(): void {
+    const t0 = pnow();
     for (const p of PRODUCTS) { try { priceCache.set(p.id, api.priceInfo(ctx.state, p.id).sell); } catch { /* sim antigo */ } }
+    if (prof.on) { prof.prices += performance.now() - t0; prof.pricesN++; }
   }
   const displayPids = new Set<string>();
   function refreshTags(v: View): void {
@@ -475,13 +516,21 @@ export default function create(): GameModule {
 
   /* ---------------- sincronização geral ---------------- */
   function sync(force = false): void {
+    const t0 = pnow();
+    syncInner(force);
+    if (prof.on) { prof.sync += performance.now() - t0; prof.syncs++; }
+  }
+  let lastHash = 0, lastPriceHash = 0;
+  function syncInner(force: boolean): void {
     const s: StoreState = ctx.state;
+    const extra = (demo ? 1 : 0) + ((hiddenId ?? -1) + 2) * 4;
+    if (!force && !picksDirty && stateHash(s, extra) === lastHash) return; // nada mudou: sem alocações
     const nb = storeBounds(s.expansion);
     const dec = effectiveDecor(s.decor);
     const sk = `${s.expansion}|${s.storageUnlocked}`;
     const dk = `${dec.wallColor}|${dec.floorColor}|${dec.signColor}|${s.storeName}`;
     if (force || sk !== shellKey) {
-      shellKey = sk; bounds = nb;
+      shellKey = sk; bounds = nb; doorAt = doorPos(bounds);
       env.rebuild(bounds);
       shop.rebuild(bounds, s.storageUnlocked, dec, s.storeName);
       decorKey = dk;
@@ -494,16 +543,20 @@ export default function create(): GameModule {
       if (shop.setDecor(dec) || nameChanged) { shop.rebuild(bounds, s.storageUnlocked, dec, s.storeName); picksDirty = true; }
     }
     const v = view();
-    syncFurniture(v);
+    let t = pnow(); syncFurniture(v); lap('furn', t);
     const rk = v.furniture.filter((f) => f.type === 'rack').map((f) => `${f.id}:${f.x}:${f.z}:${f.rot}`).join(',') + '|' + PRODUCTS.map((p) => v.storage[p.id] ?? 0).join(',');
     if (rk !== rackKey) { rackKey = rk; syncRackBoxes(v); }
     const bk = boxSigOf(v);
+    t = pnow();
     if (bk !== boxKey) { boxKey = bk; syncBoxes(v); boxKey = boxSigOf(v); }
+    lap('boxes', t);
     const dsk = v.dirt.map((d) => `${d.x.toFixed(2)},${d.z.toFixed(2)}`).join(';');
     if (dsk !== dirtKey) { dirtKey = dsk; syncDirt(v); picksDirty = true; }
-    if (force || !priceCache.size) refreshPrices();
-    refreshTags(v);
-    if (picksDirty) rebuildPicks(v);
+    const ph = priceHash(s);
+    if (force || ph !== lastPriceHash || !priceCache.size) { lastPriceHash = ph; refreshPrices(); }
+    t = pnow(); refreshTags(v); lap('tagsRefresh', t);
+    t = pnow(); if (picksDirty) rebuildPicks(v); lap('picks', t);
+    lastHash = stateHash(s, extra); // depois: syncBoxes grava x/z nas caixas
   }
 
   /* ---------------- WorldService ---------------- */
@@ -631,7 +684,7 @@ export default function create(): GameModule {
       group: root, nav, get build() { return build; },
       rebuild: () => sync(true),
       sync: () => sync(false),
-      demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; furniKey = ''; entries.forEach((e) => furniGroup.remove(e.group)); entries.clear(); sync(false); },
+      demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; furniKey = ''; entries.forEach((e) => furniGroup.remove(e.group)); entries.clear(); lastHash = 0; sync(false); },
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
       quality: qualityInfo,
       setTier: (t: Tier) => applyTier(t),
@@ -651,6 +704,12 @@ export default function create(): GameModule {
       highlighted: () => picks.current,
       screens: () => screens.info(),
       tags: () => tags.info(),
+      profile: (on?: boolean) => {
+        if (on !== undefined) { for (const k of Object.keys(sec)) delete sec[k]; Object.assign(prof, { on, t0: performance.now(), frames: 0, upd: 0, sync: 0, syncs: 0, ev: 0, evs: 0, prices: 0, pricesN: 0, env: 0, max: 0 }); return null; }
+        const f = Math.max(1, prof.frames), secs = Math.max(0.001, (performance.now() - prof.t0) / 1000), r = (x: number): number => Math.round(x * 1000) / 1000;
+        const secs2 = Object.fromEntries(Object.entries(sec).map(([k, v]) => [k, r(v / Math.max(1, prof.syncs))]));
+        return { sec: secs2, frames: prof.frames, secs: r(secs), updMs: r(prof.upd / f), updMaxMs: r(prof.max), envMs: r(prof.env / f), syncPerSec: r(prof.syncs / secs), syncMs: r(prof.sync / Math.max(1, prof.syncs)), eventsPerSec: r(prof.evs / secs), eventMs: r(prof.ev / Math.max(1, prof.evs)), pricesPerSec: r(prof.pricesN / secs), pricesMs: r(prof.prices / Math.max(1, prof.pricesN)), worldMsPerFrame: r((prof.upd + prof.ev) / f) };
+      },
       /* Fase 4 (níveis) */
       tagLevels: () => tags.levels(),
       levels: (id: number) => { const v = view(); const f = v.furniture.find((x) => x.id === id); return f ? levelsOf(v, f) : null; },
@@ -683,6 +742,7 @@ export default function create(): GameModule {
       root.add(env.group, shop.group, furniStatic, furniGroup, deskGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx);
       itemLayer.group.traverse((o) => { o.renderOrder = 2; });
       initDirt();
+      for (const o of [root, furniStatic, furniGroup, deskGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx, dirtMesh]) if (o) freezeSelf(o);
       build = new BuildMode({
         ctx, root,
         bounds: () => bounds, storageUnlocked: () => ctx.state.storageUnlocked,
@@ -709,23 +769,23 @@ export default function create(): GameModule {
           if (first && storedTier() === null) return;
           applyTier(p.quality);
         }),
-        on('stateChanged', () => { refreshPrices(); sync(false); }),
-        on('dayStarted', () => { refreshPrices(); sync(false); }),
+        on('stateChanged', () => { const t0 = pnow(); sync(false); if (prof.on) { prof.ev += performance.now() - t0; prof.evs++; } }),
+        on('dayStarted', () => sync(false)),
         on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string; stockIndex?: number }) => { sync(false); picks.highlight(null); build.start(p); }),
         on('build:edit', (p: { furnitureId: number }) => { sync(false); picks.highlight(null); build.edit(p.furnitureId); }),
         on('build:box', (p: { boxIndex: number }) => { sync(false); picks.highlight(null); build.startBox(p?.boxIndex); }),
         on('checkout:display', (p: Display) => screens.set(p, view().furniture.find((f) => f.type === 'counter')?.id)),
         on('sfx', (p?: { name?: string }) => {
           if (p?.name === 'door') doorTimer = 1.6;
-          if (p?.name === 'cash') for (const e of entries.values()) if (e.drawer) e.drawerT = 1;
+          if (p?.name === 'cash') { for (const e of entries.values()) if (e.drawer) e.drawerT = 1; drawerAnim = true; }
         }),
       );
       exposeDebug();
     },
     update(dt) {
+      const T0 = pnow();
       watchFps();
-      acc += dt; priceAcc += dt;
-      if (priceAcc >= 2) { priceAcc = 0; refreshPrices(); }
+      acc += dt;
       if (acc >= 0.25) { acc = 0; sync(false); }
       const min = ctx.clock.minute;
       if (Math.abs(min - lastMinute) > 0.4) { lastMinute = min; env.setTime(min); }
@@ -733,19 +793,25 @@ export default function create(): GameModule {
       let near = doorTimer > 0;
       const pl = ctx.services.player;
       if (pl && !near) {
-        const d = doorPos(bounds);
-        near = Math.hypot(pl.position.x - d.x, pl.position.z - d.z) < 3;
+        near = Math.hypot(pl.position.x - doorAt.x, pl.position.z - doorAt.z) < 3;
       }
       shop.setOpenSign(ctx.clock.phase === 'open');
       shop.update(dt, near, env.night);
+      const TE = pnow();
       env.update(dt);
-      for (const e of entries.values()) {
-        if (e.drawer && e.drawerT > 0) {
-          e.drawerT = Math.max(0, e.drawerT - dt * 1.6);
-          e.drawer.position.z = e.drawerBaseZ - Math.sin(Math.min(1, e.drawerT * 1.3) * Math.PI) * 0.26;
+      if (prof.on) prof.env += performance.now() - TE;
+      if (drawerAnim) { // só itera enquanto alguma gaveta anima (sfx 'cash')
+        drawerAnim = false;
+        for (const e of entries.values()) {
+          if (e.drawer && e.drawerT > 0) {
+            e.drawerT = Math.max(0, e.drawerT - dt * 1.6);
+            e.drawer.position.z = e.drawerBaseZ - Math.sin(Math.min(1, e.drawerT * 1.3) * Math.PI) * 0.26;
+            if (e.drawerT > 0) drawerAnim = true;
+          }
         }
       }
       build.update(dt);
+      if (prof.on) { const d = performance.now() - T0; prof.frames++; prof.upd += d; prof.max = Math.max(prof.max, d); }
     },
     dispose() {
       offs.forEach((f) => f());

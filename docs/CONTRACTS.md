@@ -495,3 +495,27 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   `state.shelf`), `__npc.locate(pid)`. E2E: `npc-seated` (+ compra por nível, esteira sem sobreposição, pagamento maior),
   `npc-phase2` (+ "Caro!" só > 1,05), `npc`, `npc-staff` — abastecem por `__npc.stock` (state.shelf é derivado) e usam
   timeScale maior porque o SwiftShader roda a ~2–3 fps (dt limitado a 0,1 s).
+
+## Fase 4 — sim: correções do QA (docs/qa/systems.md, gameplay.md, economy.md)
+- **Relógio salvo:** `StoreState.clock?: SavedClock` (`{minute, phase: 'prep'|'open'|'closing'|'report'}`, tipos em state.ts). `newGame` =
+  `{minute: OPEN_MIN, phase: 'prep'}`; `deserialize` saneia (ausente/fase desconhecida → prep às 08:00; prep → OPEN_MIN; minuto limitado a
+  [OPEN_MIN, CLOSE_MIN]). **main/core** gravam antes de salvar e restauram ao carregar (a sim não mexe no campo).
+- **Cestas dos clientes:** `StoreState.npcHeld?: {productId, qty}[]` — o **npc** mantém (soma ao tirar com `takeFromLevel`/`takeFromShelf`,
+  subtrai ao vender com `completeSale` ou devolver com `returnToShelf`). Ao carregar, `deserialize` devolve tudo à exposição (níveis do
+  produto, níveis livres, depósito/calçada) e deixa `[]` (ausente continua ausente). Também no load: `costBasis[p].units` = unidades possuídas.
+- **Save saneado:** números inválidos (null/NaN/texto/negativos/não inteiros) viram valores válidos (dinheiro inválido → 0); objetos null →
+  padrão; produtos/licenças/melhorias fora do catálogo removidos (caixas, depósito, custo médio, preços, pedidos, estatísticas); caixa acima
+  de boxSize vira mais caixas; móvel de tipo desconhecido é descartado (unidades devolvidas) e móvel sem x/z/rot válidos, fora da área ou
+  sobreposto volta para "Para montar"; ids repetidos ganham ids novos. `deserialize` só lança para JSON ilegível ou versão ≠ 1.
+- **Save ilegível:** `load` guarda o texto em `${SAVE_KEY}:corrupt-<timestamp>` (uma vez por conteúdo) e grava `SAVE_RECOVERED_KEY`
+  (`'mercadinho:save-recovered'`) = `{"key", "at", "error"}` antes de devolver null. **ui** — mostre "save danificado (cópia guardada)" e
+  apague a chave de aviso (`localStorage.removeItem`); o backup fica.
+- **Cadeira do caixa:** `canPlace` reserva o tile do operador de cada balcão (`operatorTile(f)` em furniture.ts, mesma conta de
+  `world.counters().operator`; rot 0 → (x+1, z−1)): nenhum móvel em cima, o do balcão novo dentro do salão e livre, e o tile precisa continuar
+  alcançável a partir da porta (comprar, montar do estoque, mover). `reservedTiles(state)` = antessala + passagem + operadores.
+- **Depósito/expansão:** `unlockStorage` e `buyExpansion` realocam móveis da passagem, da antessala ou do tile do operador; sem lugar
+  válido, o móvel é desmontado para "Para montar" (unidades → depósito/calçada; nunca o último balcão).
+- **Pedido automático:** o array de `runAutoOrders` continua só com as compras; ganhou `.skipped: AutoOrderSkip[]` (não enumerável) com
+  `{productId, boxes, reason: 'sidewalk-full'|'no-money', message}` (pt-BR). **npc** — mostre `message` (toast `bad`), no máx. 1×/hora por produto.
+- **QA de economia (mantido):** dinheiro inicial R$ 250, aluguel a partir do nível 4 ou dia 6, empréstimo R$ 400 × nível; GDD §1/§4 atualizados.
+- **Pendente:** um caixa contratado por balcão (proposta P1 de docs/qa/economy.md) não foi implementado nesta rodada.

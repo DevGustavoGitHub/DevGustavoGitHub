@@ -35,7 +35,7 @@ export function pricesTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
     kit.act('price', () => setPrice(s, id, Math.max(PRICE_STEP, v)), undefined, 'pop');
   };
   body.appendChild(h('div', { class: 'card-actions' },
-    h('span', { class: 'muted', style: 'font-size:13px;flex:1;min-width:180px' }, 'Preço por unidade, em passos de R$ 0,05. O sugerido é a média do mercado: quase todo cliente aceita. Até 10% acima ainda é justo e costuma render mais; acima disso muitos desistem e os exigentes reclamam.'),
+    h('span', { class: 'muted', style: 'font-size:13px;flex:1;min-width:180px' }, 'Preço por unidade, em passos de R$ 0,05. O preço sugerido é a média do mercado: quase todo cliente aceita. Até ~10% acima quase ninguém reclama, e é entre +10% e +20% que o lucro costuma ser maior (se você atende rápido); acima disso muitos desistem.'),
     h('button', { class: 'btn accent small', id: 'price-all', on: { click: () => {
       kit.act('price', () => { for (const p of list) setPrice(s, p.id, suggestedPrice(s, p.id)); }, 'Preço sugerido aplicado a todos os produtos.', 'pop');
     } } }, 'Definir todos no sugerido')));

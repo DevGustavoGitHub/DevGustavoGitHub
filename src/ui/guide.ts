@@ -22,6 +22,7 @@ export class Guide {
   private fwd = new THREE.Vector3();
   private rel = new THREE.Vector3();
   private tmp = new THREE.Vector3();
+  private side = new THREE.Vector3();
 
   constructor(private ctx: GameContext, layer: HTMLElement, private reduceMotion: () => boolean) {
     const cone = new THREE.ConeGeometry(0.24, 0.36, 18);
@@ -96,10 +97,17 @@ export class Guide {
     this.v.copy(this.tmp).project(cam);
     cam.getWorldDirection(this.fwd);
     const front = this.rel.copy(this.tmp).sub(cam.position).dot(this.fwd) > 0;
-    let x = this.v.x, y = this.v.y;
+    const x = this.v.x, y = this.v.y;
     if (front && Math.abs(x) < 0.92 && Math.abs(y) < 0.88) { this.edge.style.display = 'none'; return; }
-    if (!front) { x = -x; y = -y; if (Math.abs(x) + Math.abs(y) < 1e-3) y = -1; }
     const W = window.innerWidth, H = window.innerHeight;
+    if (!front) {
+      // alvo atrás do jogador (QA): seta na LATERAL apontando para o lado de virar (antes caía no meio-baixo, sobre a caixa)
+      this.side.crossVectors(this.fwd, cam.up);
+      const right = this.rel.dot(this.side) >= 0;
+      this.edge.style.display = 'block';
+      this.edge.style.transform = `translate(${right ? W - 34 : 34}px,${(H * 0.42).toFixed(1)}px) rotate(${right ? 0 : Math.PI.toFixed(3)}rad)`;
+      return;
+    }
     const dx = x * W / 2, dy = -y * H / 2;
     const top = 92, bottom = 70, side = 34;
     const hw = W / 2 - side, hh = Math.max(40, Math.min(H / 2 - top, H / 2 - bottom));

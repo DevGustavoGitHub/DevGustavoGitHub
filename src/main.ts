@@ -3,7 +3,7 @@ import { EventBus } from './core/events';
 import { GameClock } from './core/clock';
 import type { GameContext, GameModule } from './core/module';
 import { SAVE_KEY, load, save, type KV } from './sim/save';
-import { newGame } from './sim/state';
+import { CLOSE_MIN, OPEN_MIN, newGame } from './sim/state';
 import createWorld from './world';
 import createPlayer from './player';
 import createNpc from './npc';
@@ -34,11 +34,21 @@ const rawSave = kv.getItem(SAVE_KEY);
 const state = load(kv) ?? newGame(Math.floor(Math.random() * 1e9));
 const bus = new EventBus();
 const clock = new GameClock(bus);
+// Restaura a hora do dia salva (antes do init dos módulos, que leem clock.phase/minute). 'report' significa que o dia
+// já foi fechado (closeDay aplicado): volta para a manhã do dia seguinte, nunca reabre o mesmo dia.
+if (state.clock) {
+  const { minute, phase } = state.clock;
+  if (phase === 'report') { clock.minute = OPEN_MIN; clock.phase = 'prep'; }
+  else {
+    clock.minute = Math.min(CLOSE_MIN, Math.max(OPEN_MIN, Number.isFinite(minute) ? minute : OPEN_MIN));
+    clock.phase = phase;
+  }
+}
 const ctx: GameContext = {
   state, bus, scene, camera, renderer, clock,
   rand: Math.random,
   uiRoot: document.getElementById('ui-root')!,
-  save: () => save(kv, state),
+  save: () => { state.clock = { minute: clock.minute, phase: clock.phase }; save(kv, state); },
   services: {},
 };
 

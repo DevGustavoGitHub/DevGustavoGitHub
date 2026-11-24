@@ -188,6 +188,7 @@ export function growMesh(map: Map<string, THREE.InstancedMesh>, parent: THREE.Ob
   if (im) { parent.remove(im); im.dispose(); }
   im = new THREE.InstancedMesh(geo, mat, cap);
   im.count = 0; im.frustumCulled = false; im.castShadow = cast; im.receiveShadow = true;
+  im.updateMatrix(); im.matrixAutoUpdate = false; // malha instanciada fica na origem: só as instâncias mudam
   parent.add(im); map.set(key, im);
   return im;
 }
@@ -296,6 +297,7 @@ export class BoxLayer {
     uvToWhite(sg, whiteCell());
     this.sep = new THREE.InstancedMesh(sg, labelMaterial(), cap);
     this.sep.count = 0; this.sep.frustumCulled = false; this.sep.receiveShadow = true;
+    this.sep.matrixAutoUpdate = false;
     this.group.add(this.sep);
   }
   /** Atualiza as caixas de uma origem (`floor`, `rack`). */

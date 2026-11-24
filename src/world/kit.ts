@@ -130,3 +130,10 @@ export function localToWorld(cx: number, cz: number, rot: number, lx: number, lz
   const c = Math.round(Math.cos(t)), s = Math.round(Math.sin(t));
   return { x: cx + lx * c + lz * s, z: cz - lx * s + lz * c };
 }
+
+/** Congela a matriz local de um objeto estático (three não recompõe posição/rotação/escala a cada quadro). */
+export function freezeSelf(o: THREE.Object3D): void { o.updateMatrix(); o.matrixAutoUpdate = false; }
+/** Congela toda a subárvore, exceto os objetos que se movem (`moving` continuam automáticos; seus filhos podem congelar). */
+export function freezeStatic(root: THREE.Object3D, moving: readonly (THREE.Object3D | null | undefined)[] = []): void {
+  root.traverse((o) => { if (!moving.includes(o)) freezeSelf(o); });
+}

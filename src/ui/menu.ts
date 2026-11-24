@@ -1,5 +1,5 @@
 /** Tela inicial, menu de pausa e opções. */
-import { SAVE_KEY } from '../sim/save';
+import { SAVE_KEY, deserialize } from '../sim/save';
 import { h } from './dom';
 import { icon } from './icons';
 import { UiKit } from './kit';
@@ -25,8 +25,14 @@ export class Menus {
 
   get isOpen(): boolean { return this.title !== null || this.pause !== null; }
 
+  /** Só um save VÁLIDO conta ("Continuar"); um ilegível é tratado pelo main/sim (cópia + aviso) e aqui vira "Jogar". */
   private hasSave(): boolean {
-    try { return localStorage.getItem(SAVE_KEY) !== null; } catch { return false; }
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      deserialize(raw); // puro (sem gravar): lança se o save for inválido
+      return true;
+    } catch { return false; }
   }
 
   showTitle(): void {

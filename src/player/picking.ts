@@ -26,6 +26,15 @@ export function pickOf(o: THREE.Object3D | null): { info: PickInfo; obj: THREE.O
   return null;
 }
 
+/** Nó com `userData.pick` (o próprio objeto ou um pai), sem alocar. */
+export function pickNode(o: THREE.Object3D | null): THREE.Object3D | null {
+  for (let n = o; n; n = n.parent) {
+    const p = n.userData?.pick as PickInfo | undefined;
+    if (p && typeof p.kind === 'string') return n;
+  }
+  return null;
+}
+
 export class FallbackPicks {
   readonly group = new THREE.Group();
   private readonly geo = new THREE.BoxGeometry(1, 1, 1);

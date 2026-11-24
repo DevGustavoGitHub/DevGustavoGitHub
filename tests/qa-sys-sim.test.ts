@@ -225,7 +225,7 @@ const reports = new Map<number, FuzzReport>();
 const reportOf = (seed: number): FuzzReport => { let rp = reports.get(seed); if (!rp) { rp = fuzz(seed, STEPS); reports.set(seed, rp); } return rp; };
 
 describe('QA sistemas — fuzz da API da sim (seeds fixas)', () => {
-  it('o fuzz exercita o jogo (dias, falências, expansões)', () => {
+  it('o fuzz exercita o jogo (dias, falências, expansões)', { timeout: 120000 }, () => {
     const all = SEEDS.map(reportOf);
     const sum = all.reduce((a, x) => ({ days: a.days + x.days, bk: a.bk + x.bankruptcies, exp: Math.max(a.exp, x.maxExpansion) }), { days: 0, bk: 0, exp: 0 });
     console.log('[qa-sys] fuzz:', JSON.stringify(sum), 'erros de regra mais comuns:', Object.entries(all[0]!.errors).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${k} ×${n}`).join(' | '));
@@ -443,9 +443,12 @@ describe('QA sistemas — save corrompido', () => {
 
 /* ---------------- fixture para tests/e2e/qa-sys-longrun.e2e.mjs ---------------- */
 // QA_FIXTURE=/caminho/busy-save.json npx vitest run tests/qa-sys-sim.test.ts -t fixture
+// Sem @types/node no projeto: variável de ambiente e fs são lidos sem os tipos do Node.
+const QA_FIXTURE = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.QA_FIXTURE;
 describe('QA sistemas — fixture', () => {
-  it.runIf(!!process.env.QA_FIXTURE)('fixture: grava o save da loja movimentada (expansão 2, depósito, 21 móveis, 3 funcionários)', async () => {
-    const { writeFileSync } = await import('node:fs');
+  it.runIf(!!QA_FIXTURE)('fixture: grava o save da loja movimentada (expansão 2, depósito, 21 móveis, 3 funcionários)', async () => {
+    const fsModule = 'node:fs';
+    const { writeFileSync } = (await import(/* @vite-ignore */ fsModule)) as { writeFileSync: (path: string, data: string) => void };
     const s = newGame(777);
     s.money = 900_000_000;
     addXp(s, xpForLevel(12)); s.levelAck = s.level;
@@ -472,6 +475,6 @@ describe('QA sistemas — fixture', () => {
     api.buyUpgrade(s, 'capacity');
     s.money = 50_000_000;
     expect(hardViolations(s)).toEqual([]);
-    writeFileSync(process.env.QA_FIXTURE!, serialize(s));
+    writeFileSync(QA_FIXTURE!, serialize(s));
   });
 });

@@ -42,6 +42,8 @@ export interface Env {
   say(a: AgentLike, key: BubbleKey, seconds?: number): void;
   /** Emite stateChanged. */
   changed(what: string): void;
+  /** Itens nas cestas/esteira mudaram (pegou, devolveu, vendeu): atualiza state.npcHeld na hora. */
+  heldChanged(): void;
   /** SFX posicional: com x/z (metros) o áudio calcula pan/volume em relação à câmera. */
   sfx(name: string, x?: number, z?: number): void;
   nearestWalkable(x: number, z: number, out: Vec2): Vec2;

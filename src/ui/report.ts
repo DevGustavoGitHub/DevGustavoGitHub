@@ -34,6 +34,9 @@ export class Report {
   afterNext: (() => void) | null = null;
   constructor(private kit: UiKit, private layer: HTMLElement) {}
   get isOpen(): boolean { return this.el !== null; }
+  private closeSheet: (() => void) | null = null;
+  /** Voltar do Android no resumo: fecha só os "Detalhes" (o resumo sai com "Continue jogando!"). */
+  closeDetails(): void { this.closeSheet?.(); }
 
   /** Marca o início do dia (para calcular XP/nível ganhos). */
   snapshotDay(force = false): void {
@@ -84,9 +87,10 @@ export class Report {
         line('Lucro total:', m.profit, m.profit < 0 ? 'neg' : 'pos', 'sum-profit')))),
       h('div', { class: 'c-in' }, h('div', { class: 'c-foot' }, go, det)));
     let sheet: HTMLElement | null = null;
+    const close = (): void => { sheet?.remove(); sheet = null; det.setAttribute('aria-expanded', 'false'); };
+    this.closeSheet = close;
     det.addEventListener('click', () => {
-      if (sheet) { sheet.remove(); sheet = null; det.setAttribute('aria-expanded', 'false'); return; }
-      const close = (): void => { sheet?.remove(); sheet = null; det.setAttribute('aria-expanded', 'false'); };
+      if (sheet) { close(); return; }
       sheet = h('section', { class: 'sum-sheet', role: 'region', 'aria-label': 'Detalhes do dia' },
         h('div', { class: 'ss-head' }, h('h3', null, `Detalhes do dia ${r.day}`), h('button', { class: 'icon-btn', 'aria-label': 'Fechar detalhes', html: icon('close'), on: { click: close } })),
         this.details(r, prev, low, gain, rep0),

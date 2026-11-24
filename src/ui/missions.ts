@@ -13,6 +13,8 @@ import type { UiKit } from './kit';
 import { managerSvg } from './manager';
 import { PRODUCTS } from '../sim/catalog';
 import * as api from '../sim/api';
+import { marketAverage, sellPrice } from '../sim/market';
+import { icon } from './icons';
 
 const KEY = 'mercadinho:tutorial';
 const bagIcon = (): string => productSvg({ category: 'mercearia', color: '#ff9330', shape: 'bag' }, 44);
@@ -71,6 +73,11 @@ export class Missions {
       { id: 'trash', text: 'Jogue as caixas vazias no lixo', goal: 1, icon: () => furnitureSvg('rack', 44), target: poi('trash'),
         auto: () => this.stepT > 1.5 && !s.sidewalk.some((b) => b.units <= 0) },
       { id: 'sell5', text: 'Atenda mais 5 clientes', goal: 5, icon: bagIcon, target: counter, needsCustomers: true },
+      // QA de economia: o sugerido é a média de mercado; até ~+10% quase ninguém reclama e o lucro sobe
+      { id: 'price', text: 'Na aba Preços, suba um preço: até 10% acima do mercado quase ninguém reclama', goal: 1,
+        icon: () => `<span style="display:flex;color:#ffd23f">${icon('tag', 40)}</span>`, target: poi('computer'),
+        auto: () => PRODUCTS.some((p) => s.licenses.includes(p.category) && s.prices[p.id] !== undefined && sellPrice(s, p.id) > marketAverage(s, p.id) * 1.004),
+        tablet: { tab: 'prices', text: 'Missão: até ~10% acima do mercado quase ninguém reclama, e é aí (de +10% a +20%) que o lucro costuma ser maior. Use +0,05 / +0,50.' } },
     ];
     const bus = ctx.bus;
     bus.on('player:action', (p?: { kind?: string }) => {
@@ -96,7 +103,7 @@ export class Missions {
       this.progress(1);
     };
     bus.on('checkout:done', sale);
-    bus.on('checkoutResult', sale); // fluxo antigo (sem npc da Fase 3): conta uma vez por cliente
+    // só `checkout:done` (venda registrada pelo npc) conta: o OK do painel não garante a venda (QA)
   }
 
   private get step(): Step | undefined { return this.card ? this.steps[this.i] : undefined; }
