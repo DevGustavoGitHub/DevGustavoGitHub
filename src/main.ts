@@ -90,6 +90,8 @@ renderer.setAnimationLoop((now) => {
 // Gancho para testes automatizados (Playwright): inspeção e controle do jogo.
 (window as any).__game = ctx;
 
+import './native'; // app Android (Capacitor): pause/voltar/sair
+
 // PWA: service worker só em produção (em dev atrapalha o hot reload).
 if ('serviceWorker' in navigator && import.meta.env.PROD && !(window as any).Capacitor) {
   window.addEventListener('load', () => {
