@@ -32,6 +32,15 @@ const PITCH_MIN = -1.35, PITCH_MAX = 1.2;
 
 interface Target { pick: PickInfo; key: string; base: string; obj: THREE.Object3D | null; point: THREE.Vector3; hasPoint: boolean; dist: number }
 /** `up`: abre painel/modo (Preço, computador, depósito, placa, Mover) → roda no pointerup do mesmo dedo (sem clique fantasma). */
+const OPEN_WAIT = 0.35;
+/** Ícone do botão de ação (chave de ACTION_ICONS em controls.ts). */
+const iconOf = (a: Act | null): string => {
+  if (!a || !a.enabled) return 'none';
+  const k = a.key;
+  if (k.startsWith('open:')) return k === 'open:stock' ? 'stock' : 'pull';
+  const m = /^(pick|stock|pull|store|take|move|clean|trash|sign|pc|sit|price|sdoor)/.exec(k);
+  return m ? (m[1] === 'sdoor' ? 'store' : m[1]!) : 'none';
+};
 interface Act { key: string; label: string; enabled: boolean; hold: boolean; run?: () => boolean | void; box?: Box; up?: boolean }
 interface Flying { box: Box; view: CartonView; pos: THREE.Vector3; vel: THREE.Vector3; spin: THREE.Vector3; t: number; bounces: number }
 interface Seat { counterId: number; pos: THREE.Vector3; yaw0: number; pitch0: number }
@@ -472,7 +481,7 @@ export default function create(): GameModule {
       why ??= r;
     }
     const ob = openFor ?? (pullBox ? null : openPull);
-    if (ob) return A('open', 'Abrir caixa', () => setOpen(ob, true));
+    if (ob) return A(openFor ? 'open:stock' : 'open:pull', openFor ? 'Repor' : 'Retirar', () => setOpen(ob, true), true, ob);
     if (pullBox) return pullAct(f, l, pullBox);
     return D(`why:${why}`, LEVEL_WHY[why ?? ''] ?? 'Outro produto');
   };
@@ -944,6 +953,16 @@ export default function create(): GameModule {
     if (!holding) return;
     if (!pressed || !canAct()) { holding = null; return; }
     holding.t += dt;
+    if (holding.key.startsWith('open:')) { // caixa fechada: abre (~0,35 s) e, sem soltar, passa a repor/retirar
+      if (holding.t < OPEN_WAIT || held.busy()) return;
+      resolve();
+      const n = primary;
+      if (n && n.enabled && n.hold && !n.key.startsWith('open:')) {
+        holding = { key: n.key, t: 0, box: n.box ?? null };
+        if (n.run?.() === false) holding = null;
+      } else holding = null;
+      return;
+    }
     while (holding && holding.t >= PLACE_INTERVAL) {
       holding.t -= PLACE_INTERVAL;
       const a = primary;
@@ -1021,7 +1040,7 @@ export default function create(): GameModule {
 
     const off = locked || override;
     controls.setView(off, building || !!mopping || !!pendingBox, !!seat);
-    controls.setAction(primary?.label ?? null, primary ? (primary.enabled ? 'ready' : 'disabled') : 'none');
+    controls.setAction(primary?.label ?? null, primary ? (primary.enabled ? 'ready' : 'disabled') : 'none', iconOf(primary));
     controls.setExtras(carried.length > 0 && !placingBox, tb ? isOpen(tb) : null, held.busy(), secondary?.label ?? null);
     const showStick = !seat && !off;
     if (showStick !== stickShown) { stickShown = showStick; input.setStickVisible(showStick); }

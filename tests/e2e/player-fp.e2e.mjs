@@ -193,7 +193,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await setLevels(f.id, [{ productId: 'feijao', units: 0 }, { productId: 'feijao', units: 0 }]);
   await aimLvl(f, 0);
   const a0 = await act();
-  check('nível do produto com caixa fechada → "Abrir caixa"', a0.primary?.label === 'Abrir caixa', JSON.stringify(a0));
+  check('nível do produto com caixa fechada → "Repor" (abre ao segurar)', a0.primary?.label === 'Repor', JSON.stringify(a0));
   await clearEv();
   await tapSel('.pl-act-btn');
   await until(() => __player.held().open[0] === 1);
@@ -213,6 +213,12 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const cl = await page.evaluate(() => ({ open: __player.svc.carrying?.open, held: __player.held() }));
   check('botão "Fechar caixa" fecha (abas fechadas, sem produtos à vista)', cl.open === false && cl.held.open[0] === 0 && cl.held.items === 0, JSON.stringify(cl));
   check('sfx boxClose', (await evs('sfx')).some((e) => e.name === 'boxClose'));
+  {
+    const b4 = (await lvls(f.id))[0].units;
+    await holdUntil('.pl-act-btn', ([id, b]) => __game.state.furniture.find((x) => x.id === id).levels[0].units >= b + 3, [f.id, b4], 6000);
+    const r = await page.evaluate(([id]) => ({ open: __player.svc.carrying?.open, u: __game.state.furniture.find((x) => x.id === id).levels[0].units }), [f.id]);
+    check('segurar com caixa fechada abre e já repõe sem soltar', r.open === true && r.u >= b4 + 3, JSON.stringify({ b4, ...r }));
+  }
   await page.evaluate(() => __player.look(__player.cam().yaw, 0.15));
   await page.waitForTimeout(150);
   await shot('p3-caixa-fechada');
@@ -268,7 +274,7 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   await discardHeld();
   await giveBox('feijao', 4, false);
   await aimLvl(g, 1);
-  check('caixa fechada + nível vazio sem etiqueta → "Abrir caixa"', (await act()).primary?.label === 'Abrir caixa', JSON.stringify(await act()));
+  check('caixa fechada + nível vazio sem etiqueta → "Repor" (abre ao segurar)', (await act()).primary?.label === 'Repor', JSON.stringify(await act()));
   await discardHeld();
   await clearEv();
   for (const [lvl, pid] of [[1, 'arroz'], [0, 'feijao']]) {

@@ -574,3 +574,4 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   para a lateral (lado de virar).
 - **Vários caixas:** `employees.cashierCount?` (ausente = 1); `api.extraCashierInfo/hireExtraCashier` (2º/3º/4º caixa nos níveis 9/14/19, no máx. um por balcão; nível do caixa vale para todos; salário e capacidade × contagem); npc: um caixa por balcão (ordem de `furnitureId`, pula o do jogador, sem balcão livre ficam ociosos); aba Funcionários mostra "Caixas: N de M" e o botão (`kit.act('employee')` → `stateChanged` + save).
 
+- Móveis (prateleira/geladeira/freezer) são neutros: sem placa de topo nem cor por produto (só etiquetas de preço por nível); caixa fechada + segurar o botão abre (open:stock/open:pull, ~0,35 s) e já repõe/retira sem soltar; o botão de ação troca o ícone por ação (ACTION_ICONS em src/player/icons.ts, Controls.setAction(label, st, icon)).

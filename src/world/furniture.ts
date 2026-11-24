@@ -10,9 +10,8 @@ import type { FurnitureType } from '../core/layout';
 import { boxGeo, cylGeo, sphGeo, icoGeo, coneGeo, planeGeo, hash01 } from './kit';
 import { DECAL } from './tex';
 import { Batch, meshesOf, type Kind, type Spec } from './batch';
-import { signCell, uvToCell } from './atlas';
-import { productVisual, categoryColor, pushMatrix } from './products';
-import { categoryColorOf } from './look';
+import { uvToCell } from './atlas';
+import { productVisual, pushMatrix } from './products';
 import { LICENSES, productById } from '../sim/catalog';
 import { furnitureCatalog } from '../sim/api';
 
@@ -121,7 +120,6 @@ export function signKeyOf(pids: readonly (string | undefined)[]): string {
   for (const [c, k] of count) if (k > bn) { best = c; bn = k; }
   return LICENSES.some((l) => l.id === best) ? `cat:${best}` : set[0]!;
 }
-const signColor = (key: string): number => (key.startsWith('cat:') ? categoryColorOf(key.slice(4)) : categoryColor(key === '-' ? undefined : key));
 
 interface Slot { x: number; y: number; z: number; ry: number; s: number }
 /** Posições dos itens de UM nível: fileira da frente primeiro (até 2 camadas se couber), depois as de trás.
@@ -188,44 +186,33 @@ export function furnitureItems(f: Furniture, levels: readonly { pid?: string; fi
   dummy.scale.setScalar(1);
 }
 
-/** Placa (atlas): produto, categoria (`cat:<id>`) ou '-' (VAZIO); frente (+z) e, opcionalmente, verso. */
-function sign(b: Batch, key: string, w: number, h: number, x: number, y: number, z: number, back = false): void {
-  const c = signCell(key);
-  b.add(uvToCell(planeGeo(w, h).clone(), c), ['sign', 0xffffff], x, y, z);
-  if (back) b.add(uvToCell(planeGeo(w, h).clone(), c), ['sign', 0xffffff], x, y, -z, { ry: Math.PI });
-}
-
 function shelf(lv: readonly (string | undefined)[]): Batch {
   const b = new Batch();
-  const key = signKeyOf(lv);
-  const accent = signColor(key);
   b.box(1.96, 0.1, 0.92, DARK, 0, 0, 0);
-  b.box(1.9, 1.24, 0.04, matte(tint(accent, 0.78)), 0, 0.1, -0.45);
+  b.box(1.9, 1.24, 0.04, matte(0xdfe3e8), 0, 0.1, -0.45);
   b.box(0.06, 1.26, 0.94, FRAME, -0.97, 0.1, 0);
   b.box(0.06, 1.26, 0.94, FRAME, 0.97, 0.1, 0);
   b.box(2.0, 0.05, 0.98, FRAME, 0, 1.34, 0);
   levelGeoms('shelf', lv.length).forEach((g, i) => {
     b.box(1.9, 0.04, 0.9, FRAME, 0, g.board, 0);
-    b.box(1.9, 0.06, 0.02, matte(categoryColor(lv[i])), 0, g.board + 0.04, 0.455); // friso com a cor do produto do nível
+    b.box(1.9, 0.06, 0.02, matte(0xc4cad1), 0, g.board + 0.04, 0.455); // friso neutro
   });
   b.box(1.96, 0.27, 0.08, DARK, 0, 1.39, 0);
-  sign(b, key, 1.96, 0.27, 0, 1.39 + 0.135, 0.041, true);
   return b;
 }
 
 function fridge(lv: readonly (string | undefined)[]): Batch {
   const b = new Batch();
-  const body = metal(0x3a4552);
+  const body = metal(0xaab3bc);
   b.box(2.0, 0.14, 0.98, body, 0, 0, 0);
   b.box(1.9, 1.62, 0.05, matte(0xcfe9f1), 0, 0.14, -0.45);
   b.box(0.07, 1.66, 0.94, body, -0.965, 0.14, 0);
   b.box(0.07, 1.66, 0.94, body, 0.965, 0.14, 0);
   b.box(2.0, 0.28, 1.0, body, 0, 1.78, 0);
-  sign(b, signKeyOf(lv), 2.0, 0.28, 0, 1.78 + 0.14, 0.501);
   b.box(1.8, 0.03, 0.05, glow(0xbdf2ff), 0, 1.76, 0.45);
   levelGeoms('fridge', lv.length).forEach((g, i) => {
     b.box(1.86, 0.025, 0.86, matte(0xcfe3ec), 0, g.board, 0);
-    b.box(1.86, 0.04, 0.015, matte(categoryColor(lv[i])), 0, g.board + 0.025, 0.425);
+    b.box(1.86, 0.04, 0.015, matte(0xb8c4cc), 0, g.board + 0.025, 0.425);
   });
   for (const sx of [-0.49, 0.49]) b.box(0.94, 1.56, 0.02, GLASS, sx, 0.16, 0.49);
   for (const x of [-0.98, 0, 0.98]) b.box(0.05, 1.6, 0.05, STEEL, x, 0.14, 0.49);
@@ -243,7 +230,7 @@ function freezer(lv: readonly (string | undefined)[]): Batch {
   const g = levelGeoms('freezer', lv.length);
   g.forEach((c, i) => {
     if (i > 0) b.box(0.02, 0.46, 0.8, matte(0xd5e6ef), c.x - (c.w + 0.06) / 2, 0.22, 0); // divisória entre cestos
-    b.box(c.w + 0.04, 0.03, 0.012, matte(categoryColor(lv[i])), c.x, 0.66, 0.392); // friso do cesto com a cor do produto
+    b.box(c.w + 0.04, 0.03, 0.012, matte(0xc9d6de), c.x, 0.66, 0.392); // friso neutro do cesto
   });
   b.box(2.0, 0.05, 0.06, white, 0, 0.72, 0.47);
   b.box(2.0, 0.05, 0.06, white, 0, 0.72, -0.47);
@@ -252,7 +239,6 @@ function freezer(lv: readonly (string | undefined)[]): Batch {
   b.box(0.06, 0.05, 0.9, white, 0, 0.72, 0);
   for (const sx of [-0.49, 0.49]) b.box(0.9, 0.02, 0.86, GLASS, sx, 0.74, 0);
   b.box(0.5, 0.04, 0.04, STEEL, 0, 0.76, 0.5);
-  sign(b, signKeyOf(lv), 1.1, 0.2, 0, 0.25, 0.482);
   return b;
 }
 

@@ -6,7 +6,7 @@
  * painel/modo (Preço, computador, depósito, placa, Mover) rodam no `pointerup` do mesmo dedo, e o `touchend` dos botões
  * cancela o `click` sintético: o toque nunca "cai" no tablet que acabou de abrir (clique fantasma).
  */
-import { ICON_BOX_CLOSE, ICON_BOX_OPEN, ICON_DROP, ICON_EXIT, ICON_HAND, ICON_MOVE, ICON_THROW } from './icons';
+import { ACTION_ICONS, ICON_BOX_CLOSE, ICON_BOX_OPEN, ICON_DROP, ICON_EXIT, ICON_HAND, ICON_MOVE, ICON_THROW } from './icons';
 
 export type ActState = 'none' | 'ready' | 'disabled';
 export interface ControlHandlers {
@@ -84,6 +84,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, html = '
   return e;
 };
 
+const svgEl = (html: string): Element => { const t = document.createElement('template'); t.innerHTML = html; return t.content.firstElementChild!; };
 export class Controls {
   readonly root: HTMLDivElement;
   private readonly style: HTMLStyleElement;
@@ -91,6 +92,7 @@ export class Controls {
   private readonly main: HTMLDivElement;
   private readonly mainBtn: HTMLButtonElement;
   private readonly label: HTMLDivElement;
+  private lastIcon = 'none';
   private readonly cross: HTMLDivElement;
   private readonly badgeEl: HTMLDivElement;
   private readonly slots: Record<'throw' | 'drop' | 'box' | 'move', { wrap: HTMLDivElement; btn: HTMLButtonElement; cap: HTMLDivElement }>;
@@ -115,7 +117,7 @@ export class Controls {
     this.cross = el('div', 'pl-cross');
     this.acts = el('div', 'pl-acts');
     this.main = el('div', 'pl-main');
-    this.mainBtn = el('button', 'pl-btn pl-act-btn', ICON_HAND + '<kbd>E</kbd>');
+    this.mainBtn = el('button', 'pl-btn pl-act-btn', ACTION_ICONS.none! + '<kbd>E</kbd>');
     this.mainBtn.type = 'button';
     this.mainBtn.setAttribute('aria-label', 'Ação');
     this.label = el('div', 'pl-lab');
@@ -216,7 +218,11 @@ export class Controls {
   }
 
   /** Rótulo e estado do botão de ação (sem alocar quando nada mudou). */
-  setAction(label: string | null, st: ActState): void {
+  setAction(label: string | null, st: ActState, icon = 'none'): void {
+    if (icon !== this.lastIcon) { // troca o SVG só quando a ação muda (sem piscar)
+      this.lastIcon = icon;
+      this.mainBtn.querySelector('svg')?.replaceWith(svgEl(ACTION_ICONS[icon] ?? ACTION_ICONS.none!));
+    }
     if (label === this.lastLabel && st === this.lastSt) return;
     this.lastLabel = label; this.lastSt = st;
     this.main.classList.toggle('ready', st === 'ready');
