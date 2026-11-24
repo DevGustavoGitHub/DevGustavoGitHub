@@ -51,6 +51,7 @@ tests/       Vitest (sim) e e2e
 | `camera:override` | `{active:boolean}` | world (build mode) → player (player larga a câmera e o movimento; ao terminar interpola de volta) |
 | `quality:auto` | `{quality:'low'\|'medium', fps:number}` | world → ui (adaptação automática rebaixou a qualidade gráfica; a UI pode atualizar o seletor; o world também grava `quality` em `mercadinho:settings` e emite `toast`) |
 | `checkout:cancel` | `{customerId:number, counterId:number}` | npc → ui (pedido de pagamento pendente foi invalidado — cliente saiu, balcão sumiu ou painel fechou sem resposta; a UI deve fechar o painel de troco/maquininha sem emitir `checkoutResult`) |
+| `ui:back` / `app:exit` | – | apk (`src/native.ts`, botão Voltar) → ui / ui ("Sair do jogo?" confirmado) → apk (salva e fecha o app) |
 
 Quem emitir **evento novo** deve acrescentar uma linha acima (edição aditiva, uma linha, no fim da tabela).
 
@@ -554,3 +555,22 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   (`getProgramCacheKey`/`flatten` ≈ 0,6 ms/quadro no perfil com 10 clientes); itens da cesta invisíveis quando vazia e com
   culling; LOD: fora da vista ou a mais de 15 m o esqueleto anima a cada 4 ticks. `__npc.perf()` = ms do update do npc/quadro.
 - **Vários caixas contratados:** não implementado (aguarda a sim; hoje 1 caixa contratado no balcão de menor id sem o jogador).
+
+### Fase 4 — ui: correções do QA (docs/qa/*.md)
+- **Voltar (`ui:back`):** cancela o diálogo de cima → fecha o painel/modal de cima (tablet, Opções, nível, comemoração, pagamento pede
+  confirmação, "Detalhes" do resumo) → sem modal abre a pausa (no posicionamento manda Esc ao world) → na pausa/tela inicial pergunta
+  "Sair do jogo?" e, confirmado, salva e emite `app:exit`. Resumo, falência e aviso de orientação ignoram o Voltar.
+- **Clique fantasma:** `kit` descarta (captura da janela) o 1º clique de ponteiro sem `pointerdown` novo depois da abertura de qualquer
+  modal/diálogo da UI (sem janela de tempo). Teclado e `.click()` programático passam. `qa-play-ghost-click` passa.
+- **Pagamento:** missões contam só `checkout:done`; `checkout:cancel {customerId}` fecha o painel com aviso (sem "Pago!"). HUD tocado com o
+  pagamento aberto dá retorno (toast + som). Placa: 2ª ação em < 1 s é ignorada; o diálogo de fechar avisa que não dá para reabrir hoje.
+- **Save:** `mercadinho:save-recovered` → aviso "Seu save não pôde ser carregado; guardamos uma cópia e começamos um jogo novo" e a
+  chave é apagada; "Continuar" só aparece com save que `deserialize` aceita.
+- **Nível:** a UI emite `levelUp` para cada nível acima de `levelAck` e só chama `api.consumeLevelUps` depois do "Continue jogando!" da
+  última comemoração (recarregar antes disso mostra de novo).
+- **Preço:** texto da aba Preços e missão final do tutorial ("suba um preço: até 10% acima do mercado quase ninguém reclama").
+- **Baixos:** selo de reposição do player (`.pl-badge`) recentrado na área livre à esquerda quando há cartão de missão no celular (CSS da
+  ui; o player pode adotar a posição e a ui remove a regra) — `qa-play-badge-overlap` passa; seta verde com alvo atrás da câmera vai
+  para a lateral (lado de virar).
+- **Pendente:** vários caixas (um por balcão) — a sim ainda não permite; a aba Equipe continua com um caixa.
+
