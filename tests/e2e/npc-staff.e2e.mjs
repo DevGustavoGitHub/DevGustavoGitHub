@@ -27,15 +27,15 @@ await page.evaluate(() => {
   window.__before = { shelf: s.shelf.macarrao + s.shelf.feijao, boxes: s.sidewalk.length, dirt: s.dirt.length, money: s.money };
   __game.uiRoot.style.display = 'none';
   __npc.sync();
-  __game.clock.paused = false; __game.clock.openStore(); __npc.timeScale = 4;
+  __game.clock.paused = false; __game.clock.openStore(); __npc.timeScale = 10; // SwiftShader roda a poucos fps (dt limitado a 0,1 s)
   setInterval(() => { __game.clock.paused = false; }, 100);
   __game.camera.position.set(6, 12, 15); __game.camera.lookAt(6, 0, 6);
 });
 await page.waitForTimeout(1500);
 console.log('staff', JSON.stringify(await page.evaluate(() => __npc.staff())));
 let maxShelf = 0;
-for (let i = 0; i < 90; i++) {
-  const st = await page.evaluate(() => { if (__game.clock.minute < 1100) __game.clock.minute += 6; const s = __game.state; return { boxes: s.sidewalk.length, dirt: s.dirt.length, shelf: s.shelf.macarrao + s.shelf.feijao, sold: __npc.stats.sold, staff: __npc.staff().map((x) => x.role + ':' + x.job).join(','), money: s.money }; });
+for (let i = 0; i < 150; i++) {
+  const st = await page.evaluate(() => { if (__game.clock.minute < 1100) __game.clock.minute += 6; const s = __game.state; return { boxes: s.sidewalk.length, dirt: s.dirt.length, shelf: s.shelf.macarrao + s.shelf.feijao, sold: __npc.stats.sold, staff: __npc.staff().map((x) => x.role + ':' + x.job).join(','), money: s.money, frame: __game.renderer.info.render.frame }; });
   maxShelf = Math.max(maxShelf, st.shelf);
   if (i % 5 === 0) console.log('t', i, JSON.stringify(st));
   if (i === 8) await page.screenshot({ path: `${OUT}/04-staff.png` });

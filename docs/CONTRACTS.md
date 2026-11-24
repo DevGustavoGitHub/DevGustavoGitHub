@@ -448,3 +448,25 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
 - **Debug novo:** `__player.target()` com `level`, `__player.aimLevel(furnitureId, level)` (mira pelo caminho real: raycast +
   `levelAt`), `__player.prefs()`, `__player.landscape()`. E2E: `tests/e2e/player-fp.e2e.mjs` (`npx vite build && npx vite preview
   --port 5202`; `PLAYER_URL`, prints em `PLAYER_SHOTS`).
+
+## Fase 4 — ui (src/ui)
+- **Opções:** "Sensibilidade da câmera" (`input[type=range]#opt-look`, 0,4–2,0, passo 0,1, padrão 1,0) → `mercadinho:settings.lookSensitivity`
+  e `settings:changed {…, lookSensitivity}` a cada mudança e na emissão inicial (o player aplica). A UI grava preservando campos de outros
+  módulos. Opções têm modal próprio (Esc fecha só elas). No celular deitado Opções e pausa viram grade de 2 colunas; tela inicial lado a lado.
+- **Preços:** "Preço sugerido" e "Definir todos no sugerido" (`#price-all`) usam `api.suggestedPrice` (média de mercado). Selo pela razão
+  preço/mercado: Barato < 0,95 ≤ Justo ≤ 1,10 < Caro ≤ 1,25 < Abusivo (justo até +10%, onde fica o lucro máximo da curva nova).
+- **Sem rolagem (altura ≤ 520 px):** o tablet ocupa a TELA INTEIRA (`.tb-wrap` só com a safe-area; o `.hud` fica escondido atrás, toasts por
+  cima; dinheiro em `.t3-cash` no cabeçalho; classe `tb-open` no `.mx-root`). Pagamento: troco com os 4 valores numa linha; maquininha em
+  4 colunas (≤ 420 px) ou 5 colunas/3 linhas (≤ 380 px) — a ordem das teclas segue as colunas calculadas pelo CSS (também no `resize`).
+  Comemoração/resumo compactos (emblema menor; oculto ≤ 360 px). Listas internas (produtos, trilho, Preços, carrinho) rolam com barra
+  oculta no toque/telas baixas (fina no desktop). Alvos ≥ 44 px (`.btn.small`, `.switch`, `.t3-x`).
+- **Toque:** botões do HUD (nível, dinheiro, menu, carrinho), "Terminar o dia" e teclas do troco/maquininha agem no `pointerdown`
+  (`dom.tapOn`: cancela o clique fantasma no `touchend`; teclado/leitor de tela via `click` com `detail 0`). Listas roláveis seguem no `click`.
+- **Orientação:** o aviso só aparece em retrato e sem trava: nunca no app nativo (`Capacitor.isNativePlatform()`) nem em tela cheia com
+  `screen.orientation` em paisagem (trava do `player/landscape.ts`); aceita `orientation:locked {locked}` opcional no bus; espera 0,35 s
+  antes de mostrar após girar (sem piscar). Visibilidade por classe `.rotate.on` (não mais por media query).
+- **E2E** (`npx vite build` + `npx vite preview --port 5204`; `NPC_URL`/`UI2_URL`/`UI3_URL`): `phone-fit` (sem rolagem em 844×390, 800×360,
+  740×360, 720×330: troco, maquininha, tablet/Mercado em tela inteira, Preços, pausa, Opções, comemoração, noite, resumo, tela inicial;
+  prints em `UI4_SHOTS`), `fullday` (placa → noite → Terminar o dia → resumo → Continue jogando → dia 2 `prep` → recarregar: dia e dinheiro
+  persistem), `ui-phase2` (falência via resumo e via tablet, Automático, Encher prateleiras, Preços, Finanças/banco, Melhorias,
+  Opções/sensibilidade; o layout do checkout antigo saiu), `ui-phase3` (tablet em tela inteira no celular; sem aviso no app nativo).

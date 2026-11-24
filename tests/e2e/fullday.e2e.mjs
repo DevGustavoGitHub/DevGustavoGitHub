@@ -17,7 +17,7 @@ const check = (n, ok, x = '') => { console.log(ok ? 'PASS' : 'FAIL', n, ok ? '' 
 
 await page.goto(URL);
 await page.waitForFunction(() => window.__game && window.__npc && window.__ui, null, { timeout: 30000 });
-await page.getByText('Jogar', { exact: true }).first().click({ timeout: 5000 });
+await page.getByText('Jogar', { exact: true }).first().click();
 await page.waitForFunction(() => !document.querySelector('.title-screen'), null, { timeout: 15000 });
 const s0 = await page.evaluate(() => ({ day: __game.state.day, money: __game.state.money, phase: __game.clock.phase }));
 check('começa o dia 1 em preparação', s0.phase === 'prep', JSON.stringify(s0));

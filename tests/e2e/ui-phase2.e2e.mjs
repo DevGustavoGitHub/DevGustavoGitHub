@@ -170,10 +170,11 @@ const closeTablet = async (page) => { await page.keyboard.press('Escape'); await
   check('finanças: tabela de mais vendidos', (await page.locator('.tbl tbody tr').count()) >= 2 && /Arroz/.test(await page.locator('.tbl').innerText()));
   await page.screenshot({ path: `${OUT}e2e-finance.png` });
   const loan0 = await page.evaluate(() => __game.state.loan);
-  await page.locator('#bank-take').click();
+  await page.evaluate(() => document.querySelector('#bank-take').click()); // aba "live" re-renderiza a cada ~1 s
   await page.waitForTimeout(300);
   check('banco: pegar empréstimo aumenta a dívida', await page.evaluate((l) => __game.state.loan > l, loan0));
-  await page.locator('#bank-pay').click();
+  await page.waitForTimeout(1200); // re-render com a dívida nova (habilita "Pagar")
+  await page.evaluate(() => document.querySelector('#bank-pay').click());
   await page.waitForTimeout(300);
   check('banco: pagar reduz a dívida', await page.evaluate(() => __game.state.loan >= 0));
   await page.locator('.rail-btn[data-tab="upgrades"]').click();

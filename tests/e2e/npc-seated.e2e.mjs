@@ -134,8 +134,12 @@ check('tocáveis e contornos limpos', clean.reg === 0 && clean.hulls === 0 && cl
 check('cliente feliz contado na sim', (clean.ledger.happy ?? 0) >= 1, JSON.stringify(clean.ledger));
 const lvApi = await page.evaluate(() => __npc.locate('feijao') !== null || __npc.locate('macarrao') !== null);
 if (lvApi) {
-  const lv = await page.evaluate((r) => ({ before: window.__lv0, after: window.__lvTotal(), sold: r.items.reduce((a, i) => a + i.qty, 0) }), req);
-  check('compra por nível: unidades saíram dos níveis (locateProduct → takeFromLevel)', lv.before - lv.after === lv.sold, JSON.stringify(lv));
+  // outros clientes também compram: unidades fora dos níveis = vendidas + nas cestas de quem ainda está na loja
+  const lv = await page.evaluate((r) => ({
+    before: window.__lv0, after: window.__lvTotal(), sold: r.items.reduce((a, i) => a + i.qty, 0),
+    baskets: __npc.customers().reduce((a, c) => a + (__npc.customerInfo(c.id)?.units ?? 0), 0),
+  }), req);
+  check('compra por nível: unidades saíram dos níveis (locateProduct → takeFromLevel)', lv.sold > 0 && lv.before - lv.after === lv.sold + lv.baskets, JSON.stringify(lv));
 } else console.log('SKIP compra por nível: api.locateProduct ainda indisponível (reserva takeFromShelf)');
 const leaving = await until((id) => { const i = __npc.customerInfo(id); return !i || i.state.startsWith('leave') || i.state === 'gone'; }, req.customerId, 5000);
 check('cliente sai depois de pagar', !!leaving);
@@ -150,7 +154,7 @@ await page.evaluate(() => {
     window.__beltMax = Math.max(window.__beltMax, l.belt);
     if (l.phase === 'unload' && l.belt > 0) window.__waitMax = Math.max(window.__waitMax, l.waiting);
   }, 40);
-  __npc.timeScale = 4; __npc.spawnNow(1, 'bulk');
+  __npc.timeScale = 8; __npc.spawnNow(1, 'bulk'); // SwiftShader: poucos fps
 });
 const full = await until(() => { const l = __npc.lanes()[0]; return l && l.phase === 'unload' && l.belt >= 2 ? l : null; }, undefined, 150000);
 await page.evaluate(() => { __npc.timeScale = 2; });
