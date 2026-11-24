@@ -470,3 +470,28 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
   prints em `UI4_SHOTS`), `fullday` (placa → noite → Terminar o dia → resumo → Continue jogando → dia 2 `prep` → recarregar: dia e dinheiro
   persistem), `ui-phase2` (falência via resumo e via tablet, Automático, Encher prateleiras, Preços, Finanças/banco, Melhorias,
   Opções/sensibilidade; o layout do checkout antigo saiu), `ui-phase3` (tablet em tela inteira no celular; sem aviso no app nativo).
+
+## Fase 4 — npc (src/npc)
+- **Compra por nível:** para cada item o cliente escolhe o nível COM unidades mais próximo (`api.locateProduct`; sem nenhum,
+  vai a um nível etiquetado e mostra "Sem estoque"), anda até `world.furnitureAccess(furnitureId)` e retira com
+  `api.takeFromLevel` — só de níveis que AINDA têm a etiqueta do produto (conferida por `locateProduct` logo antes de retirar),
+  completando a quantidade com outros níveis do mesmo móvel. Nível esvaziou/trocou no caminho: outro nível do móvel, outro
+  móvel (até 2 trocas, sem sortear o preço de novo) ou desiste do item (balão "Sem estoque"). Devoluções (desistência,
+  fechamento) usam `returnToShelf`. Sem a API de níveis (lança): reserva `furnitureFor` + `takeFromShelf`.
+- **Reclamação de preço:** rejeição (`acceptsPrice.ok=false`) só vira balão "Caro!" + `customerComplaint` com razão
+  preço/mercado > 1,05; abaixo disso o cliente apenas deixa o item, sem balão nem penalidade. Exigente: recusa > 1,10
+  sempre ("Absurdo!", reclamação ×2, `ratio` ×1,15); abaixo de 1,10 segue a regra comum.
+- **Repositor:** vai ao móvel mais próximo com espaço nos níveis ETIQUETADOS com o produto e repõe lá com
+  `api.placeUnitsInLevel` (nunca troca etiquetas do jogador); se sobrar e outro móvel do produto tiver espaço, leva a mesma
+  caixa até lá. Sem níveis/API: `placeUnits`.
+- **Esteira contínua:** eixo derivado de `world.beltSlots` (média dos 2 primeiros → 2 últimos, + meio passo); cada item ocupa
+  o comprimento da sua caixa envolvente (`geometry.boundingBox`, cache por produto) com folga de 3 cm, frente virada para o
+  operador; anda até encostar no da frente (nunca se sobrepõem). Não coube na ponta do cliente: ele espera (pose de cesta) e
+  põe o restante quando a bipagem libera espaço.
+- **Pagamento visto da cadeira:** com o jogador sentado, notas/cartão vêm até 0,5 m mais perto da câmera (nunca a menos de
+  1,3 m) e maiores (cartão ×2,5 ≈ 45×30 px em 740×360; notas ×1,4); o cliente encosta no balcão e se debruça. Funcionário: tamanho normal.
+- **Debug:** `__npc.lanes()` ganhou `gap` (menor folga entre itens vizinhos; negativa = sobreposição), `waiting` (itens ainda
+  na cesta), `payScale`, `method`; `__npc.stock(n, productId?)` (teste: abastece os níveis etiquetados e recalcula
+  `state.shelf`), `__npc.locate(pid)`. E2E: `npc-seated` (+ compra por nível, esteira sem sobreposição, pagamento maior),
+  `npc-phase2` (+ "Caro!" só > 1,05), `npc`, `npc-staff` — abastecem por `__npc.stock` (state.shelf é derivado) e usam
+  timeScale maior porque o SwiftShader roda a ~2–3 fps (dt limitado a 0,1 s).
