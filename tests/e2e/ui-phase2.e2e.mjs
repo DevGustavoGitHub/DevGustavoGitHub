@@ -39,8 +39,10 @@ async function boot(w, h, settings = { reduceMotion: true, quality: 'low' }) {
 }
 /** Abre o computador (atalho do carrinho) e vai para a aba `tab` (id do trilho). */
 const openTablet = async (page, tab) => {
-  await page.locator('.cart-fab').click();
-  await page.waitForSelector('.t3', { timeout: 9000 }).catch(() => {});
+  if (!(await page.locator('.t3').count())) { // comprar produtos não fecha o tablet: só abre se estiver fechado
+    await page.locator('.cart-fab').click();
+    await page.waitForSelector('.t3', { timeout: 9000 }).catch(() => {});
+  }
   if (tab) await page.locator(`.rail-btn[data-tab="${tab}"]`).click();
   await page.waitForTimeout(250);
 };
