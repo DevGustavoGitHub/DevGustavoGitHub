@@ -10,6 +10,7 @@ import type { GameContext, GameModule } from '../core/module';
 import type { Vec2, WorldService } from '../core/services';
 import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
 import * as api from '../sim/api';
+import { cashierCount } from '../sim/economy';
 import { Agent } from './agent';
 import { disposeBubbles } from './bubbles';
 import { CheckoutManager } from './checkout';
@@ -231,28 +232,24 @@ export default function create(): GameModule {
     const h = homes();
     for (const role of roles) {
       const have = staff.filter((s) => s.role === role);
-      const has = have[0];
-      const lvl = ctx.state.employees[role];
-      if (role === 'cashier') {
-        const want = cashierCount(ctx.state);
-        while (have.length > want) { const x = have.pop()!; x.remove(); staff.splice(staff.indexOf(x), 1); }
-        mgr.cashiers = have as Cashier[];
-      }
-      const missing = role === 'cashier' ? cashierCount(ctx.state) - have.length : lvl > 0 && !has ? 1 : 0;
-      for (let k = 0; k < missing; k++) {
+      const want = role === 'cashier' ? cashierCount(ctx.state) : ctx.state.employees[role] > 0 ? 1 : 0;
+      while (have.length > want) { const x = have.pop()!; x.remove(); staff.splice(staff.indexOf(x), 1); }
+      while (have.length < want) {
         const s = role === 'cashier' ? new Cashier(env) : role === 'stocker' ? new Stocker(env) : new Janitor(env);
         staff.push(s);
-        if (role === 'cashier') { have.push(s); mgr.cashiers = have as Cashier[]; }
+        have.push(s);
+        if (role === 'cashier') mgr.cashiers = have as Cashier[];
         mgr.refresh();
         const home = h[role];
-        s.setHome(home.x, home.z);
+        const hx = home.x - (have.length - 1) * 0.8;
+        s.setHome(hx, home.z);
         // aparece coerente: sentado no posto (ao carregar) ou entrando pela porta (contratado em jogo)
         if (role === 'cashier' && initial && (s as Cashier).lane) (s as Cashier).snapToSeat();
-        else if (initial) s.place(home.x, home.z, 0);
-        else { const sp = env.world().spawnPoint(); s.place(sp.x, sp.z, 0); s.moveTo(home.x, home.z); }
+        else if (initial) s.place(hx, home.z, 0);
+        else { const sp = env.world().spawnPoint(); s.place(sp.x, sp.z, 0); s.moveTo(hx, home.z); }
       }
-      if (lvl <= 0 && has && role !== 'cashier') { has.remove(); staff.splice(staff.indexOf(has), 1); }
-      else for (const s of have) if (s !== undefined && !s.removed) s.setHome(h[role].x, h[role].z);
+      if (role === 'cashier') mgr.cashiers = have as Cashier[];
+      have.forEach((s, i) => s.setHome(h[role].x - i * 0.8, h[role].z));
     }
     mgr.refresh();
   }

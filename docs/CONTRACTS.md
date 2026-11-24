@@ -572,5 +572,5 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
 - **Baixos:** selo de reposição do player (`.pl-badge`) recentrado na área livre à esquerda quando há cartão de missão no celular (CSS da
   ui; o player pode adotar a posição e a ui remove a regra) — `qa-play-badge-overlap` passa; seta verde com alvo atrás da câmera vai
   para a lateral (lado de virar).
-- **Pendente:** vários caixas (um por balcão) — a sim ainda não permite; a aba Equipe continua com um caixa.
+- **Vários caixas:** `employees.cashierCount?` (ausente = 1); `api.extraCashierInfo/hireExtraCashier` (2º/3º/4º caixa nos níveis 9/14/19, no máx. um por balcão; nível do caixa vale para todos; salário e capacidade × contagem); npc: um caixa por balcão (ordem de `furnitureId`, pula o do jogador, sem balcão livre ficam ociosos); aba Funcionários mostra "Caixas: N de M" e o botão (`kit.act('employee')` → `stateChanged` + save).
 

@@ -34,6 +34,14 @@ export function staffTab(body: HTMLElement, kit: UiKit, _tab: TabApi): void {
       h('div', { class: 'meta' }, h('span', null, 'Salário diário'), h('b', null, n ? money(n.dailyWage) : '—')),
       h('div', { class: 'meta' }, h('span', null, `Nível ${lvl} » ${Math.min(5, lvl + 1)}`), pips(lvl, 5)),
       kv('Velocidade', speed(r.role, lvl || 1)));
+    if (r.role === 'cashier' && lvl > 0) {
+      const x = api.extraCashierInfo(s);
+      extra.appendChild(h('div', { class: 'meta' }, h('span', null, 'Caixas'), h('b', { id: 'cashier-count' }, `Caixas: ${x.count} de ${x.max}`)));
+      extra.appendChild(x.cost === null ? actionBtn({ kind: 'owned', label: x.blockedReason ?? 'Máximo de caixas' })
+        : x.blockedReason ? actionBtn({ kind: 'off', label: x.blockedReason })
+          : actionBtn(buyState(s, { owned: false, minLevel: 1, cost: x.cost, label: `Contratar outro caixa ${money(x.cost)}`, id: 'hire-cashier-extra',
+            onClick: () => kit.act('employee', () => api.hireExtraCashier(s), 'Novo caixa contratado!') })));
+    }
     grid.appendChild(bigCard(r.name, personSvg(r.role, 76), r.desc, btn, extra, lvl > 0 ? 'owned' : ''));
   }
   body.appendChild(grid);
