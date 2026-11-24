@@ -41,3 +41,16 @@ Relatórios completos: [gameplay.md](gameplay.md) (jogabilidade com toques reais
 3. Botão/gesto voltar do Android em cada tela.
 4. Pagamento demorado no troco (sem pressa) — a venda deve entrar.
 5. Fluidez com a loja cheia (se cair abaixo de 30 fps o jogo reduz a qualidade sozinho e avisa).
+
+## Validação final (24/11)
+- `tsc` limpo, 198 testes unitários verdes.
+- 18 baterias de ponta a ponta: 17 verdes, incluindo os 5 scripts que reproduziam os bugs de jogabilidade
+  (agora passam) e o teste de save (43 verificações).
+- Longa duração (9 dias de jogo): sem erros, sem perda de unidades, geometrias estáveis. As texturas sobem cada vez
+  menos (cache de rostos/balões de clientes: +38 no 1º dia, +7 nos últimos 3; ~98 no total, ~1,6 MB) — não é
+  vazamento, mas fica como pendência de baixa prioridade limitar esse cache.
+
+## Pendências conhecidas
+- Um funcionário caixa por balcão (hoje 1 caixa contratado).
+- Limitar o cache de texturas de clientes.
+- Medir fluidez e consumo de bateria no celular real.
