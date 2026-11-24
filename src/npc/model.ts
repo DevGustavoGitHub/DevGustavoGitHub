@@ -249,7 +249,9 @@ export class Person {
     this.body.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.25);
 
     // cabeça + rosto + cabelo/chapéu/óculos
-    const head = new THREE.Mesh(headGeometry(), [mats4[2]!, faceMaterial(spec.face, spec.hair)]);
+    // pele da cabeça com material próprio: o mesmo material em SkinnedMesh e Mesh força troca de programa a cada
+    // quadro no three (getProgramCacheKey); um material por variante de programa evita isso
+    const head = new THREE.Mesh(headGeometry(), [lambert(`skinh:${spec.skin}`, spec.skin), faceMaterial(spec.face, spec.hair)]);
     head.position.set(HEAD_OFFSET[0], HEAD_OFFSET[1], HEAD_OFFSET[2]);
     if (this.kid) head.scale.setScalar(1.2);
     this.b.head.add(head);
@@ -263,7 +265,8 @@ export class Person {
     this.basketMesh = new THREE.Mesh(pr.basket, lambert(`basket:${spec.basket}`, spec.basket));
     this.items = new THREE.InstancedMesh(pr.item, pr.itemMat, MAX_BASKET_ITEMS);
     this.items.count = 0;
-    this.items.frustumCulled = false;
+    this.items.visible = false; // vazia: nenhuma chamada de desenho
+    this.items.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -0.15, 0), 0.45); // culling sem recalcular
     for (let i = 0; i < MAX_BASKET_ITEMS; i++) {
       const s = ITEM_SPOTS[i]!;
       tmpM.makeRotationY((i * 0.7) % 0.5).setPosition(s[0], -0.2, s[1]);
@@ -285,7 +288,7 @@ export class Person {
   setBasket(visible: boolean): void {
     this.basket.visible = visible;
     this.basketMesh.visible = true;
-    this.items.visible = true;
+    this.items.visible = this.items.count > 0;
     if (this.bagMesh) this.bagMesh.visible = false;
   }
   /** Mostra a sacola de compras no lugar da cesta (cliente saindo depois de pagar). */
@@ -293,7 +296,7 @@ export class Person {
     if (visible && !this.bagMesh) { const pr = props(); this.bagMesh = new THREE.Mesh(pr.bag, pr.vcol); this.basket.add(this.bagMesh); }
     if (this.bagMesh) this.bagMesh.visible = visible;
     this.basketMesh.visible = !visible;
-    this.items.visible = !visible;
+    this.items.visible = !visible && this.items.count > 0;
     if (visible) this.basket.visible = true;
   }
   /** Itens visíveis na cesta (cor por produto). */
@@ -301,6 +304,7 @@ export class Person {
     const n = Math.min(MAX_BASKET_ITEMS, productIds.length);
     for (let i = 0; i < n; i++) this.items.setColorAt(i, productColor(productIds[i]!));
     this.items.count = n;
+    this.items.visible = n > 0 && this.basketMesh.visible;
     if (this.items.instanceColor) this.items.instanceColor.needsUpdate = true;
   }
   /** Caixa de papelão nos braços (repositor). */
@@ -311,7 +315,7 @@ export class Person {
       g.add(new THREE.Mesh(pr.box, pr.cardboard));
       const lid = new THREE.Mesh(pr.lid, pr.vcol); lid.name = 'lid';
       const flaps = new THREE.Mesh(pr.flaps, pr.cardboard); flaps.name = 'flaps';
-      const fill = new THREE.Mesh(pr.fill, pr.itemMat); fill.name = 'fill';
+      const fill = new THREE.Mesh(pr.fill, lambert('fill:', '#d9d2c3')); fill.name = 'fill'; // itemMat é instanciado
       g.add(lid, flaps, fill);
       g.position.set(0, -0.06, 0.3);
       this.b.chest.add(g);

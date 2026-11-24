@@ -39,6 +39,9 @@ export class Agent implements AgentLike {
   arriveR = 0.15;
   /** Straight-line only (rua / fila). */
   direct = false;
+  /** LOD: dt acumulado e ticks pulados da animação do esqueleto. */
+  private animDt = 0;
+  private animSkip = 0;
 
   constructor(readonly env: Env, readonly person: Person) {
     this.group.add(person.root);
@@ -146,7 +149,12 @@ export class Agent implements AgentLike {
     // orientação
     if (this.speed > 0.2) this.heading = lerpAngle(this.heading, Math.atan2(this.vx, this.vz), Math.min(1, dt * 10));
     else if (!Number.isNaN(this.faceYaw)) this.heading = lerpAngle(this.heading, this.faceYaw, Math.min(1, dt * 6));
-    this.person.animate(dt, this.speed);
+    // LOD: fora da vista ou longe, o esqueleto anima a cada 4 ticks (com o dt acumulado)
+    this.animDt += dt;
+    if (++this.animSkip >= 4 || !this.env.lowDetail(this.x, this.z)) {
+      this.person.animate(this.animDt, this.speed);
+      this.animDt = 0; this.animSkip = 0;
+    }
     this.bubble.update(dt);
     this.sync();
   }

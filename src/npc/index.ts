@@ -5,6 +5,7 @@
  * customerComplaint, stateChanged, sfx. Fase 3: caixa sentado (ver checkout.ts) e itens tocáveis via services.pick.
  * Debug/testes: window.__npc (spawnNow, timeScale, stats...).
  */
+import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { Vec2, WorldService } from '../core/services';
 import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
@@ -75,6 +76,11 @@ export default function create(): GameModule {
   let timeScale = 1;
   const stats = { spawned: 0, sold: 0, gaveUp: 0, left: 0, kinds: { normal: 0, bulk: 0, picky: 0, kid: 0 } as Record<CustomerKind, number>, autoOrders: 0 };
   let lastAutoHour = -1;
+  /** LOD de animação: frustum da câmera (atualizado 1x por quadro) e esfera de teste reutilizados. */
+  const frustum = new THREE.Frustum();
+  const projView = new THREE.Matrix4();
+  const lodSphere = new THREE.Sphere(new THREE.Vector3(), 1.1);
+  const camPos = new THREE.Vector3();
   /** Custo do update do npc (ms acumulados / quadros) para __npc.perf(). */
   const perf = { ms: 0, frames: 0 };
   let autoBroken = false;
@@ -150,6 +156,12 @@ export default function create(): GameModule {
       if (x !== undefined && z !== undefined) { ctx.bus.emit('sfx', { name, x, z }); return; }
       const b = ctx.state.expansion * 4 + 12;
       ctx.bus.emit('sfx', { name, pan: x === undefined ? 0 : clamp((x - b / 2) / (b / 2), -1, 1) * 0.6 });
+    },
+    lowDetail(x, z) {
+      const dx = x - camPos.x, dz = z - camPos.z;
+      if (dx * dx + dz * dz > 15 * 15) return true;
+      lodSphere.center.set(x, 0.9, z);
+      return !frustum.intersectsSphere(lodSphere);
     },
     nearestWalkable(x, z, out): Vec2 {
       const w = env.world();
@@ -313,6 +325,10 @@ export default function create(): GameModule {
     update(dt) {
       if (ctx.clock.paused) return;
       const t0 = performance.now();
+      const cam = ctx.camera;
+      projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(projView);
+      cam.getWorldPosition(camPos);
       syncT += dt;
       if (syncT > 1) { syncT = 0; syncStaff(false); }
       if (timeScale > 1) ctx.clock.update(dt * (timeScale - 1));

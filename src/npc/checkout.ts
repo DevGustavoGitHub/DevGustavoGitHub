@@ -166,6 +166,8 @@ export class CheckoutManager {
   private readonly regs = new Map<THREE.Object3D, PickService>();
   private readonly pool = new Map<string, THREE.Object3D[]>();
   private readonly dimCache = new Map<string, { sx: number; sz: number; y0: number }>();
+  /** Clones (do npc) dos materiais de produto do world usados na esteira. */
+  private readonly matClones = new Map<THREE.Material, THREE.Material>();
   /** ui:modal aberto (painel de pagamento ou outro modal da UI). */
   private modalOpen = false;
   private readonly tmp: Vec2 = { x: 0, z: 0 };
@@ -361,6 +363,14 @@ export class CheckoutManager {
     if (p) return p;
     const w = this.env.world();
     const m = w.makeProductMesh ? safe('makeProductMesh', () => w.makeProductMesh!(pid), null) : null;
+    // o material do world também é usado em InstancedMesh (prateleiras): na esteira usamos um clone próprio
+    // (mesmas texturas) para o three não trocar de programa a cada quadro; o original nunca é descartado
+    if (m && (m as THREE.Mesh).isMesh && !Array.isArray((m as THREE.Mesh).material)) {
+      const src = (m as THREE.Mesh).material as THREE.Material;
+      let c = this.matClones.get(src);
+      if (!c) { c = src.clone(); this.matClones.set(src, c); }
+      (m as THREE.Mesh).material = c;
+    }
     return m ?? fallbackProductMesh(pid);
   }
   /** Tamanho do produto (caixa envolvente local, escala 1): x/z em m e deslocamento até a base. Cache por produto. */
@@ -820,6 +830,8 @@ export class CheckoutManager {
     this.fbPick?.dispose();
     this.fbPick = null;
     this.pool.clear();
+    for (const m of this.matClones.values()) m.dispose(); // só os clones (texturas são do world)
+    this.matClones.clear();
     disposeProps();
   }
 }

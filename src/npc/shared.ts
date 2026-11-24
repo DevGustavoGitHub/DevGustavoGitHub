@@ -47,6 +47,8 @@ export interface Env {
   /** SFX posicional: com x/z (metros) o áudio calcula pan/volume em relação à câmera. */
   sfx(name: string, x?: number, z?: number): void;
   nearestWalkable(x: number, z: number, out: Vec2): Vec2;
+  /** LOD de animação: true = pessoa fora da vista da câmera ou longe (pode animar com menos frequência). */
+  lowDetail(x: number, z: number): boolean;
 }
 
 export interface AgentLike {

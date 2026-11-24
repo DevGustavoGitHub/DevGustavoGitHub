@@ -318,6 +318,7 @@ export default function create(): GameModule {
   /** Raycast do centro da tela → preenche `out` (um dos alvos reaproveitados) ou null. */
   const cast = (out: Target): Target | null => {
     const cam = ctx.camera;
+    cam.updateMatrixWorld(); // pose deste quadro (o render ainda não atualizou a matriz)
     v2.set(0, 0);
     ray.setFromCamera(v2, cam);
     ray.near = 0.05;
@@ -1161,6 +1162,12 @@ export default function create(): GameModule {
           return false;
         },
         landscape: () => landLock?.info() ?? null,
+        /** Raycast da mira agora (debug): proxy mais próximo e distância. */
+        castNow: () => {
+          v2.set(0, 0); ray.setFromCamera(v2, ctx.camera); ray.near = 0.05; ray.far = RANGE_FAR + RANGE_HYST;
+          const ok = rayNearest(pickRoot());
+          return { ok, dist: ok ? +nearDist.toFixed(3) : null, pick: ok ? { ...(nearNode!.userData.pick as PickInfo) } : null, canAct: canAct(), castAge, castDirty };
+        },
         prefs: () => ({ ...prefs, sensitivity: input.sensitivity }),
         /** Custo médio/máximo do update real desde o último `perfReset()`. */
         perf: () => ({ frames: perfStat.n, avgMs: perfStat.n ? perfStat.sum / perfStat.n : 0, maxMs: perfStat.max }),
