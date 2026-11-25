@@ -14,7 +14,7 @@ import { Shop } from './shop';
 import { Env, TRASH_SILHOUETTE, RECYCLE_SILHOUETTE } from './env';
 import {
   BELT_SLOTS, BELT_Y, HANDOFF, SCANNER, SEAT, chairGeos, chairSilhouette, furnitureGeos,
-  furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, silhouetteOf, type SBox,
+  furnitureItems, makeDrawer, rackColumnSlot, RACK_COLS, silhouetteOf, type SBox,
   isDisplayType, levelCountOf, levelGeoms, levelHeights, levelIndexAt, levelPids, levelVisible,
 } from './furniture';
 import { BoxLayer, ItemLayer, BOX_H, BOX_W, BOX_D, genericVisual, productVisual, makeProductMesh, makeBoxMesh, prewarmProductGeometry, type BoxInst } from './products';
@@ -175,6 +175,8 @@ export default function create(): GameModule {
   let desk: { tx: number; tz: number; x: number; z: number; ry: number } | null = null;
   /** Caixas no chão desenhadas: índice em state.sidewalk + pose (pick/contorno/empilhamento). */
   let boxLayout: { index: number; box: Box; x: number; y: number; z: number; ry: number; open: boolean }[] = [];
+  /** Caixas desenhadas nas estantes do depósito (mira por caixa: kind 'rackBox'). */
+  let rackBoxes: { rackId: number; pid: string; x: number; y: number; z: number; ry: number }[] = [];
   const M = new THREE.Matrix4(), M2 = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1), UP = new THREE.Vector3(0, 1, 0);
 
   /* ---------------- sujeira ---------------- */
@@ -469,29 +471,48 @@ export default function create(): GameModule {
     return H ^ v.sidewalk.length;
   }
 
+  /**
+   * Caixas do depósito nas estantes (pós-teste 3): sempre FECHADAS e com rótulo; cada produto (ordem do catálogo) ocupa
+   * colunas próprias — a incompleta na frente da 1ª coluna e as cheias atrás/nas colunas seguintes; produtos diferentes
+   * lado a lado. Sem colunas livres, as que sobram ocupam os fundos livres. `rackBoxes` guarda a pose para a mira.
+   */
   function syncRackBoxes(v: View): void {
     const racks = v.furniture.filter((f) => f.type === 'rack').sort((a, b) => a.id - b.id);
     const list: BoxInst[] = [];
-    const queue: { pid: string; open: boolean; fill: number }[] = [];
+    rackBoxes = [];
+    const totalCols = racks.length * RACK_COLS;
+    const used = new Set<string>();
+    const put = (pid: string, ri: number, col: number, row: 0 | 1): void => {
+      const r = racks[ri]!;
+      const { cx, cz } = centerOf(r);
+      const sl = rackColumnSlot(col, row);
+      const w = localToWorld(cx, cz, r.rot, sl.x, sl.z);
+      const ry = (r.rot * Math.PI) / 180 + (hash01(list.length, 3) - 0.5) * 0.06;
+      list.push({ pid, x: w.x, y: sl.y, z: w.z, ry, open: false, fill: 1 });
+      rackBoxes.push({ rackId: r.id, pid, x: w.x, y: sl.y, z: w.z, ry });
+      used.add(`${ri}:${col}:${row}`);
+    };
+    let cursor = 0;
+    const overflow: string[] = [];
     for (const p of PRODUCTS) {
       const units = v.storage[p.id] ?? 0;
       if (units <= 0) continue;
-      const full = Math.floor(units / p.boxSize), rem = units % p.boxSize;
-      for (let i = 0; i < full; i++) queue.push({ pid: p.id, open: false, fill: 1 });
-      if (rem > 0) queue.push({ pid: p.id, open: true, fill: rem / p.boxSize });
+      const n = Math.ceil(units / p.boxSize);
+      for (let k = 0; k < n; k++) {
+        const c = cursor + Math.floor(k / 2);
+        if (c >= totalCols) { overflow.push(p.id); continue; }
+        put(p.id, Math.floor(c / RACK_COLS), c % RACK_COLS, (k % 2) as 0 | 1);
+      }
+      cursor += Math.ceil(n / 2);
     }
-    let k = 0;
-    for (const r of racks) {
-      const { cx, cz } = centerOf(r);
-      for (let s = 0; s < RACK_SLOTS && k < queue.length; s++, k++) {
-        const q = queue[k]!;
-        const sl = rackSlot(s);
-        const w = localToWorld(cx, cz, r.rot, sl.x, sl.z);
-        list.push({ pid: q.pid, x: w.x, y: sl.y, z: w.z, ry: (r.rot * Math.PI) / 180 + (hash01(k, 3) - 0.5) * 0.08, open: q.open, fill: q.fill });
+    for (let ri = 0; ri < racks.length && overflow.length; ri++) {
+      for (let col = 0; col < RACK_COLS && overflow.length; col++) for (const row of [0, 1] as const) {
+        if (overflow.length && !used.has(`${ri}:${col}:${row}`)) put(overflow.shift()!, ri, col, row);
       }
     }
     boxLayer.setSource('rack', list);
     shadowsDirty = true; // caixas projetam sombra
+    picksDirty = true;
   }
 
   /** Altura da pilha onde uma caixa seria largada (empilha a < 0,3 m de outra), ignorando `self`. */
@@ -519,6 +540,7 @@ export default function create(): GameModule {
       if (f.type === 'counter' && chairs.has(f.id)) picks.add({ kind: 'seat', id: f.id }, chairSilhouette(), M2.multiply(M.makeTranslation(SEAT.x, 0, SEAT.z)));
     }
     for (const b of boxLayout) picks.add({ kind: 'box', id: b.index }, b.open ? BOX_OPEN : BOX_CLOSED, T(b.x, b.y, b.z, b.ry));
+    rackBoxes.forEach((b, i) => picks.add({ kind: 'rackBox', id: b.rackId, pid: b.pid, slot: i }, BOX_CLOSED, T(b.x, b.y, b.z, b.ry)));
     v.dirt.forEach((d, i) => picks.add({ kind: 'dirt', id: i }, DIRT_SIL, T(d.x, 0, d.z)));
     const tb = trashBinPos(bounds);
     picks.add({ kind: 'trash' }, TRASH_SILHOUETTE, T(tb.x, 0, tb.z));
@@ -781,6 +803,8 @@ export default function create(): GameModule {
       stats: () => ({ calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, geometries: ctx.renderer.info.memory.geometries, textures: ctx.renderer.info.memory.textures }),
       furnitureViews: () => entries.size,
       boxCounts: () => ({ floor: boxLayer.countOf('floor'), rack: boxLayer.countOf('rack'), open: boxLayer.openCount('floor') }),
+      /** Testes (pós-teste 3): caixas desenhadas nas estantes do depósito, na ordem dos alvos ('rackBox'.slot). */
+      rackBoxes: () => rackBoxes.map((b) => ({ ...b })),
       walls: () => [{ n: [0, 1], fade: 1 }],
       setCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); ctx.camera.updateMatrixWorld(); },
       lockCamera: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => { lock = [x, y, z, lx, ly, lz]; ctx.camera.position.set(x, y, z); ctx.camera.lookAt(lx, ly, lz); ctx.camera.updateMatrixWorld(); },

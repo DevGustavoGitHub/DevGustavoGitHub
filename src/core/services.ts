@@ -8,9 +8,13 @@ export interface Vec2 { x: number; z: number }
  * cada um com `userData.pick: PickInfo`. O player faz raycast do centro da tela contra eles.
  */
 export interface PickInfo {
-  kind: 'furniture' | 'box' | 'dirt' | 'trash' | 'sign' | 'computer' | 'seat' | 'storageDoor' | 'recycle' | 'tipjar';
-  /** furnitureId (furniture/seat), índice em state.sidewalk (box), índice em state.dirt (dirt). */
+  kind: 'furniture' | 'box' | 'dirt' | 'trash' | 'sign' | 'computer' | 'seat' | 'storageDoor' | 'recycle' | 'tipjar' | 'rackBox';
+  /** furnitureId (furniture/seat/rackBox = a estante), índice em state.sidewalk (box), índice em state.dirt (dirt). */
   id?: number;
+  /** Pós-teste 3: produto da caixa do depósito mirada (kind 'rackBox'). */
+  pid?: string;
+  /** Pós-teste 3: nº da caixa na estante (kind 'rackBox'): cada caixa é um alvo próprio. */
+  slot?: number;
   /** FASE 4: nível (prateleira) mirado do móvel, calculado pelo player com world.levelAt. */
   level?: number;
 }

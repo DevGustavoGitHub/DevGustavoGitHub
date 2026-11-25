@@ -14,7 +14,7 @@ import { OUTLINE_GREEN } from '../core/outline';
 import type { SBox } from './furniture';
 
 interface Src { info: PickInfo; boxes: readonly SBox[]; matrix: THREE.Matrix4 }
-const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}`;
+const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}${p.slot !== undefined ? `:${p.slot}` : ''}`; // slot: cada caixa de estante é um alvo (pós-teste 3)
 
 const VERT = `uniform float uGrow; uniform float uBias;
 void main(){

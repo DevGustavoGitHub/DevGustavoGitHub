@@ -38,8 +38,9 @@ describe('layout inicial e capacidade', () => {
     expect(s.furniture.filter((f) => f.type === 'counter')).toHaveLength(1);
     const shelves = s.furniture.filter((f) => f.type === 'shelf');
     expect(shelves.map((f) => f.productId).sort()).toEqual(['feijao', 'macarrao']);
+    // pós-teste 3: salão inicial 10×8 (balcão em (7,5), mesa em (9,5)) ainda tem lugar para mais 2 prateleiras
     expect(canPlace(s, 'shelf', 7, 2, 0)).toBe(true);
-    expect(canPlace(s, 'shelf', 10, 2, 0)).toBe(true);
+    expect(canPlace(s, 'shelf', 1, 4, 0)).toBe(true);
     for (const f of s.furniture) expect(canPlace(s, f.type, f.x, f.z, f.rot, f.id)).toBe(true);
     expect(s.nextFurnitureId).toBeGreaterThan(Math.max(...s.furniture.map((f) => f.id)));
   });
@@ -67,28 +68,30 @@ describe('layout inicial e capacidade', () => {
 describe('canPlace', () => {
   const s = starterGame();
   it('limites do salão e rotação', () => {
+    // salão inicial 10×8 (pós-teste 3)
     expect(canPlace(s, 'shelf', -1, 5, 0)).toBe(false);
-    expect(canPlace(s, 'shelf', 11, 5, 0)).toBe(false); // 2 de largura estoura
-    expect(canPlace(s, 'shelf', 11, 5, 90)).toBe(true); // girada: 1x2
-    expect(canPlace(s, 'shelf', 0, 9, 0)).toBe(true);
-    expect(canPlace(s, 'shelf', 0, 10, 0)).toBe(false);
-    expect(canPlace(s, 'shelf', 0, 9, 90)).toBe(false); // 1x2 em z=9..10
+    expect(canPlace(s, 'shelf', 9, 2, 0)).toBe(false); // 2 de largura estoura
+    expect(canPlace(s, 'shelf', 9, 2, 90)).toBe(true); // girada: 1x2
+    expect(canPlace(s, 'shelf', 0, 7, 0)).toBe(true);
+    expect(canPlace(s, 'shelf', 0, 8, 0)).toBe(false);
+    expect(canPlace(s, 'shelf', 0, 7, 90)).toBe(false); // 1x2 em z=7..8
     expect(canPlace(s, 'shelf', 1.5, 5, 0)).toBe(false);
   });
   it('colisão por footprint', () => {
     expect(canPlace(s, 'shelf', 1, 2, 0)).toBe(false);
     expect(canPlace(s, 'shelf', 2, 2, 0)).toBe(false);
     expect(canPlace(s, 'shelf', 1, 3, 0)).toBe(true);
-    expect(canPlace(s, 'counter', 7, 7, 0)).toBe(false);
-    expect(canPlace(s, 'shelf', 8, 6, 0)).toBe(false); // Fase 4 (QA): (9,6) é o tile do operador do balcão (cadeira)
-    expect(canPlace(s, 'shelf', 6, 5, 0)).toBe(true);
-    expect(canPlace(s, 'shelf', 9, 5, 90)).toBe(false); // 1x2 em z=5..6 inclui o tile do operador (9,6)
+    expect(canPlace(s, 'counter', 6, 4, 0)).toBe(false); // sobrepõe o balcão inicial (7,5)
+    expect(canPlace(s, 'shelf', 7, 4, 0)).toBe(false); // Fase 4 (QA): (8,4) é o tile do operador do balcão (cadeira)
+    expect(canPlace(s, 'shelf', 1, 5, 0)).toBe(true);
+    expect(canPlace(s, 'shelf', 8, 3, 90)).toBe(false); // 1x2 em z=3..4 inclui o tile do operador (8,4)
   });
   it('não bloqueia a porta (antessala 2x2)', () => {
-    expect(canPlace(s, 'decor', 5, 9, 0)).toBe(false);
-    expect(canPlace(s, 'decor', 6, 8, 0)).toBe(false);
-    expect(canPlace(s, 'decor', 4, 9, 0)).toBe(true);
-    expect(canPlace(s, 'shelf', 4, 8, 0)).toBe(false);
+    // porta em x = 5 (salão 10×8): antessala (4..5, 6..7)
+    expect(canPlace(s, 'decor', 5, 7, 0)).toBe(false);
+    expect(canPlace(s, 'decor', 4, 6, 0)).toBe(false);
+    expect(canPlace(s, 'decor', 3, 7, 0)).toBe(true);
+    expect(canPlace(s, 'shelf', 3, 6, 0)).toBe(false);
   });
   it('rack só no depósito, depois de desbloqueado; shelf não vai ao depósito', () => {
     expect(canPlace(s, 'rack', 1, -3, 0)).toBe(false);
@@ -120,6 +123,9 @@ describe('canPlace', () => {
     const t = rich();
     expect(canPlace(t, 'shelf', 13, 5, 0)).toBe(false);
     buyExpansion(t);
+    expect(storeBounds(t.expansion).width).toBe(12); // pós-teste 3: 10×8 → 12×10
+    expect(canPlace(t, 'shelf', 13, 5, 0)).toBe(false);
+    buyExpansion(t);
     expect(storeBounds(t.expansion).width).toBe(16);
     expect(canPlace(t, 'shelf', 13, 5, 0)).toBe(true);
     expect(canPlace(t, 'decor', 7, 11, 0)).toBe(false); // nova antessala (porta em x=8)
@@ -145,7 +151,7 @@ describe('comprar, atribuir e vender móveis', () => {
     buyFurniture(s, 'shelf', 4, 4, 0, 'feijao');
     expect(productCapacity(s, 'feijao')).toBe(96);
     expect(s.slots.feijao).toBe(8);
-    const plain = buyFurniture(s, 'shelf', 7, 4, 0); // sem produto: níveis vazios sem etiqueta
+    const plain = buyFurniture(s, 'shelf', 7, 2, 0); // sem produto: níveis vazios sem etiqueta
     expect(plain.levels).toEqual([{ units: 0 }, { units: 0 }, { units: 0 }, { units: 0 }]);
     expect(plain.productId).toBeUndefined();
   });
@@ -196,15 +202,15 @@ describe('expansão, depósito, funcionários, personalização', () => {
     const costs: number[] = [];
     const levels: number[] = [];
     const rent0 = s.rent;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) { // pós-teste 3: 7 expansões (o salão começa em 10×8)
       costs.push(expansionCost(s)!);
       levels.push(expansionMinLevel(s)!);
       buyExpansion(s);
     }
     expect(costs).toEqual([...costs].sort((a, b) => a - b));
-    expect(new Set(costs).size).toBe(6);
+    expect(new Set(costs).size).toBe(7);
     expect(levels).toEqual([...levels].sort((a, b) => a - b));
-    expect(s.expansion).toBe(6);
+    expect(s.expansion).toBe(7);
     expect(storeBounds(s.expansion)).toEqual({ width: 36, depth: 22 });
     expect(storeBounds(99)).toEqual({ width: 36, depth: 22 });
     expect(s.rent).toBeGreaterThan(rent0);

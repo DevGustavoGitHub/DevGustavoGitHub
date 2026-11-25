@@ -144,7 +144,7 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
         expect(d.netProfit).toBeLessThan(400 * 100 * d.level + 50_000); // teto ~R$ 400 por nível (pós-teste 3: expansões/licenças mais baratas chegam antes; o teto global de R$ 10 mil/dia abaixo continua)
         expect(d.revenue).toBeLessThan(d.served * 60_000); // cesta média < R$ 600
       }
-      expect(Math.max(...st.map((d) => d.netProfit))).toBeLessThan(1_100_000); // < R$ 11 mil/dia em 80 dias (pós-teste 3: preços e salários menores; bot ótimo chegou a ~R$ 10,1 mil)
+      expect(Math.max(...st.map((d) => d.netProfit))).toBeLessThan(1_200_000); // < R$ 12 mil/dia em 80 dias (pós-teste 3: preços/salários menores e 7 expansões; bot ótimo ~R$ 11,3 mil)
     }
   });
   it('nenhum estado inválido durante 60 dias (dinheiro inteiro, estoques >= 0, capacidade respeitada)', { timeout: 60000 }, () => {

@@ -1,3 +1,4 @@
+import { sizeTier } from '../core/layout';
 import { PRODUCTS } from './catalog';
 import { marketAverage, sellPrice } from './market';
 import type { StoreState } from './state';
@@ -38,7 +39,7 @@ export function customersForDay(state: StoreState, rand: () => number): number {
   const base = lv < 4 ? EARLY_BASE[Math.max(1, lv) - 1]! : 22 + 4 * lv;
   const priceMult = Math.min(1.5, Math.max(0.5, 1 + (1 - averagePriceRatio(state)) * 0.4));
   const repMult = 0.6 + 0.1 * state.reputation;
-  const sizeMult = 1 + 0.12 * state.expansion;
+  const sizeMult = 1 + 0.12 * sizeTier(state.expansion); // 1ª expansão (10×8 → 12×10) só dá espaço
   return Math.max(0, Math.round(base * priceMult * repMult * sizeMult * (0.9 + 0.2 * rand())));
 }
 

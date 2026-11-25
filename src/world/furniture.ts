@@ -416,6 +416,17 @@ export function rackSlot(i: number): { x: number; y: number; z: number } {
   return { x: -0.69 + col * 0.46, y: 0.1 + lvl * 0.52 + 0.11, z: row === 0 ? 0.2 : -0.2 };
 }
 export const RACK_SLOTS = 24;
+/** Colunas por estante (3 níveis × 4) e ordem dos níveis (meio, de cima, de baixo: o do meio fica na altura da mão). */
+export const RACK_COLS = 12;
+const RACK_LEVEL_ORDER = [1, 2, 0] as const;
+/**
+ * Pós-teste 3: posição local de uma caixa por COLUNA (0..11) e fileira (0 = frente, +z; 1 = atrás). Cada produto ocupa
+ * colunas próprias: a caixa incompleta na frente da 1ª coluna, as cheias atrás e nas colunas seguintes.
+ */
+export function rackColumnSlot(col: number, row: 0 | 1): { x: number; y: number; z: number } {
+  const lvl = RACK_LEVEL_ORDER[Math.floor(col / 4) % 3]!, c = col % 4;
+  return { x: -0.69 + c * 0.46, y: 0.1 + lvl * 0.52 + 0.11, z: row === 0 ? 0.2 : -0.2 };
+}
 
 function rack(): Batch {
   const b = new Batch();

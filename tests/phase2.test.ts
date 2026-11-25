@@ -375,7 +375,7 @@ describe('conteúdo de fim de jogo', () => {
     for (const u of upgradeCatalog(starterGame())) levels.add(u.minLevel);
     const s = starterGame();
     const exp: number[] = [];
-    for (let i = 0; i < 6; i++) { exp.push(expansionMinLevel(s)!); s.expansion++; }
+    for (let i = 0; i < 7; i++) { exp.push(expansionMinLevel(s)!); s.expansion++; }
     exp.forEach((l) => levels.add(l));
     expect(expansionCost(s)).toBeNull();
     const sorted = [...levels].sort((a, b) => a - b);
@@ -383,7 +383,7 @@ describe('conteúdo de fim de jogo', () => {
     expect(sorted[sorted.length - 1]).toBeLessThanOrEqual(30);
     for (let l = 1; l < 28; l++) expect(sorted.some((x) => x > l && x <= l + 3), `nível ${l}`).toBe(true);
     // Fase 3: expansões 1–4 nos níveis 3, 5, 6 e 7 (como no original); 5 e 6 ficam como metas de fim de jogo
-    expect(exp.slice(0, 4)).toEqual([3, 5, 6, 7]);
+    expect(exp.slice(0, 5)).toEqual([2, 3, 5, 6, 7]); // pós-teste 3: nova 1ª expansão (10×8 → 12×10) no nível 2
     expect(exp[4]).toBeGreaterThan(exp[3]!);
     expect(exp[5]).toBeGreaterThan(exp[4]!);
     expect(exp[5]).toBeLessThanOrEqual(30);
@@ -420,8 +420,8 @@ describe('decoração e expansões novas', () => {
   it('expansões 5 e 6 ampliam o salão e a porta nunca fica bloqueada por móveis antigos', () => {
     const s = at(30);
     unlockStorage(s);
-    // móvel exatamente onde ficará a nova antessala/passagem depois de cada expansão
-    for (let i = 0; i < 6; i++) {
+    // móvel exatamente onde ficará a nova antessala/passagem depois de cada expansão (7 expansões desde o pós-teste 3)
+    for (let i = 0; i < 7; i++) {
       const next = storeBounds(s.expansion + 1);
       const dx = next.width / 2;
       for (const [x, z] of [[dx - 1, 0], [dx - 1, next.depth - 2]] as const) {

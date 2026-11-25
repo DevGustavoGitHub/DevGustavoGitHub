@@ -140,11 +140,12 @@ describe('início do jogo (dias 1–10) com o dinheiro inicial atual', () => {
     expect(net).toBeGreaterThan(40_000);
     expect(net).toBeLessThan(90_000);
   });
-  it('dinheiro inicial quase não muda o eficiente (o caixa é o limite): R$ 150 x R$ 300 diferem < 15% nos dias 1–10', () => {
+  // pós-teste 3: com o salão inicial menor, a 1ª expansão (R$ 500, nível 2) entra cedo e o dinheiro inicial pesa um pouco mais
+  it('dinheiro inicial pouco muda o eficiente (o caixa é o limite): R$ 150 x R$ 300 diferem < 25% nos dias 1–10', () => {
     const at = (money: number): number => avg(SEEDS.map((seed) => netAvg(play(HUMAN_PROFILES.eficiente, seed, 10, money).ds)));
     const lo = at(15_000);
     const hi = at(30_000);
-    expect(Math.abs(hi - lo) / lo).toBeLessThan(0.15);
+    expect(Math.abs(hi - lo) / lo).toBeLessThan(0.25);
   });
   it('desperdiçador (×1,25, planta no dia 1, móvel antes do estoque) sente o erro mas não quebra', () => {
     for (const r of waste) {

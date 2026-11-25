@@ -48,7 +48,7 @@ interface Seat { counterId: number; pos: THREE.Vector3; yaw0: number; pitch0: nu
 
 /** Alvo sem nível (histerese de alcance) e com nível (troca de alvo/destaque também entre níveis do mesmo móvel). */
 const baseOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}`;
-const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}:${p.level ?? ''}`;
+const keyOf = (p: PickInfo): string => `${p.kind}:${p.id ?? ''}:${p.level ?? ''}:${p.slot ?? ''}`; // slot: caixa de estante mirada
 const isDisplay = (f: Furniture): boolean => f.type === 'shelf' || f.type === 'fridge' || f.type === 'freezer';
 /** Reserva sem `world.levelAt`: faixa vertical dos níveis (nível 0 = o de CIMA, como no world; freezer: da esquerda p/ a direita). */
 const LEVEL_BAND: Partial<Record<Furniture['type'], readonly [number, number]>> = { shelf: [0.08, 1.5], fridge: [0.12, 1.9], freezer: [0.1, 0.95] };
@@ -111,11 +111,14 @@ export default function create(): GameModule {
   let emptied: { box: Box; fid: number; l: number; t: number } | null = null; // caixa esvaziada no Repor: sem "Retirar" por 1 s
   const mkTarget = (): Target => ({ pick: { kind: 'trash' }, key: '', base: '', obj: null, point: new THREE.Vector3(), hasPoint: false, dist: 0 });
   const T0 = mkTarget(), T1 = mkTarget(), TF = mkTarget(); // dois alternados para o raycast + o forçado (testes)
-  interface Keys { kind: string; id: number | undefined; level: number | undefined; key: string; base: string }
+  interface Keys { kind: string; id: number | undefined; level: number | undefined; slot?: number; key: string; base: string }
   const keyCache = new WeakMap<PickInfo, Keys>();
   const invM = new THREE.Matrix4(), lray = new THREE.Ray(), hitL = new THREE.Vector3(), cW = new THREE.Vector3(), nearPoint = new THREE.Vector3();
   const stack: THREE.Object3D[] = [];
   let nearNode: THREE.Object3D | null = null, nearDist = 0;
+  /** Pós-teste 3: caixa de estante mais próxima no mesmo raio (tem prioridade sobre a própria estante). */
+  let nearBox: THREE.Object3D | null = null, nearBoxDist = Infinity;
+  const nearBoxPoint = new THREE.Vector3();
   let catalog: api.FurnitureSpec[] | null = null;
   const heldList: HeldBox[] = [];
   const heldState: HeldState = { boxes: heldList, dolly: false, hideTop: false, walk: 0, lookYaw: 0, lookPitch: 0, reduce: false, mop: null };
@@ -286,8 +289,8 @@ export default function create(): GameModule {
   /** Chaves do alvo (cache por PickInfo; recalcula se o world mudar kind/id/level no mesmo objeto). */
   const keysOf = (p: PickInfo): Keys => {
     let k = keyCache.get(p);
-    if (!k || k.kind !== p.kind || k.id !== p.id || k.level !== p.level) {
-      k = { kind: p.kind, id: p.id, level: p.level, key: keyOf(p), base: baseOf(p) };
+    if (!k || k.kind !== p.kind || k.id !== p.id || k.level !== p.level || k.slot !== p.slot) {
+      k = { kind: p.kind, id: p.id, level: p.level, slot: p.slot, key: keyOf(p), base: baseOf(p) };
       keyCache.set(p, k);
     }
     return k;
@@ -299,6 +302,7 @@ export default function create(): GameModule {
   const rayNearest = (root: THREE.Object3D): boolean => {
     const r = ray.ray;
     nearNode = null; nearDist = ray.far;
+    nearBox = null; nearBoxDist = Infinity;
     stack.length = 0;
     stack.push(root);
     while (stack.length) {
@@ -322,7 +326,9 @@ export default function create(): GameModule {
       if (bb.containsPoint(lray.origin) || !lray.intersectBox(bb, hitL)) continue;
       hitL.applyMatrix4(m.matrixWorld);
       const d = hitL.distanceTo(r.origin);
-      if (d < ray.near || d >= nearDist) continue;
+      if (d < ray.near) continue;
+      if ((node.userData.pick as PickInfo | undefined)?.kind === 'rackBox' && d < nearBoxDist) { nearBox = node; nearBoxDist = d; nearBoxPoint.copy(hitL); }
+      if (d >= nearDist) continue;
       nearNode = node; nearDist = d; nearPoint.copy(hitL);
     }
     return nearNode !== null;
@@ -336,7 +342,11 @@ export default function create(): GameModule {
     ray.near = 0.05;
     ray.far = RANGE_FAR + RANGE_HYST;
     if (!rayNearest(pickRoot())) return null;
-    const node = nearNode!, pinfo = node.userData.pick as PickInfo;
+    let node = nearNode!, pinfo = node.userData.pick as PickInfo;
+    // a estante envolve as caixas: se o raio acerta a estante e, logo atrás, uma caixa dela, vale a caixa
+    if (pinfo.kind === 'furniture' && nearBox && nearBoxDist - nearDist < 0.9 && st().furniture.find((x) => x.id === pinfo.id)?.type === 'rack') {
+      node = nearBox; pinfo = node.userData.pick as PickInfo; nearDist = nearBoxDist; nearPoint.copy(nearBoxPoint);
+    }
     const base = keysOf(pinfo).base;
     const far = pinfo.kind === 'sign' || pinfo.kind === 'computer';
     const lim = (far ? RANGE_FAR : RANGE) + (target?.base === base ? RANGE_HYST : 0);
@@ -488,12 +498,22 @@ export default function create(): GameModule {
     if (pullBox) return pullAct(f, l, pullBox);
     return D(`why:${why}`, LEVEL_WHY[why ?? ''] ?? 'Outro produto');
   };
+  /** Pós-teste 3: estante (fora das caixas): guardar qualquer caixa; para retirar, mirar na caixa do produto. */
   const rackAct = (f: Furniture): Act | null => {
     const t0 = top();
     if (t0 && t0.units > 0) return A('store', 'Guardar', () => storeTop(f));
     if (t0) return D('store-empty', 'Caixa vazia');
-    for (const k in st().storage) if ((st().storage[k] ?? 0) > 0) return A('take', 'Retirar', () => takeFrom(f));
+    for (const k in st().storage) if ((st().storage[k] ?? 0) > 0) return D('take-aim', 'Mire na caixa');
     return D('take-none', 'Depósito vazio');
+  };
+  const shortPid = (pid: string): string => { try { return productById(pid).name.split(' ')[0]!; } catch { return pid; } };
+  /** Pós-teste 3: caixa do depósito mirada: Retirar ESTE produto (mãos livres) ou Guardar (completa a incompleta). */
+  const rackBoxAct = (f: Furniture, pid: string): Act | null => {
+    const t0 = top();
+    if (t0 && t0.units > 0) return A('store', t0.productId === pid ? 'Completar' : 'Guardar', () => storeTop(f));
+    if (t0) return D('store-empty', 'Caixa vazia');
+    if ((st().storage[pid] ?? 0) <= 0) return null;
+    return A(`take:${pid}`, `Retirar ${shortPid(pid)}`, () => takeFrom(f, pid));
   };
   const staffedId = (): number | null => {
     if ((st().employees.cashier ?? 0) <= 0) return null;
@@ -523,6 +543,11 @@ export default function create(): GameModule {
         else if (f.type === 'rack') { primary = rackAct(f); secondary = mover; }
         else if (f.type === 'counter') { primary = seatAct(f.id); secondary = mover; }
         else primary = mover;
+        return;
+      }
+      case 'rackBox': {
+        const f = s.furniture.find((x) => x.id === t.pick.id);
+        if (f && t.pick.pid) primary = rackBoxAct(f, t.pick.pid);
         return;
       }
       case 'dirt': {
@@ -656,27 +681,27 @@ export default function create(): GameModule {
     act('recycleBox', { productId: b.productId }); changed('sidewalk');
     return true;
   };
+  /**
+   * Guardar (pós-teste 3): as unidades completam a caixa incompleta do produto no depósito; se couberem todas, a caixa
+   * da mão fica VAZIA na mão (para jogar fora/reciclar); senão a caixa inteira entra no depósito.
+   */
   const storeTop = (f: Furniture): boolean => {
     const b = top();
     if (!b) return false;
-    try { api.storeBox(st(), idxOf(b)); } catch (e) { toastErr(e); return false; }
-    removeCarried(b);
+    let r: { stored: number; leftEmpty: boolean };
+    try { r = api.stashBox(st(), idxOf(b)); } catch (e) { toastErr(e); return false; }
+    if (r.leftEmpty) { syncTop(); toast(`Caixa de ${shortPid(b.productId)} completada no depósito. Jogue a caixa vazia no lixo.`); }
+    else removeCarried(b);
     sfx('box');
     act('storeBox', { productId: b.productId, furnitureId: f.id }); changed('storage');
     return true;
   };
-  const takeFrom = (f: Furniture): boolean => {
+  /** Retirar (pós-teste 3): o jogador escolhe o produto mirando a caixa dele; vem a da frente (incompleta primeiro). */
+  const takeFrom = (f: Furniture, pid: string): boolean => {
     const s = st();
-    let pid: string | null = null, ratio = Infinity;
-    for (const k of Object.keys(s.storage)) {
-      if ((s.storage[k] ?? 0) <= 0) continue;
-      const c = capOf(k);
-      const r = (s.shelf[k] ?? 0) / Math.max(1, c === Infinity ? 1 : c);
-      if (r < ratio) { ratio = r; pid = k; }
-    }
-    if (!pid) return false;
+    if ((s.storage[pid] ?? 0) <= 0) return false;
     try {
-      api.takeFromStorage(s, pid, true);
+      api.takeStorageBox(s, pid, true);
       const b = s.sidewalk[s.sidewalk.length - 1];
       if (!b) return false;
       b.carried = true;

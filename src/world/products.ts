@@ -300,8 +300,11 @@ function boxVisual(pid: string, open: boolean): THREE.BufferGeometry {
       }
     }
   });
-  const lab = uvToCell(new Batch().add(planeGeo(0.3, 0.15), ['matte', 0xffffff], 0, BOX_H * 0.48, BOX_D / 2 + 0.003).build().get('matte')!, labelCell(pid));
-  parts.push(lab);
+  // rótulo nas DUAS faces largas (pós-teste 3: na estante do depósito a caixa pode estar de costas para o jogador)
+  for (const side of [1, -1]) {
+    const lab = uvToCell(new Batch().add(planeGeo(0.3, 0.15), ['matte', 0xffffff], 0, BOX_H * 0.48, side * (BOX_D / 2 + 0.003), { ry: side > 0 ? 0 : Math.PI }).build().get('matte')!, labelCell(pid));
+    parts.push(lab);
+  }
   g = mergeGeometries(parts, false)!;
   parts.forEach((p) => p.dispose());
   boxGeoCache.set(key, g);
@@ -417,7 +420,7 @@ function shellGeo(pid: string): THREE.BufferGeometry {
   let g = shellCache.get(pid);
   if (g) return g;
   const parts = partsToGeo((push) => shellParts(push));
-  parts.push(uvToCell(new Batch().add(planeGeo(0.3, 0.15), ['matte', 0xffffff], 0, BOX_H * 0.48, BOX_D / 2 + 0.003).build().get('matte')!, labelCell(pid)));
+  for (const side of [1, -1]) parts.push(uvToCell(new Batch().add(planeGeo(0.3, 0.15), ['matte', 0xffffff], 0, BOX_H * 0.48, side * (BOX_D / 2 + 0.003), { ry: side > 0 ? 0 : Math.PI }).build().get('matte')!, labelCell(pid)));
   g = mergeGeometries(parts, false)!;
   parts.forEach((p) => p.dispose());
   shellCache.set(pid, g);

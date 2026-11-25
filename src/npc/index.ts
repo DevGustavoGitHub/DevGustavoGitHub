@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { Vec2, WorldService } from '../core/services';
-import { DOOR_WIDTH } from '../core/layout';
+import { DOOR_WIDTH, storeBounds } from '../core/layout';
 import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
 import * as api from '../sim/api';
 import { cashierCount } from '../sim/economy';
@@ -207,7 +207,7 @@ export default function create(): GameModule {
     heldChanged() { syncHeld(); },
     sfx(name, x, z) {
       if (x !== undefined && z !== undefined) { ctx.bus.emit('sfx', { name, x, z }); return; }
-      const b = ctx.state.expansion * 4 + 12;
+      const b = storeBounds(ctx.state.expansion).width;
       ctx.bus.emit('sfx', { name, pan: x === undefined ? 0 : clamp((x - b / 2) / (b / 2), -1, 1) * 0.6 });
     },
     lowDetail(x, z) {

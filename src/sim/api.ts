@@ -4,7 +4,7 @@
  * violação de regra (dinheiro insuficiente, nível baixo, posição inválida...). Dinheiro sempre em centavos.
  * Regras em furniture.ts / economy.ts / tuning.ts; números documentados em docs/GDD.md §4.
  */
-import { DOOR_WIDTH, MAX_EXPANSION, SIDEWALK_DEPTH, STORAGE_DEPTH, doorX, storeBounds, type FurnitureType } from '../core/layout';
+import { DOOR_WIDTH, MAX_EXPANSION, SIDEWALK_DEPTH, STORAGE_DEPTH, doorX, sizeTier, storeBounds, type FurnitureType } from '../core/layout';
 import { PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay } from './demand';
 import {
@@ -304,6 +304,43 @@ export function storeBox(state: StoreState, boxIndex: number): void {
   if (storageUsedImpl(state) + extra > storageCapacityImpl(state)) throw new Error('Depósito cheio: compre mais estantes');
   state.storage[box.productId] = stored + box.units;
   state.sidewalk.splice(boxIndex, 1);
+}
+
+/**
+ * Pós-teste 3 — guardar pela ESTANTE (jogador): as unidades da caixa da mão completam primeiro a caixa incompleta do
+ * produto no depósito. Se couberem todas nela, a caixa da mão fica VAZIA na mão (para jogar fora/reciclar) e o depósito
+ * não ganha caixa nova; se sobrar, a caixa inteira entra no depósito (o resto vira a nova caixa incompleta da frente).
+ */
+export function stashBox(state: StoreState, boxIndex: number): { stored: number; leftEmpty: boolean } {
+  if (!state.storageUnlocked) throw new Error('Desbloqueie o depósito primeiro');
+  const box = boxAt(state, boxIndex);
+  if (box.units <= 0) throw new Error('Caixa vazia: jogue no lixo');
+  const p = productById(box.productId);
+  const stored = state.storage[box.productId] ?? 0;
+  const rem = stored % p.boxSize, room = rem > 0 ? p.boxSize - rem : 0;
+  if (box.units <= room) {
+    const n = box.units;
+    state.storage[box.productId] = stored + n;
+    box.units = 0;
+    return { stored: n, leftEmpty: true };
+  }
+  const n = box.units;
+  storeBox(state, boxIndex);
+  return { stored: n, leftEmpty: false };
+}
+
+/**
+ * Pós-teste 3 — retirar pela ESTANTE (jogador escolhe o produto): vem a caixa da FRENTE, a incompleta (se houver),
+ * senão uma cheia. Caixa sai fechada. Retorna as unidades retiradas.
+ */
+export function takeStorageBox(state: StoreState, productId: string, carry: boolean): number {
+  const have = state.storage[productId] ?? 0;
+  if (have <= 0) throw new Error('Sem estoque no depósito');
+  const bs = productById(productId).boxSize, rem = have % bs;
+  const n = rem > 0 ? rem : Math.min(have, bs);
+  state.storage[productId] = have - n;
+  state.sidewalk.push(carry ? { productId, units: n, open: false, carried: true } : { productId, units: n, open: false });
+  return n;
 }
 
 /** Retira do depósito 1 caixa de `productId` (cria Box com carried=true se `carry`). Retorna unidades retiradas. */
@@ -823,7 +860,7 @@ export function setBoxOpen(state: StoreState, boxIndex: number, open: boolean): 
 }
 /** Máximo de clientes simultâneos (cresce com expansão e com a melhoria 'capacity'). O npc usa como limite. */
 export function customerCapacity(state: StoreState): number {
-  const e = clamp(Math.floor(Number.isFinite(state.expansion) ? state.expansion : 0), 0, MAX_EXPANSION);
+  const e = sizeTier(clamp(Math.floor(Number.isFinite(state.expansion) ? state.expansion : 0), 0, MAX_EXPANSION));
   return CUSTOMER_CAPACITY.base + CUSTOMER_CAPACITY.perExpansion * e + (state.upgrades.includes('capacity') ? UPGRADES.capacity.extra : 0);
 }
 /** Tipo de móvel que expõe o produto (para o ícone "móvel exigido" no Mercado). */

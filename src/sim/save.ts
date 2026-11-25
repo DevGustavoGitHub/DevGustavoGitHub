@@ -62,6 +62,9 @@ function sanitizeFields(s: StoreState, d: Raw, base: StoreState): void {
   s.loan = intOr(d.loan, 0, 0);
   s.bankruptcies = intOr(d.bankruptcies, 0, 0);
   s.expansion = intOr(d.expansion, 0, 0, MAX_EXPANSION);
+  // pós-teste 3: salão inicial menor — save da tabela antiga mantém o tamanho (expansão 0 antiga = 12×10 = expansão 1 nova)
+  if (d.sizeVersion !== 2) s.expansion = Math.min(MAX_EXPANSION, s.expansion + 1);
+  s.sizeVersion = 2;
   s.storageUnlocked = d.storageUnlocked === true;
   s.storeName = typeof d.storeName === 'string' && d.storeName.trim() ? d.storeName.trim().slice(0, STORE_NAME_MAX) : base.storeName;
   const lic = (Array.isArray(d.licenses) ? d.licenses : []).filter((x): x is string => typeof x === 'string' && LICENSES.some((l) => l.id === x));

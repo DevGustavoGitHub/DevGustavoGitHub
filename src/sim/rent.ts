@@ -1,3 +1,4 @@
+import { sizeTier } from '../core/layout';
 /**
  * Aluguel diário com início tardio (Fase 3). O valor do dia fica em `state.rent` (a UI lê o campo) e é recalculado
  * no início de cada dia (closeDay), ao comprar expansão, no recomeço após falência e ao migrar saves antigos.
@@ -7,7 +8,7 @@ import type { StoreState } from './state';
 import { RENT } from './tuning';
 
 /** Aluguel cheio da loja (sem rampa): base + por expansão. */
-export const fullRent = (expansion: number): Cents => RENT.base + RENT.perExpansion * Math.max(0, Math.floor(expansion));
+export const fullRent = (expansion: number): Cents => RENT.base + RENT.perExpansion * sizeTier(expansion); // 1ª expansão (10×8 → 12×10) não sobe o aluguel
 
 /**
  * Fração do aluguel cobrada: 0 abaixo do nível RENT.startLevel E antes do dia RENT.startDay; depois sobe 1/rampSteps por

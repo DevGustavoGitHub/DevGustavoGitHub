@@ -110,7 +110,7 @@ export interface StoreState {
   rent: Cents;
   ledger: Ledger;
   storeName: string;
-  /** 0..MAX_EXPANSION (6) — ver storeBounds() em core/layout.ts. */
+  /** 0..MAX_EXPANSION (7) — ver storeBounds() em core/layout.ts. */
   expansion: number;
   storageUnlocked: boolean;
   furniture: Furniture[];
@@ -145,6 +145,11 @@ export interface StoreState {
    * produto, níveis livres, depósito/calçada) e zera a lista: nada some e o custo médio continua coerente.
    */
   npcHeld?: { productId: string; qty: number }[];
+  /**
+   * Pós-teste 3: versão da tabela de tamanhos do salão. 2 = salão inicial 10×8 (expansão 0). Saves sem o campo são da
+   * tabela antiga (expansão 0 = 12×10): `deserialize` soma 1 à expansão para manter o mesmo tamanho.
+   */
+  sizeVersion?: number;
 }
 
 export type SavedDayPhase = 'prep' | 'open' | 'closing' | 'report';
@@ -156,7 +161,7 @@ export interface SavedClock { minute: number; phase: SavedDayPhase }
  */
 export function initialFurniture(): Furniture[] {
   return [
-    { id: 1, type: 'counter', x: 8, z: 7, rot: 0 },
+    { id: 1, type: 'counter', x: 7, z: 5, rot: 0 }, // salão inicial 10×8 (pós-teste 3): perto da entrada, à direita da porta
     ...INITIAL_SHELVES.map((_, i): Furniture => ({
       id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, levels: emptyLevels('shelf'),
     })),
@@ -208,6 +213,7 @@ export function newGame(seed = 1): StoreState {
     bankruptcies: 0,
     furnitureStock: [],
     clock: { minute: OPEN_MIN, phase: 'prep' },
+    sizeVersion: 2,
   };
   s.rent = rentFor(s);
   ensureDesk(s); // mesa do computador colada à ponta do operador do balcão (id = INITIAL_NEXT_FURNITURE_ID)

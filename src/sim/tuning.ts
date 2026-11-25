@@ -25,13 +25,14 @@ export const INITIAL_SHELVES: readonly string[] = ['', ''];
  */
 export const RENT = { base: 8000 as Cents, perExpansion: 4000 as Cents, startLevel: 4, startDay: 6, rampSteps: 3 };
 
-/** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 6 níveis (layout.MAX_EXPANSION). */
+/** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 7 níveis (layout.MAX_EXPANSION). */
 /**
  * Pós-teste 3 (nível 6 no dia 10 sem conseguir comprar expansão, depósito, laticínios, capacidade nem carrinho): preços do
  * meio do jogo ~½ a ⅓ dos anteriores (1ª expansão R$ 1.500 → 800, 2ª 4.500 → 2.000, 3ª 11.000 → 4.500) — com lucro de
  * ~R$ 300–550/dia nos níveis 4–6 (bot cuidadoso), cada compra custa ~2–5 dias de economia em vez de 5–15.
  */
 export const EXPANSIONS: { cost: Cents; minLevel: number }[] = [
+  { cost: 50000, minLevel: 2 }, // pós-teste 3: 10×8 → 12×10 (o salão começa menor)
   { cost: 80000, minLevel: 3 },
   { cost: 200000, minLevel: 5 },
   { cost: 450000, minLevel: 6 },

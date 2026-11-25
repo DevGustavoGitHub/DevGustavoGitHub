@@ -209,6 +209,8 @@ describe('capacidade, melhorias e móvel exigido', () => {
   it('customerCapacity cresce com expansão e com a melhoria capacity', () => {
     const s = at(30);
     expect(customerCapacity(s)).toBe(6);
+    buyExpansion(s); // pós-teste 3: a 1ª (10×8 → 12×10) só dá espaço
+    expect(customerCapacity(s)).toBe(6);
     buyExpansion(s);
     buyExpansion(s);
     expect(customerCapacity(s)).toBe(10);
@@ -293,7 +295,8 @@ describe('economia de início e liberações por nível (Fase 3)', () => {
     expect(rentFor({ expansion: 0, level: 1, day: 7 })).toBe(twoThirds);
     expect(rentFor({ expansion: 0, level: 6, day: 1 })).toBe(full);
     expect(rentFor({ expansion: 0, level: 1, day: 8 })).toBe(full);
-    expect(rentFor({ expansion: 2, level: 9, day: 30 })).toBe(full + 2 * RENT.perExpansion);
+    expect(rentFor({ expansion: 1, level: 9, day: 30 })).toBe(full); // pós-teste 3: a 1ª expansão (10×8 → 12×10) não sobe o aluguel
+    expect(rentFor({ expansion: 3, level: 9, day: 30 })).toBe(full + 2 * RENT.perExpansion);
     const s = starterGame();
     const rents: number[] = [];
     for (let d = 0; d < 9; d++) rents.push(closeDay(s).rent!);
@@ -315,8 +318,8 @@ describe('economia de início e liberações por nível (Fase 3)', () => {
     expect(employeeCost(s, 'stocker')!.minLevel).toBe(8);
     expect(storageCost().minLevel).toBe(5);
     const exp: number[] = [];
-    for (let i = 0; i < 6; i++) { exp.push(expansionMinLevel(s)!); s.expansion++; }
-    expect(exp.slice(0, 4)).toEqual([3, 5, 6, 7]);
+    for (let i = 0; i < 7; i++) { exp.push(expansionMinLevel(s)!); s.expansion++; }
+    expect(exp.slice(0, 5)).toEqual([2, 3, 5, 6, 7]); // pós-teste 3: nova 1ª expansão (10×8 → 12×10) no nível 2
   });
   it('paleta padrão (paredes azul-claro, piso de madeira quente, letreiro vermelho); saves mantêm a escolha', () => {
     const s = starterGame();
