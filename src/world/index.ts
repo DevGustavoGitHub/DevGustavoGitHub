@@ -114,6 +114,8 @@ function stateHash(s: StoreState, extra: number): number {
   for (let i = 0; i < d.length; i++) { hNum(d[i]!.x); hNum(d[i]!.z); }
   return H;
 }
+/** Começa um hash numérico (as chaves de mudança das seções usam isto em vez de strings gigantes: sem alocação). */
+const hBegin = (seed: number): void => { H = seed | 0; };
 /** Hash só das entradas de preço (prices/market): etiquetas recalculam `priceInfo` apenas quando muda. */
 function priceHash(s: StoreState): number {
   H = 0x2c1b3c6d | 0;
@@ -148,13 +150,14 @@ export default function create(): GameModule {
   let demoCache: { key: string; v: View } | null = null;
 
   /** Cada móvel tem um grupo (gaveta e tela do balcão); a casca estática de TODOS é fundida em poucas malhas. */
-  interface Entry { geoSig: string; group: THREE.Group; drawer?: THREE.Mesh; drawerBaseZ: number; drawerT: number }
+  interface Entry { geoSig: number; group: THREE.Group; drawer?: THREE.Mesh; drawerBaseZ: number; drawerT: number }
   const entries = new Map<number, Entry>();
-  let furniKey = '', itemsKey = '';
+  /** Chaves de mudança (hash numérico; NaN = força refazer). */
+  let furniKey = NaN, itemsKey = NaN, tagsKey = NaN;
   const staticGeos: THREE.BufferGeometry[] = [];
   let hiddenId: number | null = null;
   let bounds: Bounds = storeBounds(0);
-  let shellKey = '', decorKey = '', navKey = '', rackKey = '', boxKey = '', dirtKey = '';
+  let shellKey = '', decorKey = '', navKey = NaN, rackKey = NaN, boxKey = NaN, dirtKey = NaN;
   let picksDirty = true;
   let acc = 0;
   /** Perfil de CPU opt-in (`__world.profile(true)` liga/zera; `__world.profile()` lê médias em ms). Desligado = só um teste de booleano. */
@@ -288,12 +291,14 @@ export default function create(): GameModule {
     return s;
   }
 
+  /** Hash da pose do móvel (tipo, tile, rotação). */
+  function geoHash(f: Furniture): number { hBegin(0x3c6ef372); hStr(f.type); hNum(f.x); hNum(f.z); hNum(f.rot); return H; }
   function syncFurniture(v: View): void {
     const seen = new Set<number>();
     let geoChanged = false;
     for (const f of v.furniture) {
       seen.add(f.id);
-      const geoSig = `${f.type}|${f.x}|${f.z}|${f.rot}`;
+      const geoSig = geoHash(f);
       let e = entries.get(f.id);
       if (e && e.geoSig === geoSig) continue;
       if (e) furniGroup.remove(e.group);
@@ -324,8 +329,14 @@ export default function create(): GameModule {
     tipJars.sync(ctx.state.upgrades.includes('tipjar'), cg);
     const lvls = new Map<number, LevelView[]>();
     for (const f of v.furniture) if (isDisplayType(f.type)) lvls.set(f.id, levelsOf(v, f));
-    const lp = (f: Furniture): string => (lvls.get(f.id) ?? []).map((l) => l.pid ?? '').join('/');
-    const fk = `${hiddenId ?? ''}|${ctx.state.upgrades.includes('tipjar') ? 'tj' : ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${lp(f)}:${f.variant ?? ''}`).join(',');
+    // chaves numéricas (antes eram strings com todos os móveis, montadas a cada cliente que pegava um item)
+    hBegin(0x6a09e667); hInt(hiddenId ?? -1); hInt(ctx.state.upgrades.includes('tipjar') ? 1 : 0); hInt(bounds.width); hInt(bounds.depth); hInt(ctx.state.storageUnlocked ? 1 : 0);
+    for (const f of v.furniture) {
+      hInt(f.id); hStr(f.type); hNum(f.x); hNum(f.z); hNum(f.rot); hStr(f.variant);
+      const lv = lvls.get(f.id);
+      if (lv) for (let i = 0; i < lv.length; i++) hStr(lv[i]!.pid ?? '');
+    }
+    const fk = H;
     if (fk !== furniKey) {
       furniKey = fk;
       computeDesk(v);
@@ -333,10 +344,19 @@ export default function create(): GameModule {
       picksDirty = true;
     }
     // etiquetas por nível (a malha só é refeita quando produto/esgotado de algum nível muda)
-    tags.rebuild(v.furniture.filter((f) => f.id !== hiddenId && lvls.has(f.id)).map((f) => ({ f, levels: lvls.get(f.id)!.map((l) => ({ pid: l.pid, empty: !(l.fill > 0) })) })));
-    const ik = fk + '|' + v.furniture.map((f) => (lvls.get(f.id) ?? []).map((l, i, a) => levelVisible(f.type, a.length, i, l.pid, l.units)).join('/')).join(',');
+    hBegin(fk ^ 0x5be0cd19);
+    for (const f of v.furniture) { const lv = lvls.get(f.id); if (!lv || f.id === hiddenId) continue; hInt(f.id); for (let i = 0; i < lv.length; i++) { hStr(lv[i]!.pid ?? ''); hInt(lv[i]!.fill > 0 ? 1 : 0); } }
+    if (H !== tagsKey) {
+      tagsKey = H;
+      tags.rebuild(v.furniture.filter((f) => f.id !== hiddenId && lvls.has(f.id)).map((f) => ({ f, levels: lvls.get(f.id)!.map((l) => ({ pid: l.pid, empty: !(l.fill > 0) })) })));
+    }
+    hBegin(fk ^ 0x1f83d9ab);
+    for (const f of v.furniture) { const lv = lvls.get(f.id); if (!lv) continue; hInt(f.id); for (let i = 0; i < lv.length; i++) hInt(levelVisible(f.type, lv.length, i, lv[i]!.pid, lv[i]!.units)); }
+    const ik = H;
     if (ik !== itemsKey) { itemsKey = ik; const t = pnow(); rebuildItems(v, lvls); lap('items', t); }
-    const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
+    hBegin(0x9b05688c); hInt(bounds.width); hInt(bounds.depth); hInt(ctx.state.storageUnlocked ? 1 : 0);
+    for (const f of v.furniture) { hInt(f.id); hStr(f.type); hNum(f.x); hNum(f.z); hNum(f.rot); }
+    const nk = H;
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
   }
   function rebuildStatic(v: View, lvls: Map<number, LevelView[]>): void {
@@ -363,16 +383,34 @@ export default function create(): GameModule {
     for (const mesh of meshesOf(merged, furniStatic, { order: 2 })) { staticGeos.push(mesh.geometry); freezeSelf(mesh); }
     shadowsDirty = true; // a casca dos móveis projeta sombra
   }
+  /** Matrizes dos itens por móvel, em cache: quando um cliente pega um item só o móvel dele é recalculado (antes:
+   *  todos os itens da loja eram refeitos e reenviados à GPU a cada item pego). */
+  const itemCache = new Map<number, { sig: number; by: Map<string, Float32Array> }>();
   /** Itens expostos POR NÍVEL (cada nível só com o seu produto), 1 InstancedMesh por produto na ItemLayer. */
   function rebuildItems(v: View, lvls: Map<number, LevelView[]>): void {
-    const by = new Map<string, number[]>();
+    const out = new Map<string, Float32Array[]>();
+    const alive = new Set<number>();
     for (const f of v.furniture) {
       const lv = lvls.get(f.id);
       if (f.id === hiddenId || !lv) continue;
-      const { cx, cz } = centerOf(f);
-      furnitureItems(f, lv, cx, cz, by);
+      alive.add(f.id);
+      hBegin(0x510e527f); hStr(f.type); hNum(f.x); hNum(f.z); hNum(f.rot); hInt(lv.length);
+      for (let i = 0; i < lv.length; i++) { hStr(lv[i]!.pid ?? ''); hInt(levelVisible(f.type, lv.length, i, lv[i]!.pid, lv[i]!.units)); }
+      const sig = H;
+      let c = itemCache.get(f.id);
+      if (!c || c.sig !== sig) {
+        const tmp = new Map<string, number[]>();
+        const { cx, cz } = centerOf(f);
+        furnitureItems(f, lv, cx, cz, tmp);
+        const by = new Map<string, Float32Array>();
+        for (const [pid, arr] of tmp) by.set(pid, new Float32Array(arr));
+        c = { sig, by };
+        itemCache.set(f.id, c);
+      }
+      for (const [pid, arr] of c.by) { let l = out.get(pid); if (!l) out.set(pid, (l = [])); l.push(arr); }
     }
-    itemLayer.setSource('furniture', by);
+    for (const id of itemCache.keys()) if (!alive.has(id)) itemCache.delete(id);
+    itemLayer.setChunks('furniture', out);
   }
   function rebuildNav(v: View): void {
     nav.build(bounds, ctx.state.storageUnlocked, v.furniture, env.blocked);
@@ -424,7 +462,12 @@ export default function create(): GameModule {
     picksDirty = true;
     shadowsDirty = true;
   }
-  const boxSigOf = (v: View): string => v.sidewalk.map((b) => `${b.productId}:${b.units}:${b.x ?? '-'}:${b.z ?? '-'}:${b.carried ? 1 : 0}:${b.open ? 1 : 0}:${b.rot ?? ''}`).join(',');
+  /** Hash das caixas no chão (produto, unidades, pose, carregada/aberta). */
+  function boxSigOf(v: View): number {
+    hBegin(0x4b6f2a1);
+    for (let i = 0; i < v.sidewalk.length; i++) { const b = v.sidewalk[i]!; hStr(b.productId); hNum(b.units); hNum(b.x); hNum(b.z); hInt((b.carried ? 1 : 0) + (b.open ? 2 : 0)); hNum(b.rot); }
+    return H ^ v.sidewalk.length;
+  }
 
   function syncRackBoxes(v: View): void {
     const racks = v.furniture.filter((f) => f.type === 'rack').sort((a, b) => a.id - b.id);
@@ -529,7 +572,7 @@ export default function create(): GameModule {
       shadowsDirty = true;
       decorKey = dk;
       env.setTime(ctx.clock.minute, true);
-      navKey = ''; rackKey = ''; boxKey = ''; furniKey = ''; demoCache = null; picksDirty = true;
+      navKey = NaN; rackKey = NaN; boxKey = NaN; furniKey = NaN; tagsKey = NaN; itemsKey = NaN; demoCache = null; picksDirty = true;
     }
     env.setRecycler(s.upgrades.includes('recycler'));
     if (dk !== decorKey) {
@@ -539,13 +582,17 @@ export default function create(): GameModule {
     }
     const v = view();
     let t = pnow(); syncFurniture(v); lap('furn', t);
-    const rk = v.furniture.filter((f) => f.type === 'rack').map((f) => `${f.id}:${f.x}:${f.z}:${f.rot}`).join(',') + '|' + PRODUCTS.map((p) => v.storage[p.id] ?? 0).join(',');
+    hBegin(0x7137449);
+    for (const f of v.furniture) if (f.type === 'rack') { hInt(f.id); hNum(f.x); hNum(f.z); hNum(f.rot); }
+    for (let i = 0; i < PRODUCTS.length; i++) hNum(v.storage[PRODUCTS[i]!.id] ?? 0);
+    const rk = H;
     if (rk !== rackKey) { rackKey = rk; syncRackBoxes(v); }
     const bk = boxSigOf(v);
     t = pnow();
     if (bk !== boxKey) { boxKey = bk; syncBoxes(v); boxKey = boxSigOf(v); }
     lap('boxes', t);
-    const dsk = v.dirt.map((d) => `${d.x.toFixed(2)},${d.z.toFixed(2)}`).join(';');
+    hBegin(0x2f2a1b3); for (let i = 0; i < v.dirt.length; i++) { hNum(v.dirt[i]!.x); hNum(v.dirt[i]!.z); }
+    const dsk = H ^ v.dirt.length;
     if (dsk !== dirtKey) { dirtKey = dsk; syncDirt(v); picksDirty = true; }
     const ph = priceHash(s);
     if (force || ph !== lastPriceHash || !priceCache.size) { lastPriceHash = ph; refreshPrices(); }
@@ -720,7 +767,7 @@ export default function create(): GameModule {
       group: root, nav, get build() { return build; },
       rebuild: () => sync(true),
       sync: () => sync(false),
-      demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; furniKey = ''; entries.forEach((e) => furniGroup.remove(e.group)); entries.clear(); lastHash = 0; sync(false); },
+      demo: (on = true) => { demo = on; demoCache = null; boxKey = NaN; rackKey = NaN; navKey = NaN; dirtKey = NaN; furniKey = NaN; tagsKey = NaN; itemsKey = NaN; entries.forEach((e) => furniGroup.remove(e.group)); entries.clear(); lastHash = 0; sync(false); },
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
       quality: qualityInfo,
       /** Debug/testes: aplica uma qualidade (low/medium/high/auto) sem gravar como escolha do jogador. */

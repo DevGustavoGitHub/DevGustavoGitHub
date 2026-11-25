@@ -13,7 +13,8 @@ import type { GameContext, GameModule } from '../core/module';
 import type { PickInfo, PickService, PlayerService, WorldService } from '../core/services';
 import { recycleBinPos, storeBounds, trashBinPos } from '../core/layout';
 import type { Box, Furniture, ShelfLevel, StoreState } from '../sim/state';
-import { productById } from '../sim/catalog';
+import { PRODUCTS, productById } from '../sim/catalog';
+import { registerWarm } from '../core/warm';
 import * as api from '../sim/api';
 import { Input } from './input';
 import { Controls } from './controls';
@@ -901,6 +902,7 @@ export default function create(): GameModule {
   };
   const tickFlying = (dt: number): void => {
     if (!flying.length) return;
+    world()?.shadowDirty?.(); // a caixa no ar projeta sombra: o mapa de sombra (estático) é refeito enquanto ela voa
     const bin = binPos();
     const rec = recyclerOwned() ? recBinPos() : null;
     for (let i = flying.length - 1; i >= 0; i--) {
@@ -1108,6 +1110,8 @@ export default function create(): GameModule {
       boxMk = boxMaker; // caixa arremessada = mesmo visual das caixas do chão
       held = new HeldView(ctx.scene, tpls); // na mão: caixa própria (abas dobram para fora e não tapam a vista)
       worldKit = new CartonKit(false);
+      // aquecimento de shaders (core/warm.ts): caixa na mão (materiais "por cima", rótulo e produtos dentro)
+      offs.push(registerWarm((add) => { const v = new CartonView(held.kit, tpls); v.set({}, PRODUCTS[0]!.id, 6, true); add(v.root); }));
       fbPicks = new FallbackPicks();
       fbHL = new FallbackHighlight(ctx.scene);
       controls = new Controls(ctx.uiRoot, {

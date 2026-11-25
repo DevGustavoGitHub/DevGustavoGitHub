@@ -4,9 +4,12 @@
     <!-- appCategory="game" (Android 8+: categoria oficial; Game Mode/Game Dashboard exigem) e isGame (legado, ainda lido
          por launchers de fabricantes) marcam o app como JOGO. A Samsung (Gaming Hub) também usa uma base própria por pacote:
          se não detectar sozinho, adicione em Gaming Hub > Meus jogos > ⋮ > Adicionar jogos. -->
+    <!-- hardwareAccelerated explícito: o WebGL do WebView só existe com aceleração por hardware (o padrão já é true;
+         explícito evita que um tema/biblioteca desligue sem querer). -->
     <application
         android:appCategory="game"
         android:isGame="true"
+        android:hardwareAccelerated="true"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

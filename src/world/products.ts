@@ -212,22 +212,42 @@ export function growMesh(map: Map<string, THREE.InstancedMesh>, parent: THREE.Ob
   parent.add(im); map.set(key, im);
   return im;
 }
+type Chunk = ArrayLike<number> & { length: number };
 export class ItemLayer {
   readonly group = new THREE.Group();
   private meshes = new Map<string, THREE.InstancedMesh>();
-  private src = new Map<string, Map<string, number[]>>();
+  /** origem → produto → blocos de matrizes (16 números por item). */
+  private src = new Map<string, Map<string, Chunk[]>>();
   /** Troca os itens de uma origem (`furniture`, `box:floor`...) por matrizes de mundo agrupadas por produto. */
-  setSource(name: string, data: Map<string, number[]>): void { this.src.set(name, data); this.flush(); }
-  private flush(): void {
-    const totals = new Map<string, number>();
-    for (const d of this.src.values()) for (const [pid, a] of d) totals.set(pid, (totals.get(pid) ?? 0) + a.length / 16);
-    for (const m of this.meshes.values()) m.count = 0;
-    for (const [pid, n] of totals) {
+  setSource(name: string, data: Map<string, number[]>): void {
+    const m = new Map<string, Chunk[]>();
+    for (const [pid, a] of data) m.set(pid, [a]);
+    this.setChunks(name, m);
+  }
+  /**
+   * Como `setSource`, em blocos (um por móvel, reaproveitados entre sincronizações). Só os produtos cujos blocos
+   * mudaram (por identidade) são reescritos e reenviados à GPU: um item pego não reenvia a loja inteira.
+   */
+  setChunks(name: string, data: Map<string, Chunk[]>): void {
+    const prev = this.src.get(name);
+    const dirty = new Set<string>();
+    if (prev) for (const [pid, l] of prev) { const n = data.get(pid); if (!n || n.length !== l.length || n.some((c, i) => c !== l[i])) dirty.add(pid); }
+    for (const [pid, l] of data) { const p = prev?.get(pid); if (!p || p.length !== l.length || l.some((c, i) => c !== p[i])) dirty.add(pid); }
+    this.src.set(name, data);
+    this.flush(dirty);
+  }
+  private flush(pids: Set<string>): void {
+    for (const pid of pids) {
+      let n = 0;
+      for (const d of this.src.values()) { const l = d.get(pid); if (l) for (const c of l) n += c.length / 16; }
+      if (n === 0) { const m = this.meshes.get(pid); if (m) m.count = 0; continue; }
       const im = growMesh(this.meshes, this.group, pid, productVisual(pid).geo, productMat(), n, false);
       let k = 0;
       const arr = im.instanceMatrix.array as Float32Array;
-      for (const d of this.src.values()) { const a = d.get(pid); if (!a) continue; arr.set(a, k * 16); k += a.length / 16; }
+      for (const d of this.src.values()) { const l = d.get(pid); if (!l) continue; for (const c of l) { arr.set(c, k); k += c.length; } }
       im.count = n; im.instanceMatrix.needsUpdate = true;
+      // só a parte usada sobe para a GPU (o buffer tem folga para crescer)
+      im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, n * 16);
     }
   }
   get count(): number { let n = 0; for (const m of this.meshes.values()) n += m.count; return n; }

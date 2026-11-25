@@ -124,6 +124,8 @@ await page.waitForTimeout(600);
 await page.evaluate(() => { const b = [...document.querySelectorAll('.title-screen .btn')].find((x) => /Jogar|Continuar/.test(x.textContent)); b?.click(); });
 await page.waitForFunction(() => !document.querySelector('.title-screen'), null, { timeout: 20000 }).catch(() => {});
 await page.waitForTimeout(1500);
+// shaders compilados até aqui = carregamento (tela inicial); depois disto, cada link é uma travada potencial no jogo
+const boot = await page.evaluate(() => ({ links: window.__bench.links.length, waitMs: +window.__bench.progWaitMs.toFixed(1), warm: window.__world.warm?.() ?? null }));
 
 /* ---------- configuração de render e cena ---------- */
 const cfg = await page.evaluate(() => {
@@ -155,7 +157,8 @@ const cfg = await page.evaluate(() => {
     backdrop: [...document.querySelectorAll('#ui-root *')].filter((e) => { const s = getComputedStyle(e); return (s.backdropFilter && s.backdropFilter !== 'none') && e.getClientRects().length > 0; }).map((e) => e.className.toString().slice(0, 24)),
   };
 });
-out.boot = { ms: bootMs };
+out.boot = { ms: bootMs, ...boot };
+console.log(`carregamento: ${bootMs} ms até o jogo existir; shaders linkados no carregamento=${boot.links} (espera ${boot.waitMs} ms)${boot.warm ? ` aquecimento=${JSON.stringify(boot.warm)}` : ''}`);
 out.cfg = cfg;
 console.log(`qualidade=${QUALITY} tier=${cfg.quality.tier ?? '?'} canvas=${cfg.canvas.join('x')} (${(cfg.pixels / 1e6).toFixed(2)} Mpx, pixelRatio ${cfg.pixelRatio}, DPR ${cfg.dpr}) MSAA=${cfg.msaa} sombra=${cfg.shadowMap}${cfg.shadowAuto ? ' (todo quadro)' : ' (estática)'} luzes=${JSON.stringify(cfg.lights)}`);
 console.log(`cena: renderáveis=${cfg.renderables} skinned=${cfg.skinned} instanced=${cfg.instanced} casters=${cfg.casters} receivers=${cfg.receivers} transparentes=${cfg.transparent} materiais=${JSON.stringify(cfg.mats)}`);
@@ -322,8 +325,8 @@ if (PHASES.has('day')) {
   out.day = await win(SECS * 1000, `dia acelerado ${SECS}s (timeScale 20)`);
   const p1 = await progs();
   const fresh = p1.keys.filter((k) => !p0.keys.includes(k));
-  out.programs = { atWarm: p0.keys.length, atEnd: p1.keys.length, newDuringDay: fresh, linksDuringDay: p1.links - p0.links, linkWaitMsDuringDay: +(p1.wait - p0.wait).toFixed(1), totalLinks: p1.links, totalLinkWaitMs: +p1.wait.toFixed(1), minutes: [Math.round(p0.minute), Math.round(p1.minute), p1.phase] };
-  console.log(`programas: aquecido=${p0.keys.length} fim=${p1.keys.length} novos no dia=${JSON.stringify(fresh)} (links no dia ${p1.links - p0.links}; total de links ${p1.links}, espera de link ${p1.wait.toFixed(1)} ms) relógio ${Math.round(p0.minute)}→${Math.round(p1.minute)} ${p1.phase}`);
+  out.programs = { atWarm: p0.keys.length, atEnd: p1.keys.length, newDuringDay: fresh, linksDuringDay: p1.links - p0.links, linkWaitMsDuringDay: +(p1.wait - p0.wait).toFixed(1), linksAfterStart: p1.links - boot.links, totalLinks: p1.links, totalLinkWaitMs: +p1.wait.toFixed(1), minutes: [Math.round(p0.minute), Math.round(p1.minute), p1.phase] };
+  console.log(`programas: aquecido=${p0.keys.length} fim=${p1.keys.length} novos no dia=${JSON.stringify(fresh)} (links depois da tela inicial ${p1.links - boot.links}, no dia ${p1.links - p0.links}; total ${p1.links}, espera de link ${p1.wait.toFixed(1)} ms) relógio ${Math.round(p0.minute)}→${Math.round(p1.minute)} ${p1.phase}`);
   check('textura de canvas não é reenviada todo quadro (dia acelerado)', out.day.texCanvasPerSec <= Math.max(3, out.day.renderedPerSec * 0.5), `${out.day.texCanvasPerSec}/s com ${out.day.renderedPerSec} quadros/s`);
 }
 

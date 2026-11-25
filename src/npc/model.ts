@@ -1,17 +1,18 @@
 /**
  * Pessoas 3D procedurais (arte 100% original), estilizadas com proporções humanas realistas.
- * Cada pessoa: 1 SkinnedMesh (corpo, geometria compartilhada por variante, 4 grupos de material) + cabeça
- * (pele + rosto em CanvasTexture) + cabelo/chapéu/óculos + cesta (itens num InstancedMesh) + sombra.
- * ≈ 6–9 objetos e 10–13 draw calls por pessoa; materiais em cache; animação sem alocação.
+ * Cada pessoa: 1 SkinnedMesh (corpo, geometria compartilhada por variante, UM material com cor por parte) + cabeça
+ * fundida (pele + rosto em CanvasTexture + cabelo/chapéu/óculos, UM material) + cesta (itens num InstancedMesh).
+ * A sombra (disco no chão) de todas as pessoas é um InstancedMesh único no módulo npc.
+ * ≈ 2–4 draw calls por pessoa (antes 10–13); programas de shader compartilhados; animação sem alocação.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PRODUCTS } from '../sim/catalog';
 import {
   type BoneName, FORE_ARM, HEAD_OFFSET, type HairStyle, type HatStyle, type Legs, REST, UPPER_ARM,
-  bodyGeometry, boneInverses, disposeBodies, glassesGeometry, hairGeometry, hatGeometry, headGeometry, makeBones,
+  bodyGeometry, boneInverses, disposeBodies, headCombo, makeBones,
 } from './body';
-import { FEMALE_FACES, KIND_OUTFIT, MALE_FACES, OUTFITS, type Outfit, UNIFORMS, disposeLooks, faceMaterial, outfitMaterial } from './looks';
+import { FEMALE_FACES, KIND_OUTFIT, MALE_FACES, OUTFITS, type Outfit, UNIFORMS, bodyMaterial, disposeLooks, headMaterial } from './looks';
 import { clamp } from './shared';
 
 export type Pose = 'normal' | 'basket' | 'carry' | 'mop' | 'grab' | 'scan' | 'place' | 'extend' | 'sit' | 'sitScan';
@@ -76,6 +77,7 @@ export function productColor(pid: string): THREE.Color {
 }
 
 interface Props {
+  /** Disco de sombra (o npc desenha todos num InstancedMesh; ver `shadowBlob`). */
   basket: THREE.BufferGeometry; bag: THREE.BufferGeometry; item: THREE.BufferGeometry; shadow: THREE.BufferGeometry;
   box: THREE.BufferGeometry; lid: THREE.BufferGeometry; flaps: THREE.BufferGeometry; fill: THREE.BufferGeometry; mop: THREE.BufferGeometry;
   shadowMat: THREE.MeshBasicMaterial; itemMat: THREE.MeshLambertMaterial; cardboard: THREE.MeshLambertMaterial; vcol: THREE.MeshLambertMaterial;
@@ -137,6 +139,9 @@ function props(): Props {
   };
   return P;
 }
+
+/** Geometria e material do disco de sombra das pessoas (para o InstancedMesh único do npc). */
+export function shadowBlob(): { geo: THREE.BufferGeometry; mat: THREE.Material } { const p = props(); return { geo: p.shadow, mat: p.shadowMat }; }
 
 export function disposeModels(): void {
   for (const g of geos) g.dispose();
@@ -236,30 +241,20 @@ export class Person {
     this.scale = spec.height / 1.75;
     this.b = makeBones();
     this.hipBase = REST.hips[1];
-    const mats4 = [
-      outfitMaterial(spec.outfit),
-      lambert(`low:${spec.pants}`, spec.pants),
-      lambert(`skin:${spec.skin}`, spec.skin),
-      lambert(`shoe:${spec.shoes}`, spec.shoes),
-    ];
-    this.body = new THREE.SkinnedMesh(bodyGeometry(spec.sex, spec.outfit.sleeves, spec.legs), mats4);
+    // corpo inteiro num draw call: roupa (textura) + calça, pele e calçado (cores por parte; looks.ts)
+    this.body = new THREE.SkinnedMesh(bodyGeometry(spec.sex, spec.outfit.sleeves, spec.legs), bodyMaterial(spec.outfit, spec.pants, spec.skin, spec.shoes));
     this.root.add(this.b.root, this.body);
     this.skeleton = new THREE.Skeleton(Object.values(this.b), boneInverses());
     this.body.bind(this.skeleton, new THREE.Matrix4());
     this.body.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.25);
 
-    // cabeça + rosto + cabelo/chapéu/óculos
-    // pele da cabeça com material próprio: o mesmo material em SkinnedMesh e Mesh força troca de programa a cada
-    // quadro no three (getProgramCacheKey); um material por variante de programa evita isso
-    const head = new THREE.Mesh(headGeometry(), [lambert(`skinh:${spec.skin}`, spec.skin), faceMaterial(spec.face, spec.hair)]);
+    // cabeça + rosto + cabelo/chapéu/óculos numa malha (geometria em cache por combinação) e num draw call
+    const longHair = spec.hairStyle === 'long' || spec.hairStyle === 'ponytail' || spec.hairStyle === 'bob';
+    const hair: HairStyle | null = (spec.hat && !longHair) || spec.hairStyle === 'none' ? null : spec.hairStyle;
+    const head = new THREE.Mesh(headCombo(hair, spec.hat, spec.glasses), headMaterial(spec.face, spec.skin, spec.hair, spec.hatColor));
     head.position.set(HEAD_OFFSET[0], HEAD_OFFSET[1], HEAD_OFFSET[2]);
     if (this.kid) head.scale.setScalar(1.2);
     this.b.head.add(head);
-    const longHair = spec.hairStyle === 'long' || spec.hairStyle === 'ponytail' || spec.hairStyle === 'bob';
-    const hg = spec.hat && !longHair ? null : hairGeometry(spec.hairStyle);
-    if (hg) head.add(new THREE.Mesh(hg, lambert(`hair:${spec.hair}`, spec.hair, { side: THREE.DoubleSide })));
-    if (spec.hat) head.add(new THREE.Mesh(hatGeometry(spec.hat), lambert(`hat:${spec.hatColor}`, spec.hatColor)));
-    if (spec.glasses) head.add(new THREE.Mesh(glassesGeometry(), lambert('glasses', '#15171a')));
 
     // cesta na mão direita (itens num InstancedMesh)
     this.basketMesh = new THREE.Mesh(pr.basket, lambert(`basket:${spec.basket}`, spec.basket));
@@ -279,8 +274,6 @@ export class Person {
     this.basket.visible = false;
     this.b.handR.add(this.basket);
 
-    const shadow = new THREE.Mesh(pr.shadow, pr.shadowMat);
-    this.root.add(shadow);
     this.root.scale.setScalar(this.scale);
     this.eyeHeight = (REST.head[1] + HEAD_OFFSET[1] * (this.kid ? 1.2 : 1)) * this.scale;
   }
@@ -364,10 +357,10 @@ export class Person {
   setReach(x: number, y: number, z: number): void { this.reachOn = true; this.rwx = x; this.rwy = y; this.rwz = z; }
   clearReach(): void { this.reachOn = false; }
 
+  /** Aproxima a rotação do osso do alvo; `set` recalcula o quatérnio uma vez (x/y/z separados recalculavam 3 vezes). */
   private sr(b: THREE.Bone, x: number, y: number, z: number, k: number): void {
-    b.rotation.x += (x - b.rotation.x) * k;
-    b.rotation.y += (y - b.rotation.y) * k;
-    b.rotation.z += (z - b.rotation.z) * k;
+    const r = b.rotation;
+    r.set(r.x + (x - r.x) * k, r.y + (y - r.y) * k, r.z + (z - r.z) * k);
   }
 
   /** speed em m/s reais. Sem alocação. */
@@ -471,11 +464,11 @@ export class Person {
     this.sr(B.head, headX, headY - chY - spY, 0, k);
     // cesta sempre "pendurada" na vertical
     if (this.basket.visible) {
-      this.basket.rotation.x = -(B.uArmR.rotation.x + B.fArmR.rotation.x + B.handR.rotation.x + B.spine.rotation.x);
-      this.basket.rotation.z = -B.uArmR.rotation.z;
+      this.basket.rotation.set(-(B.uArmR.rotation.x + B.fArmR.rotation.x + B.handR.rotation.x + B.spine.rotation.x), this.basket.rotation.y, -B.uArmR.rotation.z);
     }
   }
 
+  /** Materiais do corpo/cabeça NÃO são descartados (ver looks.ts): o programa de shader compartilhado continua vivo. */
   dispose(): void {
     this.skeleton.dispose();
     this.items.dispose();

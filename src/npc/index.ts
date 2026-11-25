@@ -18,7 +18,10 @@ import { Customer } from './customer';
 import { productById } from '../sim/catalog';
 import { createFallbackWorld } from './fallbackWorld';
 import { stockForTest } from './helpers';
-import { type CustomerKind, disposeModels, pickKind } from './model';
+import { type CustomerKind, Person, disposeModels, pickKind, randomCustomerSpec, shadowBlob } from './model';
+import { Bubble } from './bubbles';
+import { addOutline } from '../core/outline';
+import { registerWarm } from '../core/warm';
 import { type AgentLike, type BubbleKey, type Env, clamp, safe } from './shared';
 import { Cashier, Janitor, Staff, Stocker, type StaffRole } from './staff';
 
@@ -84,6 +87,34 @@ export default function create(): GameModule {
   const camPos = new THREE.Vector3();
   /** Custo do update do npc (ms acumulados / quadros) para __npc.perf(). */
   const perf = { ms: 0, frames: 0 };
+  /** Sombras (discos no chão) de TODAS as pessoas num InstancedMesh: 1 draw call em vez de 1 por pessoa. */
+  const BLOB_CAP = 48;
+  let blobs: THREE.InstancedMesh | null = null;
+  const blobM = new THREE.Matrix4(), blobP = new THREE.Vector3(), blobQ = new THREE.Quaternion(), blobS = new THREE.Vector3();
+  function syncBlobs(): void {
+    if (!blobs) return;
+    const all = env.agents as unknown as Agent[];
+    let n = 0;
+    for (let i = 0; i < all.length && n < BLOB_CAP; i++) {
+      const a = all[i]!;
+      if (!a.person || !a.group?.visible || !a.group.parent) continue;
+      const s = a.person.scale;
+      blobs.setMatrixAt(n++, blobM.compose(blobP.set(a.x, 0, a.z), blobQ, blobS.set(s, s, s)));
+    }
+    if (n !== blobs.count || n > 0) { blobs.count = n; blobs.instanceMatrix.needsUpdate = true; }
+  }
+  /** Aquecimento de shaders (core/warm.ts): uma pessoa com tudo o que pode aparecer (cesta com itens, sacola, caixa,
+   *  esfregão), balão e contorno — os mesmos materiais/programas usados depois, sem travar quando o 1º cliente entra. */
+  function warmSamples(add: (o: THREE.Object3D) => void): void {
+    const spec = randomCustomerSpec(() => 0.137, 1, 'picky');
+    spec.glasses = true;
+    const p = new Person(spec);
+    p.setBasket(true); p.setBasketItems(['arroz', 'refri']); p.setBag(true); p.setBasket(true);
+    p.setCarryBox(true); p.setCarryOpen(true, 'arroz'); p.setMop(true);
+    add(p.root);
+    const b = new Bubble(1); b.show('obrigado', 1); add(b.sprite);
+    const o = new THREE.Group(); o.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshLambertMaterial())); addOutline(o); add(o);
+  }
   let autoBroken = false;
   /** Gancho de teste: substitui api.runAutoOrders (útil enquanto a sim não implementa). */
   let autoImpl: ((s: typeof ctx.state) => { productId: string; boxes: number; cost: number }[]) | null = null;
@@ -304,6 +335,12 @@ export default function create(): GameModule {
       }));
       unsub.push(ctx.bus.on('checkoutResult', (r) => { if (r) mgr.onResult(r); }));
       unsub.push(ctx.bus.on('ui:modal', (m) => mgr.setModal(!!m?.open)));
+      const sb = shadowBlob();
+      blobs = new THREE.InstancedMesh(sb.geo, sb.mat, BLOB_CAP);
+      blobs.name = 'npcShadows'; blobs.count = 0; blobs.frustumCulled = false; blobs.renderOrder = 1;
+      blobs.matrixAutoUpdate = false;
+      ctx.scene.add(blobs);
+      unsub.push(registerWarm(warmSamples));
       syncStaff(true);
       syncHeld(); // a sim já devolveu às prateleiras o que estava com clientes no save
       (window as unknown as { __npc: unknown }).__npc = {
@@ -351,6 +388,7 @@ export default function create(): GameModule {
       const n = Math.max(1, Math.ceil(total / 0.05));
       const h = total / n;
       for (let i = 0; i < n; i++) tick(h);
+      syncBlobs();
       perf.ms += performance.now() - t0; perf.frames++;
     },
     dispose() {
@@ -360,6 +398,7 @@ export default function create(): GameModule {
       for (const s of staff) s.remove();
       customers.length = 0; staff.length = 0;
       mgr.dispose();
+      if (blobs) { ctx.scene.remove(blobs); blobs.dispose(); blobs = null; }
       disposeBubbles();
       disposeModels();
       delete (window as unknown as { __npc?: unknown }).__npc;

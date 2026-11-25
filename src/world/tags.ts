@@ -17,7 +17,9 @@ const COLS = 4, CW = 1024, CELL_H = 96, TW = 0.35, TH = 0.131;
 const cellW = Math.floor(CW / COLS);
 const KEYS = ['-', ...PRODUCTS.flatMap((p) => [p.id, `${p.id}|-`])];
 const ROWS = Math.ceil(KEYS.length / COLS);
-const CH = 2 ** Math.ceil(Math.log2(ROWS * CELL_H));
+/** Altura exata (WebGL2 aceita textura não potência de 2): antes arredondava para cima e ~45% do atlas era vazio,
+ *  e o atlas inteiro é reenviado quando um preço muda. */
+const CH = ROWS * CELL_H;
 const brl = (c: number): string => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Etiqueta de um nível: produto (undefined = sem etiqueta) e se está esgotado (0 unidades). */

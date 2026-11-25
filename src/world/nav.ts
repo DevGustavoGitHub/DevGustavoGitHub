@@ -14,6 +14,10 @@ export const footprintOf = (f: { type: Furniture['type']; rot: number }): { w: n
 export const STREET_STRIP = 2;
 const MARGIN_X = 14;
 
+/** 8 vizinhos (4 retos + 4 diagonais) do A*. */
+const DIRS_X = [1, -1, 0, 0, 1, 1, -1, -1] as const;
+const DIRS_Z = [0, 0, 1, -1, 1, -1, 1, -1] as const;
+
 export class NavGrid {
   minX = 0; minZ = 0; w = 0; h = 0;
   walk = new Uint8Array(0);
@@ -98,53 +102,70 @@ export class NavGrid {
     return res ? res.map((p) => ({ x: p.x, z: p.z })) : null;
   }
 
+  /* Memória de trabalho do A* reaproveitada entre buscas (antes: 3 arrays do tamanho da grade + heap por busca,
+   * lixo para o GC a cada cliente que escolhe um destino). */
+  private gs = new Float32Array(0);
+  private par = new Int32Array(0);
+  private closed = new Uint8Array(0);
+  private heap = new Int32Array(64);
+  private hf = new Float64Array(64);
+  private hn = 0;
+  private hpush(i: number, f: number): void {
+    if (this.hn === this.heap.length) {
+      const h2 = new Int32Array(this.hn * 2); h2.set(this.heap); this.heap = h2;
+      const f2 = new Float64Array(this.hn * 2); f2.set(this.hf); this.hf = f2;
+    }
+    const heap = this.heap, hf = this.hf;
+    let c = this.hn++;
+    heap[c] = i; hf[c] = f;
+    while (c > 0) {
+      const p = (c - 1) >> 1;
+      if (hf[p]! <= hf[c]!) break;
+      const ti = heap[p]!, tf = hf[p]!; heap[p] = heap[c]!; hf[p] = hf[c]!; heap[c] = ti; hf[c] = tf;
+      c = p;
+    }
+  }
+  private hpop(): number {
+    const heap = this.heap, hf = this.hf;
+    const top = heap[0]!;
+    const n = --this.hn;
+    if (n > 0) {
+      heap[0] = heap[n]!; hf[0] = hf[n]!;
+      let c = 0;
+      for (;;) {
+        const l = c * 2 + 1, r = l + 1;
+        let m = c;
+        if (l < n && hf[l]! < hf[m]!) m = l;
+        if (r < n && hf[r]! < hf[m]!) m = r;
+        if (m === c) break;
+        const ti = heap[m]!, tf = hf[m]!; heap[m] = heap[c]!; hf[m] = hf[c]!; heap[c] = ti; hf[c] = tf;
+        c = m;
+      }
+    }
+    return top;
+  }
+
   private astar(sx: number, sz: number, gx: number, gz: number): Vec2[] | null {
     if (sx === gx && sz === gz) return [{ x: gx + 0.5, z: gz + 0.5 }];
     const W = this.w, N = this.w * this.h;
-    const gs = new Float32Array(N).fill(Infinity);
-    const par = new Int32Array(N).fill(-1);
-    const closed = new Uint8Array(N);
-    const heap: number[] = [], hf: number[] = [];
-    const push = (i: number, f: number): void => {
-      heap.push(i); hf.push(f);
-      let c = heap.length - 1;
-      while (c > 0) {
-        const p = (c - 1) >> 1;
-        if (hf[p]! <= hf[c]!) break;
-        [heap[p], heap[c]] = [heap[c]!, heap[p]!]; [hf[p], hf[c]] = [hf[c]!, hf[p]!]; c = p;
-      }
-    };
-    const pop = (): number => {
-      const top = heap[0]!;
-      const li = heap.pop()!, lf = hf.pop()!;
-      if (heap.length) {
-        heap[0] = li; hf[0] = lf;
-        let c = 0;
-        for (;;) {
-          const l = c * 2 + 1, r = l + 1;
-          let m = c;
-          if (l < heap.length && hf[l]! < hf[m]!) m = l;
-          if (r < heap.length && hf[r]! < hf[m]!) m = r;
-          if (m === c) break;
-          [heap[m], heap[c]] = [heap[c]!, heap[m]!]; [hf[m], hf[c]] = [hf[c]!, hf[m]!]; c = m;
-        }
-      }
-      return top;
-    };
+    if (this.gs.length < N) { this.gs = new Float32Array(N); this.par = new Int32Array(N); this.closed = new Uint8Array(N); }
+    const gs = this.gs, par = this.par, closed = this.closed;
+    gs.fill(Infinity, 0, N); par.fill(-1, 0, N); closed.fill(0, 0, N);
+    this.hn = 0;
     const hh = (x: number, z: number): number => {
       const dx = Math.abs(x - gx), dz = Math.abs(z - gz);
       return dx + dz + (Math.SQRT2 - 2) * Math.min(dx, dz);
     };
     const si = this.idx(sx, sz), gi = this.idx(gx, gz);
-    gs[si] = 0; push(si, hh(sx, sz));
-    const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-    while (heap.length) {
-      const cur = pop();
+    gs[si] = 0; this.hpush(si, hh(sx, sz));
+    while (this.hn > 0) {
+      const cur = this.hpop();
       if (closed[cur]) continue;
       closed[cur] = 1;
       if (cur === gi) break;
       const cx = (cur % W) + this.minX, cz = Math.floor(cur / W) + this.minZ;
-      for (const [dx, dz] of dirs) {
+      for (let d = 0; d < 8; d++) {
+        const dx = DIRS_X[d]!, dz = DIRS_Z[d]!;
         const nx = cx + dx, nz = cz + dz;
         if (!this.step(cx, cz, nx, nz) && !(dx !== 0 && dz !== 0)) continue;
         if (dx !== 0 && dz !== 0) {
@@ -153,7 +174,7 @@ export class NavGrid {
         const ni = this.idx(nx, nz);
         if (closed[ni]) continue;
         const ng = gs[cur]! + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1);
-        if (ng < gs[ni]!) { gs[ni] = ng; par[ni] = cur; push(ni, ng + hh(nx, nz)); }
+        if (ng < gs[ni]!) { gs[ni] = ng; par[ni] = cur; this.hpush(ni, ng + hh(nx, nz)); }
       }
     }
     if (par[gi] === -1) return null;

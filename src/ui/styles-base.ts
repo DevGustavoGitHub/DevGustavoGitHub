@@ -54,7 +54,10 @@ export const baseCss = `
 .mx-dialog p{margin:0 0 16px;color:var(--c-ink-2);line-height:1.4}
 @keyframes mx-fade{from{opacity:0}to{opacity:1}}
 @keyframes mx-pop{from{opacity:0;transform:scale(.94) translateY(8px)}to{opacity:1;transform:none}}
-@keyframes mx-pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,147,48,.7)}50%{transform:scale(1.05);box-shadow:0 0 0 12px rgba(255,147,48,0)}}
+/* pulso só com transform/opacity (compositor): animar box-shadow repintava o botão em todo quadro por cima do canvas */
+@keyframes mx-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes mx-ring{0%{transform:scale(1);opacity:.75}100%{transform:scale(1.22,1.4);opacity:0}}
+.pulse::after,.attend-btn::after{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 5px rgba(255,147,48,.8);animation:mx-ring 1.4s ease-out infinite;pointer-events:none}
 @keyframes mx-shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-7px)}40%,60%{transform:translateX(7px)}}
 .shake{animation:mx-shake .45s}
 
@@ -95,6 +98,7 @@ export const baseCss = `
 .store-btn.end{background:var(--c-bad);color:#fff;box-shadow:0 4px 0 #a92b30,var(--sh-1)}
 .store-btn:disabled{opacity:.5}
 .pulse{animation:mx-pulse 1.4s infinite}
+.attend-btn{position:relative}
 .interact-btn{min-height:56px;padding:0 18px;border-radius:20px;border:0;background:#fff;color:var(--c-ink);font-weight:800;font-size:16px;
   display:inline-flex;align-items:center;gap:10px;box-shadow:0 4px 0 rgba(0,0,0,.2),var(--sh-1);max-width:min(300px,64vw)}
 .interact-btn kbd{font:800 14px var(--font);min-width:28px;height:28px;border-radius:8px;background:var(--c-ink);color:#fff;display:none;align-items:center;justify-content:center}
