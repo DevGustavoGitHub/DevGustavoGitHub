@@ -27,12 +27,15 @@ export function averagePriceRatio(state: StoreState): number {
   return den === 0 ? 1 : num / den;
 }
 
+export const EARLY_BASE = [13, 17, 20];
+
 /**
  * Fluxo diário de clientes: cresce com nível (até 30), reputação, tamanho da loja e preço baixo.
- * base = 22 + 4·nível; preço: ±0,4 por unidade de desvio de razão (0,5..1,5); reputação 0,6+0,1·rep; +12% por expansão.
+ * Início suave (pós-teste 2): base 13/17/20 nos níveis 1/2/3 (a mão dá conta de ~23/dia); do nível 4 (caixa) em diante base = 22 + 4·nível; preço: ±0,4 por unidade de desvio de razão (0,5..1,5); reputação 0,6+0,1·rep; +12% por expansão.
  */
 export function customersForDay(state: StoreState, rand: () => number): number {
-  const base = 22 + 4 * Math.min(30, state.level);
+  const lv = Math.min(30, state.level);
+  const base = lv < 4 ? EARLY_BASE[Math.max(1, lv) - 1]! : 22 + 4 * lv;
   const priceMult = Math.min(1.5, Math.max(0.5, 1 + (1 - averagePriceRatio(state)) * 0.4));
   const repMult = 0.6 + 0.1 * state.reputation;
   const sizeMult = 1 + 0.12 * state.expansion;

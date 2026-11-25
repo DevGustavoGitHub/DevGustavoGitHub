@@ -547,7 +547,7 @@ export default function create(): GameModule {
       }
       case 'sign': {
         const ph = ctx.clock.phase;
-        if (ph === 'prep' || ph === 'open') primary = U('sign', ph === 'prep' ? 'Abrir loja' : 'Fechar loja', signAct);
+        if (ph === 'prep' || ph === 'open') primary = U('sign', ph === 'prep' ? 'Abrir loja' : ctx.clock.doorsClosed ? 'Abrir a porta' : 'Fechar a porta (pausar clientes)', signAct);
         return;
       }
       case 'computer':

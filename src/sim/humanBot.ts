@@ -379,7 +379,7 @@ export function simulateHumanOpen(s: StoreState, prof: HumanProfile, rand: () =>
       st.maxLine = Math.max(st.maxLine, l.line.length);
       for (let k = l.line.length - 1; k >= 0; k--) {
         const c = l.line[k]!;
-        c.waited += DT;
+        c.waited += manned ? DT * 0.5 : DT; // fila de balcão atendido: paciência à metade
         if (c.waited > c.patience) { l.line.splice(k, 1); giveUp(c); }
       }
     });

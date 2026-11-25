@@ -9,6 +9,20 @@ export class GameClock {
   minute = OPEN_MIN;
   phase: DayPhase = 'prep';
   paused = false;
+  /**
+   * Pausa de entrada (placa FECHADO durante o expediente): sem clientes novos, o dia e o relógio seguem. Só vale na fase
+   * 'open'; zera ao fechar/terminar o dia. Evento `storeDoors {closed}` (+ `stateChanged {what:'doors'}`).
+   * Para o visual da placa use `signOpen` (= aberta de fato: fase 'open' e portas abertas).
+   */
+  doorsClosed = false;
+  get signOpen(): boolean { return this.phase === 'open' && !this.doorsClosed; }
+  /** Pausa/retoma a entrada de clientes novos (só na fase 'open'). */
+  setDoorsClosed(closed: boolean): void {
+    if (this.phase !== 'open' || this.doorsClosed === closed) return;
+    this.doorsClosed = closed;
+    this.bus.emit('storeDoors', { closed });
+    this.bus.emit('stateChanged', { what: 'doors' });
+  }
   constructor(private bus: EventBus) {}
   /** Jogador abre a loja (começa o expediente). */
   openStore(): void {
@@ -20,12 +34,14 @@ export class GameClock {
   closeStore(): void {
     if (this.phase !== 'open') return;
     this.phase = 'closing';
+    this.doorsClosed = false;
     this.bus.emit('storeClosing');
   }
   /** Chamado quando o relatório do dia é confirmado; volta para a manhã do próximo dia. */
   startNextDay(): void {
     this.minute = OPEN_MIN;
     this.phase = 'prep';
+    this.doorsClosed = false;
     this.bus.emit('dayStarted');
   }
   update(dt: number): void {

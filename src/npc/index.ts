@@ -258,7 +258,7 @@ export default function create(): GameModule {
     const phase = ctx.clock.phase;
     if (phase === 'open' && schedDay !== ctx.state.day) buildSchedule();
     if (phase === 'open') autoTick();
-    if (phase === 'open') {
+    if (phase === 'open' && !ctx.clock.doorsClosed) {
       while (schedIdx < sched.length && ctx.clock.minute >= sched[schedIdx]!) {
         if (!spawnCustomer()) break;
         schedIdx++;

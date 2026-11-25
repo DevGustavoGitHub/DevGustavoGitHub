@@ -117,8 +117,8 @@ export class Customer extends Agent {
   }
 
   /** Paciência corre (fila, ou no balcão sem ninguém atendendo). true = esgotou. */
-  tickPatience(dt: number): boolean {
-    this.waited += dt;
+  tickPatience(dt: number, rate = 1): boolean {
+    this.waited += dt * rate;
     if (!this.warned && this.waited > this.patience * 0.6) { this.warned = true; this.env.say(this, 'neutral', 2); }
     return this.waited > this.patience;
   }
@@ -430,7 +430,8 @@ export class Customer extends Agent {
       const o = lane.operator;
       this.faceTowards(o.x, o.z);
     }
-    if (this.waiting() && this.tickPatience(dt)) {
+    // fila de balcão atendido (jogador sentado/funcionário): paciência à metade da velocidade
+    if (this.waiting() && this.tickPatience(dt, this.mgr.isManned(lane) ? 0.5 : 1)) {
       this.mgr.remove(lane, this);
       this.giveUp('espera');
     }

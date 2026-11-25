@@ -227,3 +227,12 @@ Relato: o jogador chegou ao nível 3 e não conseguiu comprar nada desbloqueado.
 | Eficiente: licença + geladeira | dia 7 | dia 5–7 (nível 4–5) |
 
 Alavancas usadas na ordem: custos, margem; o dinheiro inicial ficou (R$ 300 deixava comprar a 4ª caixa e quebrava o "início pobre"). `displayTypeFor` passou a usar a ordem do catálogo (prateleira antes da geladeira) em vez do mais barato, e o humanBot cuidadoso agora compra licença nova antes de mais uma prateleira de mercearia. Caixa no fim do dia 1 do cuidadoso caiu um pouco (R$ 127–304), limite do teste ajustado para R$ 120.
+
+## Ritmo do início (pós-teste 2)
+
+Feedback: no nível 1–2 o jogador abastece 2–3 produtos, a fila se forma, falta mercadoria e não dá tempo de atender, comprar e repor (um iniciante atende ~23 clientes/dia sozinho; chegavam 26–30).
+- **Chegadas** (`demand.ts EARLY_BASE`): base 13/17/20 nos níveis 1/2/3 (≈ 12–14, 16–18, ~20 clientes/dia); do nível 4 (caixa) a curva antiga `22 + 4·nível`.
+- **Cestas** (`api.makeShoppingList`): 1–3 itens nos níveis 1–2; teto sobe 1 item a cada 2 níveis a partir do 3, até o teto antigo.
+- **Placa como pausa**: na fase `open` a placa alterna `clock.doorsClosed` (sem clientes novos, relógio segue; o dia só fecha às 21:00 ou em "Terminar o dia").
+- **Paciência**: fila de balcão atendido (jogador sentado ou funcionário) perde paciência à metade da velocidade; quem está sendo atendido não perde.
+- **Resultado** (humanBot, 5 sementes): iniciante cuidadoso perde ~1–3 clientes/dia (fila + estoque) nos níveis 1–2. Teste intencional alterado: caixa no fim do dia 1 do cuidadoso ≥ R$ 80 (era R$ 120), pois com metade dos clientes o dia 1 rende menos; nível 4 chega ~1–2 dias depois.

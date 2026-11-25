@@ -374,23 +374,35 @@ export default function create(): GameModule {
     picksDirty = true;
   }
 
-  /** Balcão do computador: canto esquerdo da frente; senão o 1º tile livre junto à parede (ao lado da antessala da porta; depois laterais). */
+  /** Mesa do computador: SEMPRE colada ao 1º balcão, ao lado da ponta do operador (lado direito, depois o esquerdo); sem balcão/espaço, junto à parede. */
   function placeDesk(v: View): void {
     const W = bounds.width, D = bounds.depth, dx = doorX(bounds);
     const occ = occupied(v);
     const reserved = new Set<string>();
     for (const zz of [D - 1, D - 2]) for (const xx of [dx - 1, dx]) reserved.add(`${xx},${zz}`);
     for (const f of v.furniture) {
+      if (f.type !== 'counter') continue;
       const { cx, cz } = centerOf(f);
-      const fp = FURNITURE_FOOTPRINT[f.type];
-      const fy = fp.d / 2 + 0.5;
-      const near: [number, number][] = f.type === 'counter'
-        ? [[SEAT.x, SEAT.z], [SEAT.x - 1, SEAT.z], [-0.5, fy], [0.5, fy], [-0.5, fy + 1]]
-        : [[-0.5, fy], [0.5, fy]];
+      const near: [number, number][] = [[SEAT.x, SEAT.z], [-0.5, 0.5], [-0.5, 1.5], [-0.5, 2.5], [0.5, 0.5], [0.5, 1.5]];
       for (const [lx, lz] of near) { const w = localToWorld(cx, cz, f.rot, lx, lz); reserved.add(`${Math.floor(w.x)},${Math.floor(w.z)}`); }
     }
     const free = (x: number, z: number): boolean => x >= 0 && x < W && z >= 0 && z < D && !occ.has(`${x},${z}`) && !reserved.has(`${x},${z}`);
-    // 1ª escolha: canto ESQUERDO da frente (junto à vitrine, à esquerda da porta, longe do balcão do caixa)
+    const c0 = v.furniture.find((f) => f.type === 'counter');
+    if (c0) {
+      const { cx, cz } = centerOf(c0);
+      for (const [lx, lz] of [[1.5, -0.5], [-1.5, -0.5], [1.5, -1.5], [-1.5, -1.5]] as const) {
+        const t = localToWorld(cx, cz, c0.rot, lx, lz);
+        const tx = Math.floor(t.x), tz = Math.floor(t.z);
+        if (!free(tx, tz)) continue;
+        const p = localToWorld(cx, cz, c0.rot, lx + (lx > 0 ? 0.03 : -0.03), -0.4);
+        desk = { tx, tz, x: p.x, z: p.z, ry: (c0.rot * Math.PI) / 180 };
+        deskGroup.position.set(desk.x, 0.01, desk.z); deskGroup.rotation.y = desk.ry; deskGroup.updateMatrix();
+        if (!deskGroup.children.length) for (const m of meshesOf(deskGeos(), deskGroup, { order: 2 })) freezeSelf(m);
+        deskGroup.visible = true;
+        return;
+      }
+    }
+    // reserva: canto ESQUERDO da frente (junto à vitrine, à esquerda da porta, longe do balcão do caixa)
     const cands: { tx: number; tz: number; wall: 'front' | 'left' | 'right' }[] = [{ tx: 0, tz: D - 1, wall: 'front' }];
     for (let k = 0; k < W; k++) {
       const left = dx - 2 - k, right = dx + 1 + k;
@@ -598,7 +610,7 @@ export default function create(): GameModule {
       const op = localToWorld(cx, cz, f.rot, 0.5, -1.5);
       const queue: Vec2[] = [];
       for (let i = 0; i < 8; i++) {
-        const q = localToWorld(cx, cz, f.rot, -0.5, 1.5 + i);
+        const q = localToWorld(cx, cz, f.rot, -0.5, 0.5 + i);
         const t = tileC(q.x, q.z);
         if (!nav.isWalkable(t.x, t.z) || t.z >= bounds.depth) break; // fila só dentro do salão
         queue.push(t);
@@ -816,7 +828,7 @@ export default function create(): GameModule {
       if (pl && !near) {
         near = Math.hypot(pl.position.x - doorAt.x, pl.position.z - doorAt.z) < 3;
       }
-      shop.setOpenSign(ctx.clock.phase === 'open');
+      shop.setOpenSign(ctx.clock.signOpen);
       shop.update(dt, near, env.night);
       tipJars.update(dt); tipJars.panelRefresh(ctx.state.ledger.tips);
       const TE = pnow();

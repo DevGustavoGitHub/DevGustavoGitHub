@@ -31,6 +31,7 @@ tests/       Vitest (sim) e e2e
 | Evento | Payload | Emissor → ouvintes |
 |---|---|---|
 | `storeOpened` / `storeClosing` / `dayStarted` | – | clock → todos |
+| `storeDoors` | `{closed:boolean}` | clock → todos. Placa FECHADO durante o expediente pausa só a entrada de clientes (`clock.doorsClosed`; o relógio segue). Visual da placa: `clock.signOpen` (fase `open` e porta aberta); também emite `stateChanged {what:'doors'}`. |
 | `storeEmpty` | – | npc → ui (loja fechando e vazia: gerar relatório) |
 | `dayEnded` | `DayReport` | ui (após `closeDay`) → audio, main (autosave) |
 | `toast` | `{text:string, kind?:'info'\|'good'\|'bad'}` | qualquer → ui |

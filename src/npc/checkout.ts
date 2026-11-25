@@ -300,6 +300,8 @@ export class CheckoutManager {
     if (p.seatedAt !== undefined) return p.seatedAt;
     return p.atCounter ?? null;
   }
+  /** Balcão com jogador sentado ou funcionário no posto: a fila perde paciência à metade da velocidade. */
+  isManned(l: Lane): boolean { return this.operatorOf(l, this.playerSeat()) !== null; }
   private operatorOf(l: Lane, seat: number | null): Op {
     if (l.staffed) return this.cashiers.some((c) => c.lane === l && c.atPost(l)) ? 'staff' : null;
     return seat === l.furnitureId ? 'player' : null;

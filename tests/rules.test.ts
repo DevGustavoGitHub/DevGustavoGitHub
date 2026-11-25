@@ -78,10 +78,10 @@ describe('canPlace', () => {
     expect(canPlace(s, 'shelf', 1, 2, 0)).toBe(false);
     expect(canPlace(s, 'shelf', 2, 2, 0)).toBe(false);
     expect(canPlace(s, 'shelf', 1, 3, 0)).toBe(true);
-    expect(canPlace(s, 'counter', 7, 6, 0)).toBe(false);
-    expect(canPlace(s, 'shelf', 8, 5, 0)).toBe(false); // Fase 4 (QA): (9,5) é o tile do operador do balcão (cadeira)
+    expect(canPlace(s, 'counter', 7, 7, 0)).toBe(false);
+    expect(canPlace(s, 'shelf', 8, 6, 0)).toBe(false); // Fase 4 (QA): (9,6) é o tile do operador do balcão (cadeira)
     expect(canPlace(s, 'shelf', 6, 5, 0)).toBe(true);
-    expect(canPlace(s, 'shelf', 9, 5, 90)).toBe(false); // 1x2 em z=5..6 encosta no balcão (z=6)
+    expect(canPlace(s, 'shelf', 9, 5, 90)).toBe(false); // 1x2 em z=5..6 inclui o tile do operador (9,6)
   });
   it('não bloqueia a porta (antessala 2x2)', () => {
     expect(canPlace(s, 'decor', 5, 9, 0)).toBe(false);

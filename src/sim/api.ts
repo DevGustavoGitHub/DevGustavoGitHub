@@ -336,13 +336,15 @@ export function arrivalSchedule(state: StoreState): number[] {
 /**
  * Lista de compras (produtos distintos, só categorias licenciadas e com algum nível etiquetado — `state.slots` > 0),
  * sem checar preço/estoque.
- * Pode devolver [] se não houver nada exposto. Nº de itens: 1..(4 + nível/3), até 7 produtos distintos.
+ * Pode devolver [] se não houver nada exposto. Nº de itens: 1..3 nos níveis 1–2, depois cresce (teto antigo 4 + nível/3), até 7 produtos distintos.
  */
 export function makeShoppingList(state: StoreState, rand: () => number): { productId: string; qty: number }[] {
   const pool = PRODUCTS.filter((p) => state.licenses.includes(p.category) && (state.slots[p.id] ?? 0) > 0);
   if (pool.length === 0) return [];
   const maxItems = Math.min(pool.length, 7, 3 + Math.floor(state.level / 3));
-  const count = Math.min(pool.length, 1 + Math.floor(rand() * (maxItems + 1)));
+  // início: cesta de 1–3 itens nos níveis 1–2 (teto 3 → 4 → ... cresce 1 item a cada ~2 níveis a partir do 3)
+  const cap = state.level <= 2 ? 3 : Math.min(maxItems + 1, 3 + Math.ceil((state.level - 2) / 2));
+  const count = Math.min(pool.length, 1 + Math.floor(rand() * cap));
   const list: { productId: string; qty: number }[] = [];
   const left = [...pool];
   for (let i = 0; i < count && left.length > 0; i++) {

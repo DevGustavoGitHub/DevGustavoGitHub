@@ -1,3 +1,4 @@
+import { PRODUCTS } from '../sim/catalog';
 import { FURNITURE_FOOTPRINT, storeBounds } from '../core/layout';
 import type { Furniture, StoreState } from '../sim/state';
 import * as api from '../sim/api';
@@ -111,7 +112,9 @@ export function stockForTest(state: StoreState, n: number, productId?: string): 
     }
     for (let i = 0; i < lv.length; i++) {
       const l = lv[i]!;
-      const pid = l.productId ?? (i === 0 ? f.productId : undefined);
+      // Níveis sem produto (prateleiras iniciais vêm vazias desde o pós-teste): escolhe um produto licenciado
+      // aceito pelo móvel, em rodízio por nível, para o gancho de teste conseguir abastecer.
+      const pid = l.productId ?? (i === 0 ? f.productId : undefined) ?? productId ?? fallbackProduct(state, f.type, i);
       if (!pid) continue;
       if (!productId || pid === productId) {
         const cap = safe('levelCapacity', () => api.levelCapacity(state, f.id, i, pid), safe('slotCapacity', () => productById(pid).slotCapacity, n));
@@ -142,4 +145,12 @@ export function shelfRoom(env: Env, productId: string): number {
   const cap = safe('productCapacity', () => api.productCapacity(state, productId), -1);
   const capacity = cap >= 0 ? cap : safe('shelfCapacity', () => shelfCapacity(state, productId), 0);
   return capacity - (state.shelf[productId] ?? 0);
+}
+
+/** Produto licenciado aceito pelo tipo de móvel (rodízio por índice) — só para o gancho de teste `__npc.stock`. */
+function fallbackProduct(state: StoreState, type: string, i: number): string | undefined {
+  let cats: string[] = [];
+  try { cats = api.furnitureCatalog().find((s) => s.type === type)?.categories ?? []; } catch { /* sim antiga */ }
+  const pool = PRODUCTS.filter((p) => state.licenses.includes(p.category) && (cats.length === 0 || cats.includes(p.category)));
+  return pool.length ? pool[i % pool.length]!.id : undefined;
 }

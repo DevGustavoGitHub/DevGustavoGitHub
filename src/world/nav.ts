@@ -38,7 +38,15 @@ export class NavGrid {
     }
     for (const f of furniture) {
       const fp = footprintOf(f);
-      for (let dz = 0; dz < fp.d; dz++) for (let dx = 0; dx < fp.w; dx++) this.block(f.x + dx, f.z + dz);
+      // balcão reto: só a fileira de TRÁS (lado do operador, lz<0) é sólida; a da frente é piso livre (a fila começa nela)
+      const t = (f.rot * Math.PI) / 180, c = Math.round(Math.cos(t)), s = Math.round(Math.sin(t));
+      for (let dz = 0; dz < fp.d; dz++) for (let dx = 0; dx < fp.w; dx++) {
+        if (f.type === 'counter') {
+          const ux = dx + 0.5 - fp.w / 2, uz = dz + 0.5 - fp.d / 2;
+          if (ux * s + uz * c > 0) continue;
+        }
+        this.block(f.x + dx, f.z + dz);
+      }
     }
     for (const t of blocked) this.block(t.x, t.z);
     this.cache.clear();

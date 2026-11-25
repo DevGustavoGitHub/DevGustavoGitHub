@@ -155,7 +155,7 @@ export interface SavedClock { minute: number; phase: SavedDayPhase }
  */
 export function initialFurniture(): Furniture[] {
   return [
-    { id: 1, type: 'counter', x: 8, z: 6, rot: 0 },
+    { id: 1, type: 'counter', x: 8, z: 7, rot: 0 },
     ...INITIAL_SHELVES.map((_, i): Furniture => ({
       id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, levels: emptyLevels('shelf'),
     })),

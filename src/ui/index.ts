@@ -75,8 +75,11 @@ export default function create(): GameModule {
     signAt = now;
     if (clock.phase === 'prep') { clock.openStore(); kit.sfx('sign'); kit.toast('Loja aberta! Os clientes já podem entrar.', 'good'); }
     else if (clock.phase === 'open') {
-      void kit.confirm({ title: 'Fechar a loja agora?', text: 'Nenhum cliente novo vai entrar e não dá para reabrir hoje. Quem já está na loja termina as compras.', ok: 'Fechar loja' })
-        .then((ok) => { if (ok && clock.phase === 'open') { clock.closeStore(); kit.sfx('sign'); } });
+      // durante o expediente a placa só PAUSA a entrada (o dia fecha às 21:00 ou em "Terminar o dia")
+      const closed = !clock.doorsClosed;
+      clock.setDoorsClosed(closed);
+      kit.sfx('sign');
+      kit.toast(closed ? 'Porta fechada: nenhum cliente novo entra. Toque na placa para reabrir.' : 'Porta aberta: os clientes voltaram a entrar.', closed ? 'info' : 'good');
     } else if (clock.phase === 'closing') kit.toast('A loja está fechada. Toque em "Terminar o dia" quando quiser.', 'info');
   };
 

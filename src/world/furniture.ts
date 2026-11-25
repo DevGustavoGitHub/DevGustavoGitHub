@@ -247,24 +247,27 @@ function freezer(lv: readonly (string | undefined)[]): Batch {
   return b;
 }
 
-/* ---------------- balcão do caixa (Fase 3) ----------------
- * Local (frente/clientes em +z, footprint [-1,1]²): esteira à esquerda (x<0) correndo de +z (cliente) para −z
- * (scanner); mesa do operador à direita (x>0) com monitor, maquininha, impressora e teclado; gôndola de doces na
- * frente da mesa; cadeira atrás do balcão (fora do footprint, no tile do operador). */
+/* ---------------- balcão do caixa (reto, como no jogo original) ----------------
+ * Local (frente/clientes em +z, footprint [-1,1]²): balcão comprido ocupando a fileira de TRÁS (z −0,8…0, 1,96 m),
+ * tampo cinza-claro, faixa vermelha contínua, corpo azul-claro com painéis. Esteira embutida no tampo à ESQUERDA (x<0,
+ * lado do cliente, corre de −x para o scanner em x≈−0,1); registradora/teclado/impressora/monitor/maquininha à DIREITA
+ * (ponta do operador). Cadeira atrás (tile do operador, fora do footprint). A fileira da frente do footprint fica livre
+ * (a fila começa nela). */
 const C_BODY = matte(0x93b4ea), C_PANEL = matte(0xb9bfcc), C_FRAME = matte(0x6f8ccb), C_RED = matte(0xc4161c), C_TOP = matte(0xd6d9df), C_PLINTH = matte(0x3a3e48);
-export const BELT_Y = 0.882;
+export const BELT_Y = 0.892;
+const CZ = -0.4; // centro do balcão em z (profundidade 0,8)
 /** Monitor (pose local no balcão): tela w×h a `cy` acima da mesa, virada para o operador. */
-export const MONITOR = { x: 0.74, y: 0.92, z: -0.12, ry: Math.atan2(0.5 - 0.74, -1.42 + 0.12), tilt: -0.08, w: 0.56, h: 0.36, cy: 0.41, cz: 0.014 };
+export const MONITOR = { x: 0.66, y: 0.9, z: -0.38, ry: Math.atan2(0.5 - 0.66, -1.42 + 0.38), tilt: -0.08, w: 0.56, h: 0.36, cy: 0.41, cz: 0.014 };
 /** Maquininha de cartão: face (tela + teclas) w×h no topo do corpo inclinado. */
-export const CARDPAD = { x: 0.16, y: 0.92, z: -0.6, ry: Math.atan2(0.5 - 0.16, -1.42 + 0.6), tilt: 0.45, lift: 0.075, w: 0.088, h: 0.176 };
+export const CARDPAD = { x: 0.86, y: 0.9, z: -0.7, ry: Math.atan2(0.5 - 0.86, -1.42 + 0.7), tilt: 0.45, lift: 0.075, w: 0.088, h: 0.176 };
 /** Assento do operador (local) e pose dos olhos sentado. */
-export const SEAT = { x: 0.5, z: -1.42, eye: [0.5, 1.24, -1.34] as const, look: [-0.02, 0.97, 0.55] as const };
-/** Mão do cliente estendendo dinheiro/cartão; scanner; esteira (cliente → scanner). */
-export const HANDOFF = [-0.3, 1.12, 0.84] as const;
-export const SCANNER = [-0.51, -0.6] as const;
-export const BELT_SLOTS: readonly (readonly [number, number])[] = Array.from({ length: 8 }, (_, i) => [-0.51 + (i % 2 ? 0.11 : -0.11), 0.84 - i * 0.157] as const);
+export const SEAT = { x: 0.5, z: -1.42, eye: [0.5, 1.24, -1.34] as const, look: [-0.2, 0.97, 0.1] as const };
+/** Mão do cliente estendendo dinheiro/cartão; scanner; esteira (cliente → scanner, ao longo de x). */
+export const HANDOFF = [-0.4, 1.1, 0.12] as const;
+export const SCANNER = [-0.1, -0.41] as const;
+export const BELT_SLOTS: readonly (readonly [number, number])[] = Array.from({ length: 8 }, (_, i) => [-0.84 + i * 0.085, CZ + 0.01 + (i % 2 ? 0.06 : -0.06)] as const);
 
-const DRAWER = { w: 0.42, h: 0.1, d: 0.36, x: 0.5, y: 0.68, z: -0.7 };
+const DRAWER = { w: 0.42, h: 0.1, d: 0.36, x: 0.45, y: 0.68, z: -0.595 };
 const _m = new THREE.Matrix4(), _r = new THREE.Matrix4();
 /** Matriz local de uma peça do balcão: T(x,y,z)·Ry·Rx. */
 export function poseMatrix(out: THREE.Matrix4, x: number, y: number, z: number, ry: number, rx: number): THREE.Matrix4 {
@@ -273,53 +276,57 @@ export function poseMatrix(out: THREE.Matrix4, x: number, y: number, z: number, 
   _r.makeRotationX(rx); out.multiply(_r);
   return out;
 }
+/** Caixa com cantos verticais arredondados (raio r) em planta. */
+function rbox(b: Batch, w: number, h: number, d: number, spec: Spec, x: number, y: number, z: number, r: number): void {
+  b.box(w - 2 * r, h, d, spec, x, y, z); b.box(w, h, d - 2 * r, spec, x, y, z);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(cylGeo(r, r, h, 10), spec, x + sx * (w / 2 - r), y, z + sz * (d / 2 - r));
+}
+/** Placa retangular arredondada na face voltada para ±z (cantos em xy), espessura t a partir de zf. */
+function rpanel(b: Batch, w: number, h: number, spec: Spec, x: number, y: number, zf: number, dir: 1 | -1, r: number, t = 0.012): void {
+  const z0 = dir > 0 ? zf : zf - t;
+  b.box(w - 2 * r, h, t, spec, x, y, z0 + t / 2); b.box(w, h - 2 * r, t, spec, x, y + r, z0 + t / 2);
+  for (const sx of [-1, 1]) for (const sy of [0, 1]) b.add(cylGeo(r, r, t, 8), spec, x + sx * (w / 2 - r), y + r + sy * (h - 2 * r), z0, { rx: Math.PI / 2 });
+}
 function counter(): Batch {
   const b = new Batch();
-  // esteira
-  b.box(0.9, 0.07, 1.8, C_PLINTH, -0.51, 0, 0.055);
-  b.box(0.88, 0.7, 1.78, C_BODY, -0.51, 0.07, 0.055);
-  for (const z of [-0.42, 0.45]) { b.box(0.01, 0.5, 0.78, C_FRAME, -0.953, 0.16, z); b.box(0.014, 0.42, 0.7, C_PANEL, -0.956, 0.2, z); }
-  b.box(0.68, 0.5, 0.01, C_FRAME, -0.51, 0.16, 0.946); b.box(0.6, 0.42, 0.014, C_PANEL, -0.51, 0.2, 0.948);
-  b.box(0.92, 0.1, 1.82, C_RED, -0.51, 0.77, 0.055);
-  for (const x of [-0.925, -0.095]) b.box(0.07, 0.04, 1.82, C_TOP, x, 0.87, 0.055);
-  b.box(0.76, 0.012, 1.25, matte(0x3f4249), -0.51, 0.87, 0.31);
-  for (let i = 0; i < 12; i++) b.box(0.74, 0.003, 0.012, matte(0x34373e), -0.51, 0.882, -0.26 + i * 0.1);
-  b.box(0.9, 0.04, 0.04, C_TOP, -0.51, 0.87, 0.95);
-  b.box(0.6, 0.025, 0.035, matte(0xffc107), -0.51, 0.882, 0.86);
-  b.box(0.78, 0.02, 0.52, matte(0xd9dde3), -0.51, 0.87, -0.6);
-  b.box(0.32, 0.006, 0.24, matte(0x1f2a33), SCANNER[0], 0.89, SCANNER[1]);
-  b.box(0.26, 0.003, 0.012, glow(0xff2a2a), SCANNER[0], 0.896, SCANNER[1]);
-  // mesa do operador
-  b.box(1.0, 0.07, 1.16, C_PLINTH, 0.46, 0, -0.28);
-  b.box(0.98, 0.72, 1.14, C_BODY, 0.46, 0.07, -0.28);
-  b.box(0.01, 0.5, 0.88, C_FRAME, 0.963, 0.16, -0.28); b.box(0.014, 0.42, 0.8, C_PANEL, 0.966, 0.2, -0.28);
-  b.box(0.7, 0.5, 0.012, matte(0x2f3342), 0.46, 0.1, -0.856);
-  b.box(1.02, 0.1, 1.18, C_RED, 0.46, 0.79, -0.28);
-  b.box(1.04, 0.03, 1.2, C_TOP, 0.46, 0.89, -0.28);
-  // gôndola de doces virada para a fila
-  b.box(0.92, 0.08, 0.58, C_PLINTH, 0.46, 0, 0.645);
-  b.box(0.92, 1.1, 0.04, C_TOP, 0.46, 0.08, 0.37);
-  for (const x of [0.015, 0.905]) b.box(0.03, 1.1, 0.58, C_TOP, x, 0.08, 0.645);
-  b.box(0.92, 0.16, 0.035, matte(0xff7a2e), 0.46, 1.16, 0.37);
-  const candy = [0xe63946, 0xffd23f, 0x3a86ff, 0x2fbf71, 0x9b5de5, 0xff7a2e];
-  [0.3, 0.6, 0.9].forEach((y, t) => {
-    const d = 0.5 - t * 0.12, zc = 0.39 + d / 2;
-    b.box(0.86, 0.025, d, C_TOP, 0.46, y, zc);
-    b.box(0.86, 0.05, 0.015, matte(0x3a86ff), 0.46, y + 0.02, zc + d / 2);
-    for (let i = 0; i < 7; i++) b.box(0.075, 0.1, 0.05, matte(candy[(i + t) % candy.length]!), 0.1 + i * 0.12, y + 0.025, zc + d / 2 - 0.06);
-  });
-  // base escura da registradora/teclado e recorte cinza no tampo
-  b.box(0.5, 0.016, 0.3, matte(0x5a5a74), 0.5, 0.92, -0.68);
-  b.box(0.36, 0.004, 0.3, matte(0xaeb3bc), 0.62, 0.92, 0.08);
-  // impressora de cupom, teclado
-  b.box(0.15, 0.11, 0.19, matte(0xe3e6ea), 0.88, 0.92, -0.6);
-  b.box(0.1, 0.006, 0.02, matte(0x2b2f36), 0.88, 1.03, -0.53);
-  b.box(0.08, 0.12, 0.004, matte(0xffffff), 0.88, 1.03, -0.535, { rx: -0.35 });
-  b.box(0.36, 0.025, 0.14, matte(0x2b2f36), 0.5, 0.936, -0.68);
+  // rodapé escuro, corpo azul-claro, faixa vermelha contínua
+  b.box(1.9, 0.07, 0.72, C_PLINTH, 0, 0, CZ);
+  rbox(b, 1.94, 0.71, 0.78, C_BODY, 0, 0.07, CZ, 0.07);
+  rbox(b, 1.98, 0.1, 0.82, C_RED, 0, 0.78, CZ, 0.08);
+  // painéis arredondados cinza (frente: 2; laterais; trás)
+  const zF = CZ + 0.39, zB = CZ - 0.39;
+  for (const x of [-0.5, 0.5]) { rpanel(b, 0.8, 0.5, C_FRAME, x, 0.14, zF - 0.002, 1, 0.07, 0.008); rpanel(b, 0.72, 0.42, C_PANEL, x, 0.18, zF - 0.002, 1, 0.06, 0.014); }
+  rpanel(b, 0.56, 0.5, C_FRAME, 0.5, 0.14, zB + 0.002, -1, 0.07, 0.008); // lado do operador: vão escuro
+  b.box(0.5, 0.42, 0.01, matte(0x2f3342), 0.5, 0.18, zB - 0.004);
+  for (const sx of [-1, 1]) {
+    b.box(0.01, 0.5, 0.58, C_FRAME, sx * 0.973, 0.14, CZ);
+    b.box(0.014, 0.42, 0.5, C_PANEL, sx * 0.977, 0.18, CZ);
+  }
+  // tampo: placa cinza-clara de cantos arredondados + borda elevada deixando a esteira embutida
+  rbox(b, 1.98, 0.016, 0.82, C_TOP, 0, 0.87, CZ, 0.07);
+  const BX0 = -0.9, BX1 = 0.0, BZ0 = CZ - 0.31, BZ1 = CZ + 0.31;
+  rbox(b, 0.08, 0.014, 0.82, C_TOP, -0.95, 0.886, CZ, 0.04);
+  b.box(BX1 - BX0, 0.014, BZ0 - (CZ - 0.41), C_TOP, (BX0 + BX1) / 2, 0.886, (BZ0 + CZ - 0.41) / 2);
+  b.box(BX1 - BX0, 0.014, CZ + 0.41 - BZ1, C_TOP, (BX0 + BX1) / 2, 0.886, (BZ1 + CZ + 0.41) / 2);
+  b.box(0.5, 0.014, 0.82, C_TOP, 0.25, 0.886, CZ);
+  rbox(b, 0.5, 0.014, 0.82, C_TOP, 0.73, 0.886, CZ, 0.07);
+  // esteira (plano escuro + roletes) e scanner
+  b.box(BX1 - BX0 - 0.02, 0.004, BZ1 - BZ0 - 0.02, matte(0x3f4249), (BX0 + BX1) / 2, 0.886, CZ);
+  for (let i = 0; i < 12; i++) b.box(0.012, 0.003, BZ1 - BZ0 - 0.04, matte(0x34373e), BX0 + 0.06 + i * 0.07, 0.89, CZ);
+  b.box(0.02, 0.006, BZ1 - BZ0, matte(0xffc107), BX0 + 0.012, 0.886, CZ);
+  b.box(0.2, 0.006, 0.3, matte(0x1f2a33), SCANNER[0], 0.89, CZ);
+  b.box(0.012, 0.003, 0.26, glow(0xff2a2a), SCANNER[0], 0.896, CZ);
+  // base da registradora + teclado
+  b.box(0.5, 0.045, 0.26, matte(0x5a5a74), 0.42, 0.9, -0.62);
+  b.box(0.4, 0.022, 0.17, matte(0x2b2f36), 0.42, 0.945, -0.66);
   for (let r = 0; r < 3; r++) for (let c = 0; c < 8; c++) {
     const col = c >= 6 ? [0x2fbf71, 0xffc107, 0xe63946][r]! : 0xdfe3e8;
-    b.box(0.032, 0.012, 0.03, matte(col), 0.5 - 0.145 + c * 0.0415, 0.961, -0.72 + r * 0.04);
+    b.box(0.032, 0.012, 0.03, matte(col), 0.42 - 0.145 + c * 0.0415, 0.967, -0.72 + r * 0.04);
   }
+  // impressora de cupom
+  b.box(0.15, 0.11, 0.16, matte(0xe3e6ea), 0.25, 0.9, -0.42);
+  b.box(0.1, 0.006, 0.02, matte(0x2b2f36), 0.25, 1.01, -0.36);
+  b.box(0.08, 0.12, 0.004, matte(0xffffff), 0.25, 1.01, -0.365, { rx: -0.35 });
   // monitor (pé, haste, moldura) — a tela é uma malha própria (screens.ts)
   const mon = new Batch();
   mon.box(0.24, 0.02, 0.18, matte(0x2b2f36), 0, 0, -0.03);
@@ -332,7 +339,7 @@ function counter(): Batch {
   const cp = new Batch();
   cp.box(0.11, 0.028, 0.2, matte(0x3a3f48), 0, -0.014, 0);
   cp.box(0.1, 0.01, 0.04, matte(0x23262c), 0, 0.012, -0.09);
-  b.box(0.13, 0.04, 0.16, matte(0x2b2f36), CARDPAD.x, 0.92, CARDPAD.z);
+  b.box(0.13, 0.04, 0.16, matte(0x2b2f36), CARDPAD.x, CARDPAD.y, CARDPAD.z);
   b.merge(cp.build(), poseMatrix(_m, CARDPAD.x, CARDPAD.y + CARDPAD.lift, CARDPAD.z, CARDPAD.ry, CARDPAD.tilt));
   return b;
 }
@@ -491,7 +498,7 @@ const SIL: Record<string, SBox[]> = {
   shelf: [[0, 0.695, 0, 2.0, 1.39, 0.98], [0, 1.525, 0, 1.96, 0.27, 0.1]],
   fridge: [[0, 1.03, 0, 2.0, 2.06, 1.0]],
   freezer: [[0, 0.39, 0, 2.0, 0.78, 0.98]],
-  counter: [[-0.51, 0.455, 0.055, 0.92, 0.91, 1.84], [0.46, 0.46, -0.28, 1.04, 0.92, 1.2], [0.46, 0.66, 0.645, 0.94, 1.32, 0.6], [0.74, 1.34, -0.12, 0.64, 0.46, 0.14]],
+  counter: [[0, 0.45, -0.4, 2.0, 0.9, 0.84], [0.66, 1.19, -0.38, 0.64, 0.6, 0.2]],
   rack: [[0, 0.87, 0, 2.0, 1.75, 0.95]],
   plant: [[0, 0.42, 0, 0.5, 0.85, 0.5]], tree: [[0, 0.95, 0, 0.9, 1.9, 0.9]], banner: [[0, 0.9, 0, 0.52, 1.8, 0.22]], lamp: [[0, 0.88, 0, 0.42, 1.76, 0.42]],
   chair: [[0, 0.27, 0, 0.62, 0.54, 0.62], [0, 0.86, -0.25, 0.48, 0.5, 0.1]],

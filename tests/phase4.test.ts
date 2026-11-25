@@ -291,25 +291,25 @@ describe('Fase 4 — correções do QA (save, relógio, cestas, operador do caix
   });
   it('o tile do operador de cada balcão (cadeira do caixa) fica livre e alcançável: comprar, montar, mover', () => {
     const s = rich();
-    expect(canPlace(s, 'shelf', 8, 5, 0)).toBe(false); // (9,5) = operador do balcão (8,6)
-    expect(canPlace(s, 'decor', 9, 5, 0)).toBe(false);
+    expect(canPlace(s, 'shelf', 8, 6, 0)).toBe(false); // (9,6) = operador do balcão (8,7)
+    expect(canPlace(s, 'decor', 9, 6, 0)).toBe(false);
     expect(canPlace(s, 'shelf', 6, 5, 0)).toBe(true);
-    expect(() => buyFurniture(s, 'shelf', 8, 5, 0)).toThrow('Posição inválida');
+    expect(() => buyFurniture(s, 'shelf', 8, 6, 0)).toThrow('Posição inválida');
     const sh = buyFurniture(s, 'shelf', 6, 5, 0);
-    expect(() => moveFurniture(s, sh.id, 9, 5, 90)).toThrow('Posição inválida');
+    expect(() => moveFurniture(s, sh.id, 9, 6, 90)).toThrow('Posição inválida');
     checkoutCart(s, [{ kind: 'furniture', id: 'decor', qty: 1, variant: 'plant' }]);
-    expect(() => placeFromStock(s, 0, 9, 5, 0)).toThrow('Posição inválida');
+    expect(() => placeFromStock(s, 0, 9, 6, 0)).toThrow('Posição inválida');
     // balcão novo: operador dentro do salão e livre; rot 180 → operador em (x, z+2)
     expect(canPlace(s, 'counter', 1, 0, 0)).toBe(false); // operador cairia em z = −1 (fora do salão)
     expect(canPlace(s, 'counter', 1, 6, 0)).toBe(true);
     expect(canPlace(s, 'counter', 0, 3, 180)).toBe(true); // operador (0,5) livre
     buyFurniture(s, 'decor', 0, 5, 0, 'plant');
     expect(canPlace(s, 'counter', 0, 3, 180)).toBe(false); // operador (0,5) ocupado pela planta
-    // fechar o último caminho até a cadeira é recusado: (9,5) cercado por (8,5), (10,5), (9,4) e o balcão
-    buyFurniture(s, 'decor', 8, 5, 0, 'plant');
-    buyFurniture(s, 'decor', 10, 5, 0, 'plant');
-    expect(canPlace(s, 'decor', 9, 4, 0)).toBe(false);
-    expect(canPlace(s, 'decor', 9, 3, 0)).toBe(true);
+    // fechar o último caminho até a cadeira é recusado: (9,6) cercado por (8,6), (10,6), (9,5) e o balcão
+    buyFurniture(s, 'decor', 8, 6, 0, 'plant');
+    buyFurniture(s, 'decor', 10, 6, 0, 'plant');
+    expect(canPlace(s, 'decor', 9, 5, 0)).toBe(false);
+    expect(canPlace(s, 'decor', 9, 4, 0)).toBe(true);
   });
   it('save ilegível: backup do texto original + aviso para a UI (uma vez por conteúdo); depois o autosave não apaga o original', () => {
     const kv = kvOf('{"version":1,"money":');

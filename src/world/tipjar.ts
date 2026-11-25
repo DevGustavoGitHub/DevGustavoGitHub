@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { canvasTex, makeCanvas } from './kit';
 import { money } from '../ui/dom';
 
-export const JAR = { x: 0.2, y: 0.92, z: -0.16 };
+export const JAR = { x: 0.88, y: 0.9, z: -0.22 };
 const R = 0.075, H = 0.17, MAX_COINS = 36, POP_N = 4, POP_T = 1.2;
 
 type Jar = { group: THREE.Group; coins: THREE.InstancedMesh; sum: number; shown: number };
