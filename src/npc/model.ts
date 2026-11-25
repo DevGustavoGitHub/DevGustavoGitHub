@@ -224,6 +224,8 @@ export class Person {
   actionT = 0;
   /** Mostra a "ação em curso" (mexendo) mesmo parado. */
   working = false;
+  /** Pós-teste 3: 0 = parado segurando o esfregão em pé, 1 = limpando (transição suave). */
+  private mopAmp = 0;
   /** Altura do assento (m, mundo) para as poses sentadas. */
   seatY = 0.5;
   private reachOn = false;
@@ -401,14 +403,22 @@ export class Person {
         if (this.working) { const w = Math.sin(this.actionT * 6) * 0.12; uRx += w; uLx -= w; spX += 0.12; }
         break;
       case 'mop': {
-        const sw = this.working ? Math.sin(this.actionT * 4.6) : 0;
-        uRx = -0.5 + sw * 0.08; uRz = -0.05 + sw * 0.18; fRx = -0.65;
-        uLx = -1.0; uLz = 0.42 + sw * 0.12; fLx = -0.75;
-        spY += sw * 0.14; spX += 0.1;
+        // pós-teste 3: mais fluido. Limpando: varre em arco (~0,5 Hz) com empurra-puxa em "8", tronco e cabeça
+        // acompanham, entrada/saída suave (mopAmp). Parado: reto, esfregão em pé na frente, as duas mãos no cabo.
+        this.mopAmp += ((this.working ? 1 : 0) - this.mopAmp) * Math.min(1, dt * 4);
+        const m = this.mopAmp, a = Math.sin(this.actionT * 3.1) * m, q = Math.cos(this.actionT * 6.2) * m;
+        const mix = (idleV: number, workV: number): number => idleV + (workV - idleV) * m;
+        uRx = mix(-0.6, -0.5) + q * 0.08; uRz = mix(0.14, -0.05) + a * 0.2; fRx = mix(-1.0, -0.65);
+        uLx = mix(-0.6, -1.0) + q * 0.05; uLz = mix(-0.14, 0.42) + a * 0.12; fLx = mix(-1.0, -0.75);
+        spX += mix(0, 0.1); spY += a * 0.2; hipZ += a * 0.025;
+        headY = headY * (1 - m) + a * 0.1;
         if (this.mop) {
-          this.mop.rotation.x = -0.52;
-          this.mop.rotation.y += ((sw * 0.5) - this.mop.rotation.y) * k;
-          this.mop.position.x = -0.2 + sw * 0.1;
+          const mo = this.mop;
+          mo.position.x += ((mix(0, -0.2) + a * 0.14) - mo.position.x) * k;
+          mo.position.z += ((mix(0.3, 0.42) + q * 0.04) - mo.position.z) * k;
+          mo.rotation.x += ((mix(-0.12, -0.52) + q * 0.05) - mo.rotation.x) * k;
+          mo.rotation.y += ((a * 0.45) - mo.rotation.y) * k;
+          mo.rotation.z += ((-a * 0.1) - mo.rotation.z) * k;
         }
         break;
       }
