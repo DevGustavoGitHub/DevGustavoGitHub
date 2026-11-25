@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { Vec2, WorldService } from '../core/services';
+import { DOOR_WIDTH } from '../core/layout';
 import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
 import * as api from '../sim/api';
 import { cashierCount } from '../sim/economy';
@@ -261,7 +262,9 @@ export default function create(): GameModule {
     const w = env.world();
     const d = w.door();
     const mk = (x: number, z: number): Vec2 => env.nearestWalkable(x, z, { x, z });
-    return { cashier: mk(d.x - 2.5, d.z - 1.8), stocker: mk(d.x - 4, d.z - 2.2), janitor: mk(d.x + 4, d.z - 2.2) };
+    // faxineiro: encostado na vitrine, ao lado da porta (lado oposto à placa ABERTO/FECHADO, que fica em +x), fora do
+    // corredor da porta e longe da frente do balcão; volta para lá depois de cada limpeza
+    return { cashier: mk(d.x - 2.5, d.z - 1.8), stocker: mk(d.x - 4, d.z - 2.2), janitor: mk(d.x - DOOR_WIDTH / 2 - 0.6, d.z - 0.55) };
   }
 
   function syncStaff(initial: boolean): void {

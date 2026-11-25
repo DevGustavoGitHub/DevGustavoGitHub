@@ -236,3 +236,21 @@ Feedback: no nível 1–2 o jogador abastece 2–3 produtos, a fila se forma, fa
 - **Placa como pausa**: na fase `open` a placa alterna `clock.doorsClosed` (sem clientes novos, relógio segue; o dia só fecha às 21:00 ou em "Terminar o dia").
 - **Paciência**: fila de balcão atendido (jogador sentado ou funcionário) perde paciência à metade da velocidade; quem está sendo atendido não perde.
 - **Resultado** (humanBot, 5 sementes): iniciante cuidadoso perde ~1–3 clientes/dia (fila + estoque) nos níveis 1–2. Teste intencional alterado: caixa no fim do dia 1 do cuidadoso ≥ R$ 80 (era R$ 120), pois com metade dos clientes o dia 1 rende menos; nível 4 chega ~1–2 dias depois.
+
+## Preços do meio do jogo (pós-teste 3)
+
+Feedback: nível 6 no dia 10 (R$ 1.185) sem conseguir comprar expansão, laticínios, capacidade, depósito ou carrinho.
+Bot cuidadoso (ritmo humano): lucro de ~R$ 150–250/dia nos níveis 2–3 e ~R$ 300–580/dia nos níveis 4–6; com os preços
+antigos cada item custava 5–15 dias de economia (e funcionários + aluguel comem R$ 180–260/dia).
+
+| Item | Antes | Agora | Dias de lucro (nív. 4–6) |
+|---|---|---|---|
+| Expansão 1 / 2 / 3 | R$ 1.500 / 4.500 / 11.000 | R$ 800 / 2.000 / 4.500 | ~2 / ~4–5 / ~8–10 |
+| Depósito | R$ 2.500 | R$ 1.200 | ~3 |
+| Laticínios / Padaria / Limpeza | R$ 1.500 / 3.500 / 7.000 | R$ 600 / 1.500 / 3.000 | ~1,5 / ~3 / ~5 |
+| Capacidade de clientes | R$ 1.500 | R$ 600 | ~1,5 |
+| Carrinho de carga | R$ 5.000 | R$ 1.500 | ~3–4 |
+| Salário nível 1: caixa / repositor / faxineiro | R$ 100 / 110 / 80 | R$ 80 / 90 / 50 | — |
+
+Fim do jogo corta menos (licenças do nível 10+ ~20–30%, expansões 5–6 ~25%) para o jogador eficiente não disparar:
+o bot ótimo da API chega a ~R$ 10,1 mil/dia no dia 80 (teto do teste: R$ 11 mil).

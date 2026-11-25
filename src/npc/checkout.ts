@@ -162,6 +162,9 @@ export class CheckoutManager {
   private availId: number | null = null;
   private acc = 0;
   private refreshT = 0;
+  /** Último balcão em que o jogador sentou (ele costuma voltar para o mesmo). */
+  private lastSeat: number | null = null;
+  private moveT = 0;
   private clock = 0;
   private fbPick: FallbackPick | null = null;
   private readonly regs = new Map<THREE.Object3D, PickService>();
@@ -310,17 +313,42 @@ export class CheckoutManager {
     return Math.max(1.2, safe('employeeSpeed', () => api.employeeSpeed('cashier', this.env.ctx.state.employees.cashier), 4)) * (s.c.kind === 'bulk' ? 1.6 : 1);
   }
 
-  /** Melhor lane para um cliente (menor espera estimada). */
+  /**
+   * Melhor lane para um cliente (menor espera estimada), dando PREFERÊNCIA FORTE a balcão com atendente (jogador sentado
+   * ou funcionário no posto): balcão sem ninguém só ganha se os atendidos estiverem bem cheios. Sem nenhum atendido, o
+   * último balcão do jogador (ele volta para lá) vem antes dos outros.
+   */
   best(): Lane | null {
     let b: Lane | null = null;
     let bs = Infinity;
     const seat = this.playerSeat();
     const csec = safe('employeeSpeed', () => api.employeeSpeed('cashier', this.env.ctx.state.employees.cashier), 4) + 3;
     for (const l of this.lanes) {
-      const s = (l.line.length + 1) * (l.staffed ? csec : PLAYER_SERVE_SEC) + (l.staffed || seat === l.furnitureId ? 0 : 12);
+      let s = (l.line.length + 1) * (l.staffed ? csec : PLAYER_SERVE_SEC);
+      if (this.operatorOf(l, seat) === null) s += l.staffed ? 30 : l.furnitureId === this.lastSeat ? 60 : 120;
       if (s < bs) { bs = s; b = l; }
     }
     return b;
+  }
+
+  /**
+   * Quem espera (fila ou frente, sem atendimento começado) num balcão SEM ninguém muda para um balcão atendido se lá
+   * a posição for melhor — ex.: o jogador saiu do caixa para repor e o funcionário está no outro.
+   */
+  private rehome(seat: number | null): void {
+    if (this.lanes.length < 2) return;
+    for (const l of this.lanes) {
+      if (this.operatorOf(l, seat) !== null) continue;
+      for (let i = 0; i < l.line.length; i++) {
+        const c = l.line[i]!;
+        if (c.state !== 'queue' && c.state !== 'front') continue;
+        if (l.svc && l.svc.c === c) continue;
+        const to = this.best();
+        if (!to || to === l || this.operatorOf(to, seat) === null || to.line.length > Math.max(i, 3)) continue; // lá anda; aqui ninguém atende
+        l.line.splice(i, 1); i--;
+        c.joinLane(to);
+      }
+    }
   }
 
   /* ---------------- toque (PickService do player, ou reserva) ---------------- */
@@ -425,6 +453,9 @@ export class CheckoutManager {
     this.refreshT += dt;
     if (this.refreshT > 0.6) { this.refreshT = 0; this.refresh(); }
     const seat = this.playerSeat();
+    if (seat !== null) this.lastSeat = seat;
+    this.moveT += dt;
+    if (this.moveT >= 1) { this.moveT = 0; this.rehome(seat); }
     for (const l of this.lanes) {
       const op = this.operatorOf(l, seat);
       const front = l.line[0];

@@ -58,6 +58,8 @@ export const phase3Css = `
   background:linear-gradient(#35b0ff,#1585d6);color:#fff;font-weight:900;font-size:17px;text-transform:uppercase;display:flex;align-items:center;gap:8px;box-shadow:0 5px 0 #0a5c9c,var(--sh-1);line-height:1.05;text-align:left}
 .endday .moon-ic{width:40px;height:40px}
 .endday.pulse{animation:mx-pulse 1.4s infinite}
+.mcard.night .endday{position:relative;right:auto;top:auto;flex:none;align-self:center;margin:6px 6px 6px 4px;min-height:46px;padding:0 12px 0 8px;font-size:14px;border-radius:12px;gap:6px;box-shadow:0 4px 0 #0a5c9c}
+.mcard.night .endday .moon-ic{width:28px;height:28px}
 .edge-arrow{position:absolute;left:0;top:0;z-index:21;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;display:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.45))}
 
 /* folha de nível (toque na estrela) */

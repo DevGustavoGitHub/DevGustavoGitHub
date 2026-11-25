@@ -407,6 +407,15 @@ export class Customer extends Agent {
     this.setPose('basket');
   }
 
+  /** Muda para outra fila (o caixa decide: ver CheckoutManager.rehome). Mantém a paciência já gasta. */
+  joinLane(l: Lane): void {
+    this.lane = l;
+    l.line.push(this);
+    this.slotIdx = -1;
+    this.state = 'queue';
+    this.setPose('basket');
+  }
+
   /** A lane foi removida do mundo: escolhe outra. */
   laneLost(): void {
     this.lane = null;

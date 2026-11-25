@@ -144,7 +144,8 @@ for (const [w, h] of [[844, 390], [800, 360], [740, 360], [720, 330]]) {
   await p.waitForSelector('#end-day', { timeout: 9000 });
   await p.waitForTimeout(300);
   const nc = await fit(p, '.mcard.night'), eb = await fit(p, '#end-day');
-  check(`[${tag}] noite: aviso e "Terminar o dia" na tela, sem sobrepor`, !!nc && !!eb && nc.inView && eb.inView && eb.y >= nc.y + nc.h - 1 && eb.h >= 44, JSON.stringify({ nc, eb }));
+  // pós-teste: o botão fica DENTRO do aviso da noite (canto superior), fora da coluna de ações da direita
+  check(`[${tag}] noite: "Terminar o dia" dentro do aviso da noite, na tela`, !!nc && !!eb && nc.inView && eb.inView && eb.y >= nc.y - 1 && eb.y + eb.h <= nc.y + nc.h + 1 && eb.h >= 44, JSON.stringify({ nc, eb }));
   await shot('night');
 
   // resumo do dia

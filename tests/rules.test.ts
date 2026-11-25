@@ -14,6 +14,7 @@ import { deserialize, serialize } from '../src/sim/save';
 import { type StoreState } from '../src/sim/state';
 import { recomputeSlots } from '../src/sim/levels';
 import { expose, starterGame } from './helpers';
+import { EMPLOYEE_TABLE } from '../src/sim/tuning';
 
 const rich = (level = 12): StoreState => {
   const s = starterGame(5);
@@ -266,9 +267,10 @@ describe('expansão, depósito, funcionários, personalização', () => {
       for (let l = 1; l < 5; l++) expect(employeeSpeed(role, l + 1)).toBeLessThan(employeeSpeed(role, l));
     }
     const rep0 = closeDay(s);
-    expect(rep0.fixed).toBe(rentToday + 28000);
+    const wage5 = EMPLOYEE_TABLE.cashier.wage[4]!; // salário do caixa nível 5 (pós-teste 3: R$ 260)
+    expect(rep0.fixed).toBe(rentToday + wage5);
     expect(rep0.rent).toBe(rentToday);
-    expect(rep0.wages).toBe(28000);
+    expect(rep0.wages).toBe(wage5);
   });
   it('contratar exige nível e dinheiro', () => {
     const s = starterGame();

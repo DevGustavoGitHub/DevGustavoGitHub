@@ -340,6 +340,7 @@ export class Stocker extends Staff {
 
 export class Janitor extends Staff {
   private job: 'idle' | 'toDirt' | 'mop' = 'idle';
+  private facedIn = false;
   private tx2 = 0;
   private tz2 = 0;
   private timer = 0;
@@ -356,6 +357,8 @@ export class Janitor extends Staff {
         this.setPose('mop');
         if (working && this.cooldown <= 0 && !this.moving && state.dirt.length > 0) this.pickDirt();
         else if (!this.moving && this.distTo(this.homeX, this.homeZ) > 0.7) this.moveTo(this.homeX, this.homeZ);
+        else if (!this.moving && !this.facedIn) { this.facedIn = true; this.faceTowards(this.homeX, this.homeZ - 3); } // esperando: olha para dentro da loja
+        if (this.moving) this.facedIn = false;
         break;
       case 'toDirt':
         this.setPose('mop');

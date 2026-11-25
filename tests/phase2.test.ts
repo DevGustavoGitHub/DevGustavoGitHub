@@ -212,13 +212,13 @@ describe('buyMissing', () => {
 });
 
 describe('melhorias (dolly)', () => {
-  it('caro, mas acessível por volta do nível 6; carryCapacity 1 → 3', () => {
+  it('acessível por volta do nível 6 (pós-teste 3: R$ 1.500, ~3 dias de lucro); carryCapacity 1 → 3', () => {
     const s = at(5, 10_000_000);
     const d = upgradeCatalog(s).find((u) => u.id === 'dolly')!;
     expect(d.owned).toBe(false);
     expect(d.minLevel).toBe(6);
-    expect(d.cost).toBeGreaterThanOrEqual(400000);
-    expect(d.cost).toBeLessThanOrEqual(800000);
+    expect(d.cost).toBeGreaterThanOrEqual(100000);
+    expect(d.cost).toBeLessThanOrEqual(300000);
     expect(carryCapacity(s)).toBe(1);
     expect(() => buyUpgrade(s, 'dolly')).toThrow('Requer nível 6');
     s.level = 6;

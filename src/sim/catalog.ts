@@ -34,14 +34,16 @@ export interface Product {
 export const LICENSES: License[] = [
   { id: 'mercearia', name: 'Mercearia', minLevel: 1, cost: 0 },
   { id: 'bebidas', name: 'Bebidas', minLevel: 2, cost: 10000 },
-  { id: 'laticinios', name: 'Laticínios', minLevel: 4, cost: 150000 },
-  { id: 'padaria', name: 'Padaria', minLevel: 6, cost: 350000 },
-  { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 700000 },
-  { id: 'congelados', name: 'Congelados', minLevel: 10, cost: 1300000 },
-  { id: 'hortifruti', name: 'Hortifrúti', minLevel: 13, cost: 2200000 },
-  { id: 'higiene', name: 'Higiene e Beleza', minLevel: 16, cost: 3400000 },
-  { id: 'frios', name: 'Açougue e Frios', minLevel: 20, cost: 5200000 },
-  { id: 'eletronicos', name: 'Eletrônicos e Utilidades', minLevel: 25, cost: 8500000 },
+  // pós-teste 3: meio do jogo bem mais barato (laticínios R$ 1.500 → 600; padaria 3.500 → 1.500; limpeza 7.000 → 3.000);
+  // fim do jogo corta menos (~20–30%), para o jogador eficiente não disparar depois do nível 10
+  { id: 'laticinios', name: 'Laticínios', minLevel: 4, cost: 60000 },
+  { id: 'padaria', name: 'Padaria', minLevel: 6, cost: 150000 },
+  { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 300000 },
+  { id: 'congelados', name: 'Congelados', minLevel: 10, cost: 900000 },
+  { id: 'hortifruti', name: 'Hortifrúti', minLevel: 13, cost: 1600000 },
+  { id: 'higiene', name: 'Higiene e Beleza', minLevel: 16, cost: 2600000 },
+  { id: 'frios', name: 'Açougue e Frios', minLevel: 20, cost: 4200000 },
+  { id: 'eletronicos', name: 'Eletrônicos e Utilidades', minLevel: 25, cost: 7000000 },
 ];
 
 export const PRODUCTS: Product[] = [

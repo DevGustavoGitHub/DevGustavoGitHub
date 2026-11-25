@@ -18,15 +18,17 @@ export class Night {
   show(): void {
     if (this.card) return;
     const time = this.kit.ctx.clock.hhmm;
+    // pós-teste: o botão fica DENTRO do aviso da noite (canto superior direito), longe da coluna de ações (SAIR DO
+    // CAIXA, arremessar/largar caixa), para não cobrir nada enquanto o jogador arruma a loja antes de virar o dia
+    this.btn = h('button', { class: 'endday', id: 'end-day', on: tapOn(() => this.endDay()) },
+      h('span', { html: moonSvg(40) }), h('span', null, 'Terminar', h('br'), 'o dia'));
     this.card = h('div', { class: 'mcard night', role: 'status' },
       h('div', { class: 'mc-box' },
         h('div', { class: 'mc-ic' }, h('div', { class: 'night-ic' }, h('b', null, 'Noite'), h('span', null, time))),
-        h('div', { class: 'mc-main' }, h('div', { class: 'mc-tx' }, 'Nenhum cliente novo virá à noite'))),
+        h('div', { class: 'mc-main' }, h('div', { class: 'mc-tx' }, 'Nenhum cliente novo à noite')),
+        this.btn),
       h('div', { class: 'mc-face', html: managerSvg('bust') }));
-    this.btn = h('button', { class: 'endday', id: 'end-day', on: tapOn(() => this.endDay()) },
-      h('span', { html: moonSvg(40) }), h('span', null, 'Terminar', h('br'), 'o dia'));
     this.hud.slot.prepend(this.card);
-    this.root.appendChild(this.btn);
     this.missions.paused = true;
     this.kit.sfx('night');
     this.sync();

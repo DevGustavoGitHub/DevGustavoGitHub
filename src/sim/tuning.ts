@@ -26,17 +26,22 @@ export const INITIAL_SHELVES: readonly string[] = ['', ''];
 export const RENT = { base: 8000 as Cents, perExpansion: 4000 as Cents, startLevel: 4, startDay: 6, rampSteps: 3 };
 
 /** Expansão do salão: índice 0 = 1ª expansão (expansion 0→1). Até 6 níveis (layout.MAX_EXPANSION). */
+/**
+ * Pós-teste 3 (nível 6 no dia 10 sem conseguir comprar expansão, depósito, laticínios, capacidade nem carrinho): preços do
+ * meio do jogo ~½ a ⅓ dos anteriores (1ª expansão R$ 1.500 → 800, 2ª 4.500 → 2.000, 3ª 11.000 → 4.500) — com lucro de
+ * ~R$ 300–550/dia nos níveis 4–6 (bot cuidadoso), cada compra custa ~2–5 dias de economia em vez de 5–15.
+ */
 export const EXPANSIONS: { cost: Cents; minLevel: number }[] = [
-  { cost: 150000, minLevel: 3 },
-  { cost: 450000, minLevel: 5 },
-  { cost: 1100000, minLevel: 6 },
-  { cost: 2600000, minLevel: 7 },
-  { cost: 7500000, minLevel: 15 },
-  { cost: 18000000, minLevel: 28 },
+  { cost: 80000, minLevel: 3 },
+  { cost: 200000, minLevel: 5 },
+  { cost: 450000, minLevel: 6 },
+  { cost: 1000000, minLevel: 7 },
+  { cost: 5500000, minLevel: 15 },
+  { cost: 14000000, minLevel: 28 },
 ];
 
 /** Depósito: custo, nível mínimo, capacidade-base (caixas) e capacidade por estante (rack). */
-export const STORAGE = { cost: 250000 as Cents, minLevel: 5, baseBoxes: 6, rackBoxes: 8 };
+export const STORAGE = { cost: 120000 as Cents, minLevel: 5, baseBoxes: 6, rackBoxes: 8 }; // pós-teste 3: R$ 2.500 → 1.200
 
 export type EmployeeRole = 'cashier' | 'stocker' | 'janitor';
 export const MAX_EMPLOYEE_LEVEL = 5;
@@ -46,19 +51,19 @@ export const EMPLOYEE_TABLE: Record<EmployeeRole, { cost: Cents[]; minLevel: num
   cashier: {
     cost: [25000, 45000, 80000, 140000, 230000],
     minLevel: [4, 8, 12, 16, 20],
-    wage: [10000, 13000, 17000, 22000, 28000],
+    wage: [8000, 11000, 15000, 20000, 26000], // pós-teste 3: −R$ 20/dia (era 100/130/170/220/280)
     seconds: [10, 8, 6.5, 5, 4],
   },
   stocker: {
     cost: [30000, 50000, 85000, 140000, 220000],
     minLevel: [8, 11, 14, 18, 22],
-    wage: [11000, 14000, 18000, 23000, 29000],
+    wage: [9000, 12000, 16000, 21000, 27000], // pós-teste 3: −R$ 20/dia
     seconds: [7, 5.5, 4.5, 3.5, 2.5],
   },
   janitor: {
     cost: [20000, 35000, 60000, 100000, 160000],
     minLevel: [6, 9, 13, 17, 21],
-    wage: [8000, 10000, 13000, 17000, 22000],
+    wage: [5000, 7000, 10000, 14000, 19000], // pós-teste 3: faxineiro −R$ 30/dia (era 80/100/130/170/220)
     seconds: [9, 7, 5.5, 4.5, 3.5],
   },
 };
@@ -112,9 +117,9 @@ export const BANKRUPTCY = { floor: 0 as Cents, stockRecovery: 0.5, restartMoney:
  */
 export const UPGRADES = {
   tipjar: { name: 'Pote de gorjeta', description: 'Clientes satisfeitos deixam gorjetas 50% maiores.', cost: 10000 as Cents, minLevel: 2, mult: 1.5 },
-  capacity: { name: 'Capacidade de clientes', description: 'Mais 4 clientes podem estar na loja ao mesmo tempo.', cost: 150000 as Cents, minLevel: 4, extra: 4 },
+  capacity: { name: 'Capacidade de clientes', description: 'Mais 4 clientes podem estar na loja ao mesmo tempo.', cost: 60000 as Cents, minLevel: 4, extra: 4 }, // pós-teste 3: R$ 1.500 → 600
   recycler: { name: 'Lixeira de reciclagem', description: 'Caixas de papelão vazias jogadas na lixeira verde rendem R$ 0,25 cada; o repositor também recicla.', cost: 40000 as Cents, minLevel: 5 },
-  dolly: { name: 'Carrinho de carga', description: 'Carregue até 3 caixas de uma vez em vez de 1.', cost: 500000 as Cents, minLevel: 6, carry: 3 },
+  dolly: { name: 'Carrinho de carga', description: 'Carregue até 3 caixas de uma vez em vez de 1.', cost: 150000 as Cents, minLevel: 6, carry: 3 }, // pós-teste 3: R$ 5.000 → 1.500
 };
 export const BASE_CARRY = 1;
 /** Crédito por caixa vazia reciclada (melhoria 'recycler'). */

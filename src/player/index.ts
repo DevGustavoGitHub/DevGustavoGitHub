@@ -1137,17 +1137,25 @@ export default function create(): GameModule {
 
       // início: de frente para o balcão (computador à vista), do lado do cliente
       const s = ctx.state, b = storeBounds(s.expansion);
+      // sempre DENTRO do salão: com o balcão perto da entrada, a frente dele dá na calçada (o jogador nascia lá fora,
+      // olhando por uma coluna da fachada) — tenta frente, diagonais e laterais, e olha para o balcão
       let sx = b.width / 2, sz = b.depth - 2.5;
-      yaw = 0;
+      let look: { x: number; z: number } | null = null;
       const counter = s.furniture.find((f) => f.type === 'counter');
       if (counter) {
         const r = furnRect(counter), cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
         const a = (counter.rot * Math.PI) / 180, fx = Math.sin(a), fz = Math.cos(a);
-        sx = cx + fx * 2.3; sz = cz + fz * 2.3;
-        yaw = Math.atan2(fx, fz);
+        const inside = (x: number, z: number): boolean => x > 0.8 && x < b.width - 0.8 && z > 0.8 && z < b.depth - 0.8;
+        const k = Math.SQRT1_2;
+        for (const [ux, uz] of [[fx, fz], [(fx - fz) * k, (fz + fx) * k], [(fx + fz) * k, (fz - fx) * k], [-fz, fx], [fz, -fx]] as const) {
+          const x = cx + ux * 2.3, z = cz + uz * 2.3;
+          if (inside(x, z)) { sx = x; sz = z; break; }
+        }
+        look = { x: cx, z: cz };
       }
       const p0 = collider.findFree(sx, sz, RADIUS);
       pos.x = p0.x; pos.z = p0.z;
+      yaw = look ? Math.atan2(-(look.x - p0.x), -(look.z - p0.z)) : 0;
       svc.position.set(pos.x, 0, pos.z);
       // caixas "carregadas" de um save: soltar perto do jogador
       for (const bx of s.sidewalk) {
