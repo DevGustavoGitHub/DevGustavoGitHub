@@ -24,6 +24,7 @@ for (const [w, h] of [[844, 390], [740, 360]]) {
   }
   const f = await page.evaluate(() => {
     __game.clock.paused = true;
+    window.__npc.stock(0, 'macarrao'); // prateleiras iniciais sem etiqueta: etiqueta os níveis vazios (0 un.)
     const b = { productId: 'macarrao', units: 20, carried: true, open: true };
     __game.state.sidewalk.push(b); __player.svc.carryingAll.push(b); __game.bus.emit('stateChanged', { what: 'sidewalk' });
     return __game.state.furniture.find((x) => x.type === 'shelf' && x.levels?.some((l) => l.productId === 'macarrao'));

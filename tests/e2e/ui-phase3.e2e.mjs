@@ -123,7 +123,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
     await page.waitForTimeout(120);
     check(`[${tag}] aba ${title} no visual novo`, (await page.locator('.t3-head h2').innerText()).toLowerCase() === title.toLowerCase() && (await page.locator('.bigcard').count()) > 0);
   }
-  check(`[${tag}] Melhorias com 3 itens`, (await page.locator('.bigcard[data-upgrade]').count()) === 3);
+  check(`[${tag}] Melhorias com 4 itens (carrinho, pote, capacidade, recicladora)`, (await page.locator('.bigcard[data-upgrade]').count()) === 4);
   if (w === 844) await shot(page, `${tag}-tab-staff`);
   await page.keyboard.press('Escape');
   await page.evaluate(() => window.__game.bus.emit('ui:openTablet', { tab: 'prices', productId: 'feijao' }));

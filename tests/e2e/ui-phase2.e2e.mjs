@@ -122,7 +122,7 @@ const closeTablet = async (page) => { await page.keyboard.press('Escape'); await
 /* ---------- 3) "Encher prateleiras" (substitui "Comprar o que falta") e Preços ---------- */
 {
   const { ctx, page } = await boot(844, 390);
-  await page.evaluate(() => { const s = __game.state; s.money = 2_000_000; s.sidewalk = []; s.storage = {}; for (const f of s.furniture) for (const l of f.levels ?? []) l.units = 0; s.shelf = {}; __game.bus.emit('stateChanged', { what: 'shelf' }); });
+  await page.evaluate(() => { const s = __game.state; s.money = 2_000_000; s.sidewalk = []; s.storage = {}; for (const f of s.furniture) for (const l of f.levels ?? []) l.units = 0; window.__npc.stock(0); __game.bus.emit('stateChanged', { what: 'shelf' }); }); // prateleiras iniciais vêm sem etiqueta: stock(0) etiqueta os níveis (0 un.)
   await openTablet(page, 'market');
   await page.locator('#mk-fill').click();
   await page.waitForTimeout(250);

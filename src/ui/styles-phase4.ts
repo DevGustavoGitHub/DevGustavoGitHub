@@ -68,7 +68,7 @@ export const phase4Css = `
   .pay-act .pk{min-height:44px}
 }
 @media (max-height:380px){
-  .pay-pad{gap:4px;grid-auto-rows:minmax(40px,1fr)}
+  .pay-pad{gap:4px;grid-template-rows:repeat(4,minmax(40px,1fr))}
   .pay-pad .pk{font-size:20px;min-height:40px}
 }
 

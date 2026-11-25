@@ -50,7 +50,7 @@ const mid = await page.evaluate(() => ({ panel: !!document.querySelector('.pay')
 check('com o painel aberto o cliente NÃO volta a estender o pagamento', !(mid.panel && mid.lane?.phase === 'pay' && mid.lane?.shown), JSON.stringify({ panel: mid.panel, phase: mid.lane?.phase, shown: mid.lane?.shown }));
 // confirma o valor certo no painel
 if (req?.method === 'card') {
-  const s = (req.total / 100).toFixed(2).replace('.', ',').replace(/,?0+$/, '');
+  const s = String(req.total); // vírgula fixa: digita só os centavos (2350 = R$ 23,50)
   for (const ch of s) await page.locator(`.pay-pad [data-key="${ch}"]`).click();
 } else if (req) {
   let rest = req.paid - req.total;

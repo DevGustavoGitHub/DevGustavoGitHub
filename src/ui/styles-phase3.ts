@@ -148,8 +148,9 @@ export const phase3Css = `
 .pay-screen b{font-size:28px;color:#1d2a3c;white-space:nowrap}
 .pay-due{font-size:12.5px;font-weight:800;color:#5f6b78;text-align:center}
 .pay-screen .due-in{display:none;font-size:11px;font-weight:800;color:#6b7785;margin-left:6px}
-.pay-pad{flex:1 1 0;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:minmax(44px,1fr);gap:6px}
-.pay-pad .pk{min-height:44px;font-size:28px}.pay-pad .pk.ok{grid-column:1/-1}
+/* maquininha: 1 2 3 / 4 5 6 / 7 8 9 / ⌫ 0 C + OK alto à direita (como o Enter do teclado numérico): 4 fileiras cabem até em 330 px de altura */
+.pay-pad{flex:1 1 0;min-height:0;display:grid;grid-template-columns:repeat(3,1fr) 1.2fr;grid-template-rows:repeat(4,minmax(44px,1fr));gap:6px}
+.pay-pad .pk{min-height:44px;font-size:28px}.pay-pad .pk.ok{grid-column:4;grid-row:1/span 4}
 .pay-done{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#fff;font-weight:900;font-size:22px;animation:mx-pop .25s}
 .pay.card .pay-done{color:#1d2a3c}
 .pay-done span{width:76px;height:76px;border-radius:50%;background:#22b13c;color:#fff;display:flex;align-items:center;justify-content:center}
@@ -157,14 +158,14 @@ export const phase3Css = `
 @media (max-height:420px){
   .pay{gap:4px;padding:6px}.pay-h h3{font-size:18px}
   .pay-den small{display:none}.pay-info b{font-size:13px}.pk{min-height:46px;font-size:23px}
-  .pay-pad{gap:5px;grid-auto-rows:minmax(40px,1fr)}.pay-pad .pk{font-size:22px;min-height:40px}
+  .pay-pad{gap:5px;grid-template-rows:repeat(4,minmax(40px,1fr))}.pay-pad .pk{font-size:22px;min-height:40px}
   .pay-screen{min-height:38px}.pay-screen b{font-size:24px}
 }
 
 @media (max-height:400px){
   .pay{top:calc(var(--hud-b,48px) + 4px);bottom:calc(var(--sa-b) + 6px)}
   .pay.card .pay-speed,.pay.card .pay-due{display:none}.pay-screen .due-in{display:inline}
-  .pay-screen{min-height:36px}.pay-screen b{font-size:22px}.pay-pad{gap:4px;grid-auto-rows:minmax(40px,1fr)}.pay-pad .pk{min-height:40px}
+  .pay-screen{min-height:36px}.pay-screen b{font-size:22px}.pay-pad{gap:4px;grid-template-rows:repeat(4,minmax(40px,1fr))}.pay-pad .pk{min-height:40px}
 }
 
 /* ---------------- aviso de orientação ---------------- */

@@ -30,7 +30,8 @@ await page.evaluate(() => {
   window.__clicks = [];
   document.addEventListener('click', (e) => { const t = e.target.closest('button'); if (t && t.closest('.t3')) window.__clicks.push((t.textContent || '').trim().slice(0, 16) + '|' + (t.closest('[data-product]')?.dataset.product ?? '')); }, true);
 });
-// prateleira do macarrão (id 3, layout inicial), níveis 0 e 2
+// prateleira do macarrão, níveis 0 e 2 (as prateleiras iniciais vêm sem etiqueta: etiqueta os níveis vazios com macarrão)
+await page.evaluate(() => { window.__npc.stock(0, 'macarrao'); __game.bus.emit('stateChanged', { what: 'shelf' }); });
 const f = await page.evaluate(() => __game.state.furniture.find((x) => x.type === 'shelf' && x.levels?.some((l) => l.productId === 'macarrao')));
 for (const lvl of [0, 2]) {
   await page.evaluate(() => { __game.state.prices = {}; window.__clicks.length = 0; });
