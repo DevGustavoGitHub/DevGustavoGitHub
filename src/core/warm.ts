@@ -59,6 +59,19 @@ export function warmUp(ctx: GameContext, o: { scene?: boolean; hold?: boolean } 
   // garante término mesmo se o driver nunca responder ao estado de compilação
   const timeout = new Promise((res) => setTimeout(res, 8000));
   running = Promise.race([jobs, timeout]).then(() => {
+    // 1º uso de cada programa (lista de uniforms, checagem de erros) e upload das texturas dos exemplos também saem do
+    // meio do jogo: no perfil com CPU ×4 eram ~30–40% dos quadros longos quando um cliente novo aparecia
+    try {
+      for (const p of r.info.programs ?? []) (p as unknown as { getUniforms?: () => unknown }).getUniforms?.();
+      const seen = new Set<THREE.Texture>();
+      group.traverse((x) => {
+        const m = (x as THREE.Mesh).material;
+        for (const mat of Array.isArray(m) ? m : m ? [m] : []) {
+          const map = (mat as THREE.MeshBasicMaterial).map;
+          if (map && !seen.has(map)) { seen.add(map); r.initTexture(map); }
+        }
+      });
+    } catch (e) { console.warn('[warm] pré-upload falhou', e); }
     if (o.hold && ctx.frame) ctx.frame.hold = Math.max(0, ctx.frame.hold - 1);
     group.clear();
     running = null;

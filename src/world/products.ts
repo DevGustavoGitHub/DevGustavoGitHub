@@ -4,7 +4,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { productById, type Product } from '../sim/catalog';
+import { PRODUCTS, productById, type Product } from '../sim/catalog';
 import { boxGeo, cylGeo, sphGeo, planeGeo } from './kit';
 import { Batch, type Spec } from './batch';
 import { labelCell, labelMaterial, productLabelCell, productMaterial, productWhite, uvToCell, uvToWhite, whiteCell } from './atlas';
@@ -467,6 +467,14 @@ export function makeBoxMesh(pid: string, open: boolean, units?: number): THREE.G
   setUnits(units ?? size);
   setOpen(open ? 1 : 0);
   return root;
+}
+
+/**
+ * Aquecimento (core/warm.ts): monta no carregamento as geometrias em cache de TODOS os produtos (item, caixa aberta e
+ * fechada, casco animável). Antes o 1º repositor/caixa de cada produto montava isso no meio do jogo (~4 ms cada no PC).
+ */
+export function prewarmProductGeometry(): void {
+  for (const p of PRODUCTS) { productVisual(p.id); boxVisual(p.id, false); boxVisual(p.id, true); shellGeo(p.id); }
 }
 
 /** Geometria (cache) da caixa fechada/aberta com etiqueta — prévia de `build:box`. */

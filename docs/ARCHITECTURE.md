@@ -59,17 +59,21 @@ WebView mostrar problemas por aparelho (há relatos de WebGL mais lento no WebVi
 4. **Materiais**: foscos em Lambert; **MSAA só com pixel ratio ≤ 1,5** (no "Alta" em DPR ≥ 2 o MSAA quase não muda a imagem).
 5. **NPCs**: corpo e cabeça (com cabelo/chapéu/óculos) com UM material cada (cor por parte no shader) e sombras de todos
    num InstancedMesh: ~10 → ~4 draw calls por pessoa; menos recálculos de quatérnio na animação.
-6. **Aquecimento de shaders** (`core/warm.ts`): tudo compilado no carregamento (sem travadinha no 1º cliente).
+6. **Aquecimento** (`core/warm.ts`): shaders compilados no carregamento (`compileAsync`), 1º uso dos programas, texturas das
+   roupas/notas/cartão e geometrias de caixa de todos os produtos prontas antes do jogo (sem travadinha no 1º cliente,
+   1º pagamento ou 1º repositor).
 7. **Sincronização do mundo**: chaves de mudança numéricas (antes strings gigantes) e itens das prateleiras recalculados
-   só no móvel que mudou, com upload só do produto afetado.
+   só no móvel que mudou, com upload só do produto afetado; A* sem alocar por busca.
 8. UI: animação de pulso só com transform/opacity; atlas de etiquetas sem área desperdiçada.
+9. **Android**: tela pedida em 60 Hz quando o limite é 60/30 (`preferredDisplayModeId` via ponte JS → `MainActivity`),
+   como faz o Frame Pacing [swappy]; `hardwareAccelerated` explícito. Compila; falta conferir no aparelho.
 
 ### Para depois (ordem de impacto estimado)
 1. **Bake de luz/AO da casca da loja** (piso, paredes, teto, móveis fixos) em `lightMap`/`aoMap` e materiais Lambert/Basic;
    com isso o "Alta" pode dispensar a amostragem do mapa de sombra no interior e ficar mais bonito (AO suave). Pode ser
    gerado offline em CPU (este ambiente não tem GPU) ou uma vez no aparelho.
-2. **Pedir 60 Hz à tela no Android** (`preferredDisplayModeId` quando o limite é 60), como faz o Frame Pacing [swappy]:
-   menos composição a 120 Hz e menos bateria. Requer ponte JS → Java no `MainActivity`.
+2. **Tela do caixa e etiquetas**: hoje cada item bipado redesenha e reenvia a textura 512² do monitor (o maior resto nos
+   quadros longos com CPU ×4); desenhar só a parte que muda (texSubImage2D parcial) ou usar texto em malha resolveria.
 3. **NPC em lote**: animação por textura (VAT) ou LOD de malha para quem está longe; cesta + itens no mesmo draw call.
 4. **IA/caminhos num Web Worker** (A* e decisões dos clientes fora da thread principal).
 5. **WebGPU** (`WebGPURenderer` do three) quando a cobertura no Android for ampla: render bundles reduzem custo de CPU

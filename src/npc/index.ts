@@ -20,6 +20,8 @@ import { createFallbackWorld } from './fallbackWorld';
 import { stockForTest } from './helpers';
 import { type CustomerKind, Person, disposeModels, pickKind, randomCustomerSpec, shadowBlob } from './model';
 import { Bubble } from './bubbles';
+import { PayProp } from './props';
+import { KIND_OUTFIT, OUTFITS, UNIFORMS, outfitMaterial } from './looks';
 import { addOutline } from '../core/outline';
 import { registerWarm } from '../core/warm';
 import { type AgentLike, type BubbleKey, type Env, clamp, safe } from './shared';
@@ -113,6 +115,10 @@ export default function create(): GameModule {
     p.setCarryBox(true); p.setCarryOpen(true, 'arroz'); p.setMop(true);
     add(p.root);
     const b = new Bubble(1); b.show('obrigado', 1); add(b.sprite);
+    add(new PayProp().group); // notas/cartão: cria e sobe as texturas no carregamento (antes: no 1º pagamento)
+    // texturas de todas as roupas (24 × 128 KB) sobem no carregamento: sem upload no 1º quadro de cada cliente novo
+    const g = new THREE.PlaneGeometry(0.01, 0.01);
+    for (const o of [...OUTFITS, ...Object.values(KIND_OUTFIT), ...Object.values(UNIFORMS)]) add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: outfitMaterial(o).map })));
     const o = new THREE.Group(); o.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshLambertMaterial())); addOutline(o); add(o);
   }
   let autoBroken = false;

@@ -17,7 +17,7 @@ import {
   furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, silhouetteOf, type SBox,
   isDisplayType, levelCountOf, levelGeoms, levelHeights, levelIndexAt, levelPids, levelVisible,
 } from './furniture';
-import { BoxLayer, ItemLayer, BOX_H, BOX_W, BOX_D, genericVisual, productVisual, makeProductMesh, makeBoxMesh, type BoxInst } from './products';
+import { BoxLayer, ItemLayer, BOX_H, BOX_W, BOX_D, genericVisual, productVisual, makeProductMesh, makeBoxMesh, prewarmProductGeometry, type BoxInst } from './products';
 import { SHAPES } from './look';
 import { combine, meshesOf } from './batch';
 import { TIERS, autoStart, autoSteps, initialQuality, isMobileDevice, isQuality, saveAutoStep, type Quality } from './quality';
@@ -742,7 +742,9 @@ export default function create(): GameModule {
   });
   /* ---------------- aquecimento de shaders (objetos que só aparecem depois) ---------------- */
   let warmReady = false;
+  let geoWarm = false;
   function warmSamples(add: (o: THREE.Object3D) => void): void {
+    if (!geoWarm) { geoWarm = true; prewarmProductGeometry(); }
     add(makeProductMesh(PRODUCTS[0]!.id)); // esteira/cesta (Mesh com o material dos produtos)
     const bm = makeBoxMesh(PRODUCTS[0]!.id, true, 6); bm.userData.setOpen?.(1); add(bm); // caixa animável (mãos/repositor)
     add(tipJars.sample()); // pote de gorjeta, "+R$" e painel

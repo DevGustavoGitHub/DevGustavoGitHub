@@ -3,6 +3,7 @@
  * desce um degrau da escada (pixel ratio; sombras só no último degrau) com histerese:
  * - desce depois de 2 janelas lentas seguidas (média < 90% do FPS alvo), ou 1 janela muito lenta (< 60%), e só se o
  *   gargalo parece ser a GPU (o JS do quadro ocupa < 75% do intervalo: com a CPU no limite, baixar a resolução não ajuda);
+ *   intervalos ≥ 800 ms são pausa (aba oculta) e zeram a janela; quadros lentos entram limitados a 250 ms;
  * - sobe depois de várias janelas boas seguidas (≥ 97% do alvo); se a subida deixa o jogo lento logo em seguida, volta e
  *   dobra a espera antes de tentar de novo (até 60 janelas), para não ficar oscilando;
  * - depois de desligar as sombras (troca de shader) não volta a ligá-las nesta sessão.
@@ -16,6 +17,11 @@ export interface DrsOptions {
   /** Janelas boas seguidas antes da 1ª tentativa de subir. */
   upAfter?: number;
 }
+
+/** Intervalo a partir do qual é pausa (aba oculta, app em segundo plano) e não lentidão. */
+const PAUSE_MS = 800;
+/** Teto de um quadro na média (≈ 4 fps): aparelho muito lento ainda é medido, travada isolada pesa pouco. */
+const SLOW_CAP_MS = 250;
 
 export class DynamicResolution {
   index: number;
@@ -48,9 +54,10 @@ export class DynamicResolution {
    * do FPS alvo (limite do jogador; sem limite = 60 fps). Devolve o novo índice quando muda de degrau, senão null.
    */
   frame(now: number, interval: number, work: number, target: number): number | null {
-    if (!(interval > 0) || interval > 250) { this.reset(); return null; } // pausa/travada isolada: não é desempenho
+    if (!(interval > 0) || interval >= PAUSE_MS) { this.reset(); return null; } // aba oculta/pausa: não é desempenho
     if (this.winStart < 0) { this.winStart = now; this.frames = 0; this.sumInterval = 0; this.sumWork = 0; return null; }
-    this.frames++; this.sumInterval += interval; this.sumWork += Math.max(0, work);
+    // quadro lento conta, mas limitado: uma travada isolada não derruba a média da janela inteira
+    this.frames++; this.sumInterval += Math.min(interval, SLOW_CAP_MS); this.sumWork += Math.min(Math.max(0, work), SLOW_CAP_MS);
     if (now - this.winStart < this.windowMs || this.frames < 8) return null;
     const avg = this.sumInterval / this.frames, avgWork = this.sumWork / this.frames;
     const ratio = target / avg; // 1 = no alvo
@@ -100,9 +107,9 @@ export class SlowWatch {
   /** true uma única vez, depois de `needWindows` janelas seguidas abaixo de 75% do alvo. */
   frame(now: number, interval: number, target: number): boolean {
     if (this.fired) return false;
-    if (!(interval > 0) || interval > 250) { this.reset(); return false; }
+    if (!(interval > 0) || interval >= PAUSE_MS) { this.reset(); return false; }
     if (this.winStart < 0) { this.winStart = now; return false; }
-    this.frames++; this.sum += interval;
+    this.frames++; this.sum += Math.min(interval, SLOW_CAP_MS);
     if (now - this.winStart < this.windowMs || this.frames < 5) return false;
     const ratio = target / (this.sum / this.frames);
     this.winStart = now; this.frames = 0; this.sum = 0;

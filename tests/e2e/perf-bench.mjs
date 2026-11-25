@@ -327,9 +327,12 @@ if (PHASES.has('day')) {
   const fresh = p1.keys.filter((k) => !p0.keys.includes(k));
   out.programs = { atWarm: p0.keys.length, atEnd: p1.keys.length, newDuringDay: fresh, linksDuringDay: p1.links - p0.links, linkWaitMsDuringDay: +(p1.wait - p0.wait).toFixed(1), linksAfterStart: p1.links - boot.links, totalLinks: p1.links, totalLinkWaitMs: +p1.wait.toFixed(1), minutes: [Math.round(p0.minute), Math.round(p1.minute), p1.phase] };
   console.log(`programas: aquecido=${p0.keys.length} fim=${p1.keys.length} novos no dia=${JSON.stringify(fresh)} (links depois da tela inicial ${p1.links - boot.links}, no dia ${p1.links - p0.links}; total ${p1.links}, espera de link ${p1.wait.toFixed(1)} ms) relógio ${Math.round(p0.minute)}→${Math.round(p1.minute)} ${p1.phase}`);
-  check('textura de canvas não é reenviada todo quadro (dia acelerado)', out.day.texCanvasPerSec <= Math.max(3, out.day.renderedPerSec * 0.5), `${out.day.texCanvasPerSec}/s com ${out.day.renderedPerSec} quadros/s`);
+  // no dia acelerado (×20) a tela do caixa redesenha a cada item bipado: só acusa se for TODO quadro
+  check('textura de canvas não é reenviada todo quadro (dia acelerado)', out.day.texCanvasPerSec < out.day.renderedPerSec * 0.9, `${out.day.texCanvasPerSec}/s com ${out.day.renderedPerSec} quadros/s`);
 }
 
+if (out.normal) check('textura de canvas não é reenviada todo quadro (ritmo normal)', out.normal.texCanvasPerSec <= Math.max(2, out.normal.renderedPerSec * 0.3), `${out.normal.texCanvasPerSec}/s com ${out.normal.renderedPerSec} quadros/s`);
+if (out.programs) check('nenhum shader novo durante o dia (depois do aquecimento)', out.programs.linksDuringDay === 0, `${out.programs.linksDuringDay} links`);
 check('sem erros de console', errors.length === 0, errors.slice(0, 3).join(' | '));
 out.errors = errors.slice(0, 20);
 if (env.BENCH_OUT) writeFileSync(env.BENCH_OUT, JSON.stringify(out, null, 1));
