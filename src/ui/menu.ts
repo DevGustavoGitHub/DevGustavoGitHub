@@ -65,7 +65,9 @@ export class Menus {
         h('div', { class: 'menu-sub' },
           h('button', { class: 'btn primary block', on: { click: close } }, 'Continuar'),
           ph === 'prep' || ph === 'open' ? h('button', { class: 'btn accent block', id: 'pause-store', on: { click: () => { close(); this.hooks.toggleStore(); } } },
-            h('span', { html: icon(ph === 'prep' ? 'store' : 'lock', 20) }), ph === 'prep' ? 'Abrir a loja' : 'Fechar a loja') : null,
+            // no expediente a placa só pausa a entrada de clientes (o dia termina às 21:00 ou em "Terminar o dia")
+            h('span', { html: icon(ph === 'prep' || clock.doorsClosed ? 'store' : 'lock', 20) }),
+            ph === 'prep' ? 'Abrir a loja' : clock.doorsClosed ? 'Abrir a porta' : 'Fechar a porta (pausar clientes)') : null,
           ph === 'report' ? null : h('button', { class: 'btn block', id: 'pause-end', on: { click: () => { close(); this.hooks.endDay(); } } }, h('span', { html: icon('moon', 20) }), 'Terminar o dia'),
           h('button', { class: 'btn block', on: { click: () => this.showOptions() } }, h('span', { html: icon('gear', 20) }), 'Opções'),
           h('button', { class: 'btn block', on: { click: () => { close(); if (tut) this.hooks.skipTutorial(); else this.hooks.replayTutorial(); } } }, h('span', { html: icon('bulb', 20) }), tut ? 'Pular tutorial' : 'Rever tutorial'),

@@ -230,11 +230,15 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
     await page.evaluate(() => { const s = window.__game.state; s.prices.arroz = 99900; window.__game.bus.emit('stateChanged', { what: 'price' }); });
     await page.waitForTimeout(600);
     check('[missões] tutorial concluído', await page.evaluate(() => localStorage.getItem('mercadinho:tutorial') === 'done' && !document.querySelector('.mcard.mission')));
-    // fechar pela placa pede confirmação
+    // no expediente a placa só PAUSA a entrada (porta fechada), sem encerrar o dia; tocar de novo reabre
+    await page.waitForTimeout(1100); // a placa ignora 2 toques em menos de 1 s
     await page.evaluate(() => window.__game.bus.emit('store:sign'));
-    await page.locator('.mx-dialog .btn.primary').click();
     await page.waitForTimeout(300);
-    check('[placa] fechar a loja com confirmação → noite', await page.evaluate(() => window.__game.clock.phase === 'closing'));
+    check('[placa] no expediente fecha só a porta (pausa clientes), sem ir para a noite', await page.evaluate(() => window.__game.clock.phase === 'open' && window.__game.clock.doorsClosed === true && !window.__game.clock.signOpen));
+    await page.waitForTimeout(1100);
+    await page.evaluate(() => window.__game.bus.emit('store:sign'));
+    await page.waitForTimeout(300);
+    check('[placa] tocar de novo reabre a porta', await page.evaluate(() => window.__game.clock.phase === 'open' && window.__game.clock.doorsClosed === false));
   }
 
   /* ---------- 7) Noite + Terminar o dia + resumo ---------- */
