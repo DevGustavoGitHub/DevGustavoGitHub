@@ -22,5 +22,11 @@ Ordem = prioridade. Só começar depois da integração base (build + testes + e
 13. Promoções/cartazes: desconto temporário em um produto que atrai fluxo.
 14. Câmeras e segurança só se ladrões entrarem no jogo (ficaram fora da v1).
 
+## Pendências conhecidas (pós-teste 2)
+- Saves antigos mantêm o balcão onde estava; o layout novo (balcão reto perto da entrada, mesa do computador colada) vale para jogo novo ou ao "Mover" o balcão.
+- Ajuste fino do ritmo do início depende do próximo teste no aparelho (chegadas 13/17/20 nos níveis 1–3, cestas de 1–3 itens, placa pausa a entrada).
+- Cache de texturas de rótulos cresce com produtos novos (baixo impacto; limpar ao trocar de dia se aparecer no perfil de memória).
+- NPCs não colidem com o jogador (atravessam); só a grade de navegação é respeitada.
+
 ## Descartado por decisão do produto
 Anúncios, energia, esperas artificiais e qualquer monetização que venda tempo ou vantagem.
