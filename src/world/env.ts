@@ -28,7 +28,16 @@ const lerpKeys = (keys: Key[], t: number, out: THREE.Color, tmp: THREE.Color): v
 const SKY_TOP: Key[] = [[0, 0x5fb2f0], [0.35, 0x3f9bea], [0.7, 0x4f8fd8], [0.88, 0x5b62b0], [1, 0x2c2f66]];
 const SKY_HOR: Key[] = [[0, 0xfde7c4], [0.35, 0xd5ecff], [0.7, 0xe8e0d0], [0.88, 0xffb98a], [1, 0xa86a7a]];
 const SUN_COL: Key[] = [[0, 0xffd7a0], [0.3, 0xfff4e0], [0.7, 0xffe0b0], [0.9, 0xff9d62], [1, 0xff7a4a]];
-const HEM_SKY: Key[] = [[0, 0xcfe4ff], [0.5, 0xcfe4ff], [0.9, 0xa9a4d8], [1, 0x7a78b8]];
+// pós-teste 3: à noite o ambiente era roxo-escuro (loja "sem luz"); agora vai para o branco quente das luminárias
+const HEM_SKY: Key[] = [[0, 0xdfeaff], [0.5, 0xdfeaff], [0.85, 0xfff1de], [1, 0xfff0d8]];
+/**
+ * Luz da LOJA (pós-teste 3: "luz muito fraca; à noite parece que não tem luz acesa"). Antes o ambiente era 1,0–1,2 (paredes,
+ * prateleiras e produtos — superfícies verticais — dependem quase só dele) e à noite ficava roxo-escuro. Agora o ambiente é
+ * forte e constante como luminárias acesas (2,4 de dia → 2,6 à noite, branco quente) e o sol fica mais suave (×0,6), para o
+ * piso não estourar ao meio-dia. A rua usa materiais próprios (env.ext) reescalados para manter o visual antigo de dia e
+ * escurecer à noite.
+ */
+const STORE_LIGHT_DAY = 2.4, STORE_LIGHT_NIGHT = 2.6, SUN_SCALE = 0.6;
 
 const CAR_COLORS = [0xd94f4f, 0x3a7bd5, 0xf2c230, 0x58b368, 0xeeeeee, 0x7a56c2];
 /** Carro (lote fosco): carroceria, cabine escura, rodas, faróis. */
@@ -82,6 +91,22 @@ export class Env {
   private cTop = new THREE.Color(); private cHor = new THREE.Color(); private tmp = new THREE.Color();
   private lastT = -1;
   private sunT = -1;
+  /** Materiais SÓ da rua (chão, calçada, prédios, árvores, mobiliário, carros, nuvens): cor-base para escurecer à noite. */
+  private ext: { m: THREE.Material & { color: THREE.Color }; base: THREE.Color }[] = [];
+  private extClones = new Map<THREE.Material, THREE.Material>();
+  /** Registra um material externo (guarda a cor-base). */
+  private extMat<T extends THREE.Material & { color: THREE.Color }>(m: T): T { this.ext.push({ m, base: m.color.clone() }); return m; }
+  /** Clone do material compartilhado (kindMaterial) só para a rua, registrado; 'glow' (luz própria) fica como está. */
+  private extOf(src: THREE.Material | THREE.Material[]): THREE.Material | THREE.Material[] {
+    if (Array.isArray(src) || src === kindMaterial('glow')) return src;
+    let c = this.extClones.get(src);
+    if (!c) {
+      c = this.tr.mat(src.clone());
+      if ((c as THREE.Material & { color?: THREE.Color }).color) this.extMat(c as THREE.Material & { color: THREE.Color });
+      this.extClones.set(src, c);
+    }
+    return c;
+  }
   /** Sobe quando o sol muda de posição (o world reenvia o mapa de sombra estático só nessas horas). */
   sunVersion = 0;
   private dm = new THREE.Object3D();
@@ -133,11 +158,11 @@ export class Env {
       const pg = new THREE.PlaneGeometry(w, d); pg.rotateX(-Math.PI / 2); scaleUV(pg, w / su, d / sv); pg.translate(x, y, z); return pg;
     };
     const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh => { const m = new THREE.Mesh(tr.geo(geo), mat); m.receiveShadow = true; g.add(m); return m; };
-    mesh(plane(600, 600, cx, -0.03, D / 2, 600, 600), tr.mat(new THREE.MeshLambertMaterial({ color: 0x9fbf88 })));
+    mesh(plane(600, 600, cx, -0.03, D / 2, 600, 600), this.extMat(tr.mat(new THREE.MeshLambertMaterial({ color: 0x9fbf88 }))));
     const sideA = plane(xw, SIDEWALK_DEPTH, xc, 0.02, D + SIDEWALK_DEPTH / 2, 1, 1), sideB = plane(xw, SIDEWALK_DEPTH, xc, 0.02, farZ0 + SIDEWALK_DEPTH / 2, 1, 1);
-    mesh(mergeGeometries([sideA, sideB], false)!, tr.mat(new THREE.MeshLambertMaterial({ color: 0xd3d8de, map: paverTex() })));
+    mesh(mergeGeometries([sideA, sideB], false)!, this.extMat(tr.mat(new THREE.MeshLambertMaterial({ color: 0xd3d8de, map: paverTex() }))));
     sideA.dispose(); sideB.dispose();
-    mesh(plane(xw, ROAD_WIDTH, xc, 0.0, roadZ0 + ROAD_WIDTH / 2, 4, 4), tr.mat(new THREE.MeshLambertMaterial({ color: 0x4b4f57, map: asphaltTex() })));
+    mesh(plane(xw, ROAD_WIDTH, xc, 0.0, roadZ0 + ROAD_WIDTH / 2, 4, 4), this.extMat(tr.mat(new THREE.MeshLambertMaterial({ color: 0x4b4f57, map: asphaltTex() }))));
     // meios-fios e faixas
     const curb: Spec = ['matte', 0xbfc5cc], white: Spec = ['matte', 0xf3f3ee], yellow: Spec = ['matte', 0xf2c230];
     sb.box(xw, 0.12, 0.18, curb, xc, 0, roadZ0 + 0.03);
@@ -191,6 +216,7 @@ export class Env {
     let xf = -60;
     for (let i = 0; xf < W + 60; i++) { const w = 9 + Math.floor(hash01(i, 41) * 6); bld(xf, xf + w, farZ0 + SIDEWALK_DEPTH + 0.5, 12, 7 + hash01(i, 42) * 12, i, -1, i % 3 === 0); xf += w + 0.4; }
     const bm = new THREE.Mesh(tr.geo(mergeGeometries(bodies, false)!), this.bldMat); bm.receiveShadow = true; g.add(bm);
+    this.ext.push({ m: this.bldMat, base: new THREE.Color(0xffffff) }); this.ext.push({ m: this.lampMat, base: new THREE.Color(0xfff1c2) });
     bodies.forEach((q) => q.dispose());
     // postes (lâmpadas acendem à noite)
     const pole: Spec = ['metal', 0x2f3540];
@@ -217,7 +243,7 @@ export class Env {
     for (const dx of [-0.26, 0.26]) for (const dz of [-0.2, 0.2]) rb.box(0.1, FEET, 0.1, DK, rx + dx - 0.05, 0, rz + dz - 0.05); // pezinhos
     decal(rb, DECAL.recycle(), 0.36, 0.36, rx, 0.45, rz + 0.33);
     this.recyclerGlow = new THREE.Group(); this.recyclerGlow.name = 'recycleBin';
-    for (const m of meshesOf(rb.build(), this.recyclerGlow, { cast: false })) tr.geo(m.geometry);
+    for (const m of meshesOf(rb.build(), this.recyclerGlow, { cast: false })) { tr.geo(m.geometry); m.material = this.extOf(m.material); }
     this.recyclerGlow.visible = this.recyclerOn; g.add(this.recyclerGlow);
     block(rx, rz);
     // caçamba cinza (lixeira do jogo): corpo, tampa entreaberta, papelão saindo, rodas, pictograma
@@ -270,13 +296,13 @@ export class Env {
     const nearX = [-11, -6.5, -2.2, W + 2.2, W + 6.5];
     nearX.forEach((x, i) => tree(x, D + 2.4, i, true));
     [-14, -1, W / 2 + 3.5, W + 4, W + 13].forEach((x, i) => tree(x, farZ0 + 1.0, i + 7, false));
-    for (const m of meshesOf(trees.build(), g, { cast: true })) { tr.geo(m.geometry); m.frustumCulled = false; }
-    for (const m of meshesOf(sb.build(), g, { cast: false })) tr.geo(m.geometry);
+    for (const m of meshesOf(trees.build(), g, { cast: true })) { tr.geo(m.geometry); m.frustumCulled = false; m.material = this.extOf(m.material); }
+    for (const m of meshesOf(sb.build(), g, { cast: false })) { tr.geo(m.geometry); m.material = this.extOf(m.material); }
     // carros em movimento (1 malha cada)
     this.cars = [];
     for (let i = 0; i < 4; i++) {
       const dir = i % 2 === 0 ? 1 : -1;
-      const car = new THREE.Mesh(tr.geo(carGeometry(CAR_COLORS[i]!)), kindMaterial('matte'));
+      const car = new THREE.Mesh(tr.geo(carGeometry(CAR_COLORS[i]!)), this.extOf(kindMaterial('matte')));
       car.position.set(X0 + hash01(i, 61) * (X1 - X0), 0, D + (dir > 0 ? LANES.near : LANES.far));
       car.rotation.y = dir > 0 ? 0 : Math.PI;
       g.add(car);
@@ -290,6 +316,7 @@ export class Env {
       this.clouds.push({ x: -80 + hash01(i, 71) * 200, y: 38 + hash01(i, 72) * 14, z: -40 + hash01(i, 73) * 90, parts });
     }
     this.cloudMesh = new THREE.InstancedMesh(icoGeo(1, 0), stdMat(0xffffff, { rough: 1, flat: true, emissive: 0xffffff, ei: 0.35 }), this.clouds.length * 4);
+    this.extMat(this.cloudMesh.material as THREE.MeshStandardMaterial);
     this.cloudMesh.castShadow = false; this.cloudMesh.receiveShadow = false; this.cloudMesh.frustumCulled = false;
     g.add(this.cloudMesh);
     this.writeClouds();
@@ -325,7 +352,9 @@ export class Env {
     if (this.scene.fog) (this.scene.fog as THREE.Fog).color.copy(this.cHor);
     lerpKeys(SUN_COL, t, this.sun.color, this.tmp);
     const arc = Math.sin(t * Math.PI);
-    this.sun.intensity = 1.7 + 1.3 * Math.pow(arc, 0.6);
+    const night = Math.max(0, Math.min(1, (t - 0.72) / 0.22));
+    const sunDay = 1.7 + 1.3 * Math.pow(arc, 0.6); // intensidade antiga do sol (referência do visual da rua)
+    this.sun.intensity = sunDay * SUN_SCALE * (1 - 0.65 * night); // mais suave; depois do pôr do sol enfraquece
     // posição do sol em degraus de 0,5% do dia (~4 min de jogo, < 1°): cada passo refaz o mapa de sombra estático
     if (force || this.sunT < 0 || Math.abs(t - this.sunT) >= 0.005) {
       this.sunT = t;
@@ -334,8 +363,13 @@ export class Env {
       this.sunVersion++;
     }
     lerpKeys(HEM_SKY, t, this.hemi.color, this.tmp);
-    this.hemi.intensity = 1.0 + 0.2 * (1 - arc);
-    const night = Math.max(0, Math.min(1, (t - 0.72) / 0.22));
+    // luzes da loja: ambiente forte e constante (a noite só esquenta a cor)
+    const hemi = STORE_LIGHT_DAY + (STORE_LIGHT_NIGHT - STORE_LIGHT_DAY) * night;
+    this.hemi.intensity = hemi;
+    // rua: mesmo brilho de antes durante o dia (o ambiente subiu para a loja) e mais escura à noite
+    const before = 1.0 + 0.2 * (1 - arc) + 0.6 * sunDay, now = hemi + 0.6 * this.sun.intensity;
+    const k = Math.max(0.25, Math.min(1, before / now)) * (1 - 0.45 * night);
+    for (const e of this.ext) e.m.color.copy(e.base).multiplyScalar(k);
     this.lampMat.emissiveIntensity = 0.2 + night * 2.2;
     this.bldMat.emissiveIntensity = night * 0.9;
     return t;
@@ -366,6 +400,7 @@ export class Env {
     }
     this.tr.disposeAll();
     this.cloudMesh = null; this.recyclerGlow = null;
+    this.ext = []; this.extClones.clear(); this.lastT = -1;
   }
   dispose(): void {
     this.clearGeo();
