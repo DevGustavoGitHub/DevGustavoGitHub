@@ -528,7 +528,7 @@ export default function create(): GameModule {
   let lastHash = 0, lastPriceHash = 0;
   function syncInner(force: boolean): void {
     const s: StoreState = ctx.state;
-    const extra = (demo ? 1 : 0) + ((hiddenId ?? -1) + 2) * 4;
+    const extra = (demo ? 1 : 0) + ((hiddenId ?? -1) + 2) * 4 + (s.upgrades.includes('tipjar') ? 1000003 : 0);
     if (!force && !picksDirty && stateHash(s, extra) === lastHash) return; // nada mudou: sem alocações
     const nb = storeBounds(s.expansion);
     const dec = effectiveDecor(s.decor);

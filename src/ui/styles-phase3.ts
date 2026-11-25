@@ -123,7 +123,7 @@ export const phase3Css = `
 .pay-speed{height:6px;border-radius:99px;background:#1b2738;overflow:hidden}.pay-speed i{display:block;height:100%;width:100%;transition:width .3s linear,background .3s}
 .pay-info{display:grid;grid-template-columns:1fr 1fr;gap:4px}
 .pay-info div{background:#1b2738;border-radius:8px;padding:3px 8px;display:flex;justify-content:space-between;align-items:center;gap:6px;color:#b9cde2;font-size:11.5px;font-weight:800;text-transform:uppercase}
-.pay-info b{color:#fff;font-size:14px;text-transform:none;white-space:nowrap}.pay-info .chg b{color:#ffd23f}.pay-info .giv b{color:#4be36b}
+.pay-info b{color:#fff;font-size:14px;text-transform:none;white-space:nowrap}.pay-info .chg b{color:#ffd23f}.pay-info .giv b.ok{color:#4be36b}.pay-info .giv b.bad{color:#ff5a5a}
 .pay-row{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;background:#1b2738;border-radius:12px;padding:6px}
 .pay-den{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:0;background:transparent;color:#fff;padding:0;min-height:48px;min-width:0;height:100%}
 .pay-den small{font-weight:900;font-size:14px;white-space:nowrap}

@@ -29,15 +29,14 @@ const BILL_C: Record<number, [string, string]> = {
 const COIN_C: Record<number, [string, string]> = {
   5: ['#e0b08f', '#a06a4a'], 10: ['#d8dce3', '#8a919e'], 25: ['#e2bb7c', '#9a6a2a'], 50: ['#d9dde4', '#8a919e'], 100: ['#f1d37a', '#b88f1d'],
 };
-const coinLabel = (d: Cents): string => (d >= 100 ? '1' : (d / 100).toFixed(2).replace('.', ',').replace(/^0/, ''));
+const coinLabel = (d: Cents): string => (d >= 100 ? '1' : String(d));
 const denLabel = (d: Cents): string => (d >= 100 ? `R$ ${d / 100}` : `R$ ${(d / 100).toFixed(2).replace('.', ',')}`);
 
-/** "37,8" → 3780 centavos (NaN se vazio). */
+/** Vírgula fixa: os dígitos digitados entram da direita para a esquerda nos centavos ("676" → 676 centavos = R$ 6,76). */
 export function parseTyped(t: string): number {
-  if (!t) return 0;
-  const [i = '0', f = ''] = t.split(',');
-  return Number(i || '0') * 100 + Number((f + '00').slice(0, 2));
+  return t ? Number(t) : 0;
 }
+const typedShown = (t: string): string => { const c = parseTyped(t); return `${Math.floor(c / 100)},${String(c % 100).padStart(2, '0')}`; };
 
 export class PayPanel {
   private el: HTMLElement | null = null;
@@ -105,7 +104,7 @@ export class PayPanel {
       const face = bill
         ? h('span', { class: 'bill3', style: `--c1:${c1};--c2:${c2}` }, h('i', null, 'R$'), h('b', null, String(d / 100)))
         : h('span', { class: `coin3${d === 100 ? ' bimetal' : ''}`, style: `--c1:${c1};--c2:${c2}` }, coinLabel(d));
-      return h('button', { class: 'pay-den', 'data-den': d, 'aria-label': denLabel(d), on: tapOn(() => this.give(d)) }, h('small', null, bill ? `R$ ${d / 100}` : d >= 100 ? 'R$ 1' : `${d}¢`), face);
+      return h('button', { class: 'pay-den', 'data-den': d, 'aria-label': denLabel(d), on: tapOn(() => this.give(d)) }, h('small', null, bill ? `R$ ${d / 100}` : d >= 100 ? 'R$ 1' : `${d}`), face);
     };
     this.refresh = (): void => {
       const giving = sum(this.picked);
@@ -113,7 +112,7 @@ export class PayPanel {
         h('div', null, 'Recebido', h('b', null, money(this.received))),
         h('div', null, 'Total', h('b', null, money(this.req?.total ?? 0))),
         h('div', { class: 'chg' }, 'Troco', h('b', { id: 'pay-change' }, money(this.due))),
-        h('div', { class: 'giv' }, 'Dando', h('b', { id: 'pay-giving', class: giving > this.due ? 'over' : '' }, money(giving))));
+        h('div', { class: 'giv' }, 'Dando', h('b', { id: 'pay-giving', class: giving === this.due ? 'ok' : 'bad' }, money(giving))));
     };
     this.body.append(info,
       h('div', { class: 'pay-row bills' }, BILLS3.map((d) => den(d, true))),
@@ -151,7 +150,7 @@ export class PayPanel {
   /* ---------------- cartão ---------------- */
   private renderCard(): void {
     const screen = h('b', { id: 'pay-typed' });
-    this.refresh = (): void => { screen.textContent = `R$ ${this.typed || '0'}`; };
+    this.refresh = (): void => { screen.textContent = `R$ ${typedShown(this.typed)}`; };
     const key = (label: string, fn: () => void, cls = 'blue', aria?: string, htmlLabel?: string): HTMLElement =>
       h('button', { class: `pk ${cls}`, 'data-key': label, 'aria-label': aria ?? label, html: htmlLabel, on: tapOn(() => { if (this.done) return; fn(); this.kit.sfx('pop'); this.kit.settings.buzz(6); this.changed(); }) }, htmlLabel ? null : label);
     const digit = (n: number): HTMLElement => key(String(n), () => this.typeChar(String(n)));
@@ -160,7 +159,7 @@ export class PayPanel {
       h('div', { class: 'pay-due' }, `Valor da compra: ${money(this.req?.total ?? 0)}`),
       h('div', { class: 'pay-pad' },
         [1, 2, 3].map(digit), key('⌫', () => { this.typed = this.typed.slice(0, -1); }, 'blue', 'Apagar', icon('backspace', 26)),
-        [4, 5, 6].map(digit), key(',', () => this.typeChar(','), 'blue', 'Vírgula'),
+        [4, 5, 6].map(digit),
         [7, 8, 9].map(digit), digit(0),
         h('button', { class: 'pk green ok', id: 'pay-ok', on: tapOn(() => this.confirmCard()) }, 'OK'),
         key('C', () => { this.typed = ''; }, 'red', 'Limpar')));
@@ -177,20 +176,16 @@ export class PayPanel {
     const k = (s: string): Element | null => pad.querySelector(`[data-key="${s}"]`);
     const ok = pad.querySelector('#pay-ok');
     const cols = getComputedStyle(pad).gridTemplateColumns.split(' ').filter(Boolean).length;
-    const order = cols >= 5 ? ['1', '2', '3', '⌫', 'C', '4', '5', '6', ',', '0', '7', '8', '9', 'OK']
-      : cols === 4 ? ['1', '2', '3', '⌫', '4', '5', '6', ',', '7', '8', '9', '0', 'C', 'OK']
-        : ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', ',', 'OK', 'C'];
+    const order = cols >= 5 ? ['1', '2', '3', '⌫', 'C', '4', '5', '6', '0', '7', '8', '9', 'OK']
+      : cols === 4 ? ['1', '2', '3', '⌫', '4', '5', '6', '7', '8', '9', '0', 'C', 'OK']
+        : ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C', 'OK'];
     for (const s of order) { const e = s === 'OK' ? ok : k(s); if (e) pad.appendChild(e); }
   }
 
   private typeChar(c: string): void {
     if (this.done) return;
-    const t = this.typed;
-    if (c === ',') { if (!t.includes(',')) this.typed = (t || '0') + ','; return; }
-    const [i = '', f] = t.split(',');
-    if (f !== undefined) { if (f.length < 2) this.typed = t + c; return; }
-    if (i.length >= 6) return;
-    this.typed = i === '0' ? c : t + c;
+    const n = this.typed + c;
+    if (n.length <= 8) this.typed = n.replace(/^0+/, '');
   }
 
   private confirmCard(): void {
@@ -206,7 +201,6 @@ export class PayPanel {
       return;
     }
     if (/^[0-9]$/.test(e.key)) this.typeChar(e.key);
-    else if (e.key === ',' || e.key === '.') this.typeChar(',');
     else if (e.key === 'Backspace') this.typed = this.typed.slice(0, -1);
     else if (e.key === 'Enter') { e.preventDefault(); this.confirmCard(); return; }
     else return;
@@ -223,7 +217,7 @@ export class PayPanel {
     if (!r) return;
     const base = { counterId: r.counterId ?? null, customerId: r.customerId, total: r.total };
     if (r.method === 'cash') this.kit.ctx.bus.emit('checkout:display', { ...base, mode: 'cash', received: this.received, change: this.due, giving: sum(this.picked) });
-    else this.kit.ctx.bus.emit('checkout:display', { ...base, mode: 'card', typed: parseTyped(this.typed), typedText: this.typed });
+    else this.kit.ctx.bus.emit('checkout:display', { ...base, mode: 'card', typed: parseTyped(this.typed), typedText: typedShown(this.typed) });
   }
 
   private mistake(msg: string): void {

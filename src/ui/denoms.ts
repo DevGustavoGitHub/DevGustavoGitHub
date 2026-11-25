@@ -20,7 +20,7 @@ export function denomLabel(d: Cents): string {
 export function denomEl(d: Cents, opts: { mini?: boolean; onClick?: () => void } = {}): HTMLElement {
   const bill = isBill(d);
   const [c1, c2] = (bill ? BILL_COLORS[d] : COIN_COLORS[d]) ?? ['#ccc', '#999'];
-  const label = d >= 100 ? String(d / 100) : (d / 100).toFixed(2).replace('.', ',');
+  const label = d >= 100 ? String(d / 100) : String(d);
   const kids = bill
     ? [h('i', { class: 'orn' }), h('i', { class: 'orn2' }), h('small', null, 'R$'), h('b', null, label)]
     : [h('b', null, label)];

@@ -124,7 +124,7 @@ export class CheckoutScreens {
       line(152);
       txt('TROCO:', 40, 190, 34, '#e8eef2', 'left', 200); txt(brl(d.change), CW - 40, 190, 38, '#ffe14d', 'right', 260);
       line(222);
-      txt('DANDO:', 40, 262, 34, '#e8eef2', 'left', 200); txt(brl(d.giving), CW - 40, 262, 38, '#5cff7a', 'right', 260);
+      txt('DANDO:', 40, 262, 34, '#e8eef2', 'left', 200); txt(brl(d.giving), CW - 40, 262, 38, (d.giving ?? 0) === (d.change ?? 0) ? '#5cff7a' : '#ff5252', 'right', 260);
     } else if (mode === 'card') {
       txt('PAGAMENTO NO CARTÃO', CW / 2, 42, 32);
       line(80);
