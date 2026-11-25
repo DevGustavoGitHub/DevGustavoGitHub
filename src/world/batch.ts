@@ -17,8 +17,9 @@ export function kindMaterial(k: Kind): THREE.Material {
   let m = mats.get(k);
   if (m) return m;
   switch (k) {
-    case 'matte': m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82 }); break;
-    case 'flat': m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true }); break;
+    // foscos: Lambert (mesmo difuso do PBR; ver ROUGH_LAMBERT em kit.ts). Metal e vidro continuam PBR (brilho visível).
+    case 'matte': m = new THREE.MeshLambertMaterial({ vertexColors: true }); break;
+    case 'flat': m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }); break;
     case 'metal': m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.55 }); break;
     case 'glass': m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.1, metalness: 0.1, transparent: true, opacity: 0.22, depthWrite: false }); break;
     case 'glow': m = new THREE.MeshBasicMaterial({ vertexColors: true }); break;

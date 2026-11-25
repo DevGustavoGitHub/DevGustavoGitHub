@@ -78,8 +78,8 @@ export interface PickBox { x: number; y: number; z: number; w: number; h: number
 export class Shop {
   readonly group = new THREE.Group();
   private tr = new Tracker();
-  private floorMat: THREE.MeshStandardMaterial | null = null;
-  private innerMat: THREE.MeshStandardMaterial | null = null;
+  private floorMat: THREE.MeshLambertMaterial | null = null;
+  private innerMat: THREE.MeshLambertMaterial | null = null;
   private decalGeo: THREE.BufferGeometry | null = null;
   private doorL: THREE.Object3D | null = null;
   private doorR: THREE.Object3D | null = null;
@@ -108,17 +108,18 @@ export class Shop {
     this.signBox = { x: sx, y: sy, z: D + t / 2, w: 0.6, h: 0.34, d: t + 0.06 };
     /* ---- pisos ---- */
     const floorG = tr.geo(new THREE.PlaneGeometry(W, D)); floorG.rotateX(-Math.PI / 2); scaleUV(floorG, W / 1.2, D / 1.2);
-    this.floorMat = tr.mat(new THREE.MeshStandardMaterial({ color: hex(decor.floorColor), map: woodTex(), roughness: 0.72 }));
+    // superfícies grandes e foscas: Lambert (difuso igual ao PBR, shader bem mais barato; ver kit.ts ROUGH_LAMBERT)
+    this.floorMat = tr.mat(new THREE.MeshLambertMaterial({ color: hex(decor.floorColor), map: woodTex() }));
     const floor = new THREE.Mesh(floorG, this.floorMat); floor.position.set(W / 2, 0.01, D / 2); floor.receiveShadow = true; g.add(floor);
     const zBack = storage ? -STORAGE_DEPTH : 0;
     if (storage) {
       const sg = tr.geo(new THREE.PlaneGeometry(W, STORAGE_DEPTH + t)); sg.rotateX(-Math.PI / 2); scaleUV(sg, W / 2, (STORAGE_DEPTH + t) / 2);
-      const sm = tr.mat(new THREE.MeshStandardMaterial({ color: 0xaab1b9, map: tileTex(), roughness: 0.85 }));
+      const sm = tr.mat(new THREE.MeshLambertMaterial({ color: 0xaab1b9, map: tileTex() }));
       const sf = new THREE.Mesh(sg, sm); sf.position.set(W / 2, 0.01, -(STORAGE_DEPTH + t) / 2); sf.receiveShadow = true; g.add(sf);
       sb.box(W - 0.4, 0.004, 0.12, ['matte', 0xf2c230], W / 2, 0.016, -0.42);
     }
     /* ---- teto com luminárias ---- */
-    const ceilMat = tr.mat(new THREE.MeshStandardMaterial({ color: 0xf5f6f8, roughness: 1, emissive: 0xffffff, emissiveIntensity: 0.24 }));
+    const ceilMat = tr.mat(new THREE.MeshLambertMaterial({ color: 0xf5f6f8, emissive: 0xffffff, emissiveIntensity: 0.24 }));
     const ceilG = tr.geo(new THREE.PlaneGeometry(W + 0.02, D - zBack + 0.02)); ceilG.rotateX(Math.PI / 2);
     const ceil = new THREE.Mesh(ceilG, ceilMat); ceil.position.set(W / 2, H, (D + zBack) / 2); g.add(ceil);
     for (let x = 1.5; x < W - 0.5; x += 3) for (let z = zBack + 1.25; z < D - 0.4; z += 2.5) {
@@ -144,12 +145,12 @@ export class Shop {
     }
     this.buildFront(wb, sb, W, D, decor, name);
     const mats = [
-      this.innerMat = tr.mat(new THREE.MeshStandardMaterial({ color: hex(decor.wallColor), roughness: 0.92, emissive: hex(decor.wallColor), emissiveIntensity: 0.12 })),
-      tr.mat(new THREE.MeshStandardMaterial({ color: 0xe3d5bf, roughness: 0.92 })),
-      tr.mat(new THREE.MeshStandardMaterial({ color: 0x3b4250, roughness: 0.7 })),
-      tr.mat(new THREE.MeshStandardMaterial({ color: 0xffffff, map: brickTex(), roughness: 0.95 })),
-      tr.mat(new THREE.MeshStandardMaterial({ color: 0xd6dbe1, roughness: 0.92, emissive: 0xd6dbe1, emissiveIntensity: 0.08 })),
-      tr.mat(new THREE.MeshStandardMaterial({ color: 0x74c255, roughness: 0.85 })),
+      this.innerMat = tr.mat(new THREE.MeshLambertMaterial({ color: hex(decor.wallColor), emissive: hex(decor.wallColor), emissiveIntensity: 0.12 })),
+      tr.mat(new THREE.MeshLambertMaterial({ color: 0xe3d5bf })),
+      tr.mat(new THREE.MeshLambertMaterial({ color: 0x3b4250 })),
+      tr.mat(new THREE.MeshLambertMaterial({ color: 0xffffff, map: brickTex() })),
+      tr.mat(new THREE.MeshLambertMaterial({ color: 0xd6dbe1, emissive: 0xd6dbe1, emissiveIntensity: 0.08 })),
+      tr.mat(new THREE.MeshLambertMaterial({ color: 0x74c255 })),
     ];
     const walls = new THREE.Mesh(tr.geo(wb.build()), mats);
     walls.receiveShadow = true; g.add(walls);

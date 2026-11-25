@@ -81,7 +81,7 @@ export function signMaterial(): THREE.MeshStandardMaterial {
 
 /* ---- etiquetas das caixas de papelão ---- */
 let labels: Atlas | null = null;
-let labelMat: THREE.MeshStandardMaterial | null = null;
+let labelMat: THREE.MeshLambertMaterial | null = null;
 const labelAtlas = (): Atlas => labels ??= new Atlas(PRODUCTS.map((p) => p.id), 4, 256, 128, (g, pid, w, h) => {
   g.fillStyle = '#fbfaf4'; g.fillRect(0, 0, w, h);
   g.fillStyle = css(categoryColor(pid)); g.fillRect(0, 0, w, h * 0.2);
@@ -100,8 +100,8 @@ const labelAtlas = (): Atlas => labels ??= new Atlas(PRODUCTS.map((p) => p.id), 
 });
 export const labelCell = (pid: string): Cell => labelAtlas().cell(pid);
 export const whiteCell = (): Cell => labelAtlas().white;
-export function labelMaterial(): THREE.MeshStandardMaterial {
-  return labelMat ??= new THREE.MeshStandardMaterial({ map: labelAtlas().tex, vertexColors: true, roughness: 0.85 });
+export function labelMaterial(): THREE.MeshLambertMaterial {
+  return labelMat ??= new THREE.MeshLambertMaterial({ map: labelAtlas().tex, vertexColors: true });
 }
 
 /* ---- rótulos dos produtos (nome + pictograma): UM atlas 2048 px para todos os produtos ---- */

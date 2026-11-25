@@ -104,6 +104,7 @@ export class BuildMode {
   private footBad = new THREE.MeshBasicMaterial({ color: 0xff4d4d, transparent: true, opacity: 0.4, depthWrite: false });
   private footBox = new THREE.MeshBasicMaterial({ color: 0x18e4ff, transparent: true, opacity: 0.35, depthWrite: false });
   private footGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  private gridMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.38, depthWrite: false });
 
   private ray = new THREE.Raycaster();
   private dir = new THREE.Vector3(); private org = new THREE.Vector3();
@@ -179,7 +180,7 @@ export class BuildMode {
     this.offKey?.(); this.offKey = null;
     if (this.mode === 'edit') this.d.hide(null);
     this.clearPreview();
-    if (this.grid) { this.d.root.remove(this.grid); this.grid.geometry.dispose(); (this.grid.material as THREE.Material).dispose(); this.grid = null; }
+    if (this.grid) { this.d.root.remove(this.grid); this.grid.geometry.dispose(); this.grid = null; }
     this.ui?.remove(); this.ui = null; this.info = null; this.placeBtn = null; this.asking = false;
     const kind = this.kind;
     this.box = null;
@@ -189,9 +190,19 @@ export class BuildMode {
     }
   }
 
+  /** Aquecimento de shaders (core/warm.ts): fantasma, marca no chão e grade com os mesmos materiais. */
+  sample(): THREE.Object3D {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(this.footGeo, this.okMat), new THREE.Mesh(this.footGeo, this.footOk));
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
+    g.add(new THREE.LineSegments(lg, this.gridMat));
+    return g;
+  }
+
   dispose(): void {
     this.end(true);
-    for (const m of [this.okMat, this.badMat, this.boxOk, this.footOk, this.footBad, this.footBox]) m.dispose();
+    for (const m of [this.okMat, this.badMat, this.boxOk, this.footOk, this.footBad, this.footBox, this.gridMat]) m.dispose();
     this.footGeo.dispose();
   }
 
@@ -225,7 +236,7 @@ export class BuildMode {
     for (let z = zBack; z <= b.depth; z++) pts.push(0, 0.025, z, b.width, 0.025, z);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    this.grid = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.38, depthWrite: false }));
+    this.grid = new THREE.LineSegments(g, this.gridMat);
     this.grid.renderOrder = 4; this.grid.frustumCulled = false;
     this.d.root.add(this.grid);
   }

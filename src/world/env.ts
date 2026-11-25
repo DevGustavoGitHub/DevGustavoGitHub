@@ -69,7 +69,7 @@ export class Env {
   private sky: THREE.Mesh | null = null;
   private skyMat: THREE.ShaderMaterial;
   private lampMat = stdMat(0xfff1c2, { emissive: 0xffd36b, ei: 0.2 });
-  private bldMat: THREE.MeshStandardMaterial;
+  private bldMat: THREE.MeshLambertMaterial;
   private cars: { g: THREE.Object3D; dir: number; speed: number }[] = [];
   private cloudMesh: THREE.InstancedMesh | null = null;
   private clouds: { x: number; y: number; z: number; parts: { dx: number; dy: number; dz: number; r: number }[] }[] = [];
@@ -81,6 +81,9 @@ export class Env {
   private b: Bounds = { width: 12, depth: 10 };
   private cTop = new THREE.Color(); private cHor = new THREE.Color(); private tmp = new THREE.Color();
   private lastT = -1;
+  private sunT = -1;
+  /** Sobe quando o sol muda de posição (o world reenvia o mapa de sombra estático só nessas horas). */
+  sunVersion = 0;
   private dm = new THREE.Object3D();
 
   constructor(private scene: THREE.Scene) {
@@ -91,7 +94,7 @@ export class Env {
       fragmentShader: 'uniform vec3 top; uniform vec3 hor; varying float vY; void main(){ float k = smoothstep(-0.05, 0.6, vY); gl_FragColor = vec4(mix(hor, top, k), 1.0);\n#include <colorspace_fragment>\n}',
     });
     const wt = windowTex();
-    this.bldMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: wt.map, roughness: 0.9, emissive: 0xffc866, emissiveMap: wt.glow, emissiveIntensity: 0 });
+    this.bldMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: wt.map, emissive: 0xffc866, emissiveMap: wt.glow, emissiveIntensity: 0 });
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
     this.sun.shadow.bias = -0.0004;
@@ -119,9 +122,10 @@ export class Env {
     const block = (x: number, z: number): void => { this.blocked.push({ x: Math.floor(x), z: Math.floor(z) }); };
     const cx = W / 2;
     const sb = new Batch();
-    // céu
+    // céu: desenhado DEPOIS dos opacos (teste de profundidade sem escrita) para só pintar os pixels onde ele aparece;
+    // antes era o 1º (renderOrder -10) e cobria a tela inteira todo quadro, mesmo dentro da loja (overdraw).
     this.sky = new THREE.Mesh(tr.geo(new THREE.SphereGeometry(170, 24, 12)), this.skyMat);
-    this.sky.position.set(cx, 0, D / 2); this.sky.renderOrder = -10; this.sky.frustumCulled = false; g.add(this.sky);
+    this.sky.position.set(cx, 0, D / 2); this.sky.renderOrder = 900; this.sky.frustumCulled = false; g.add(this.sky);
     // chão: grama, calçadas (uma malha), asfalto
     const X0 = -70, X1 = W + 70, xc = (X0 + X1) / 2, xw = X1 - X0;
     const roadZ0 = D + SIDEWALK_DEPTH, farZ0 = roadZ0 + ROAD_WIDTH;
@@ -129,11 +133,11 @@ export class Env {
       const pg = new THREE.PlaneGeometry(w, d); pg.rotateX(-Math.PI / 2); scaleUV(pg, w / su, d / sv); pg.translate(x, y, z); return pg;
     };
     const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh => { const m = new THREE.Mesh(tr.geo(geo), mat); m.receiveShadow = true; g.add(m); return m; };
-    mesh(plane(600, 600, cx, -0.03, D / 2, 600, 600), tr.mat(new THREE.MeshStandardMaterial({ color: 0x9fbf88, roughness: 1 })));
+    mesh(plane(600, 600, cx, -0.03, D / 2, 600, 600), tr.mat(new THREE.MeshLambertMaterial({ color: 0x9fbf88 })));
     const sideA = plane(xw, SIDEWALK_DEPTH, xc, 0.02, D + SIDEWALK_DEPTH / 2, 1, 1), sideB = plane(xw, SIDEWALK_DEPTH, xc, 0.02, farZ0 + SIDEWALK_DEPTH / 2, 1, 1);
-    mesh(mergeGeometries([sideA, sideB], false)!, tr.mat(new THREE.MeshStandardMaterial({ color: 0xd3d8de, map: paverTex(), roughness: 0.95 })));
+    mesh(mergeGeometries([sideA, sideB], false)!, tr.mat(new THREE.MeshLambertMaterial({ color: 0xd3d8de, map: paverTex() })));
     sideA.dispose(); sideB.dispose();
-    mesh(plane(xw, ROAD_WIDTH, xc, 0.0, roadZ0 + ROAD_WIDTH / 2, 4, 4), tr.mat(new THREE.MeshStandardMaterial({ color: 0x4b4f57, map: asphaltTex(), roughness: 0.95 })));
+    mesh(plane(xw, ROAD_WIDTH, xc, 0.0, roadZ0 + ROAD_WIDTH / 2, 4, 4), tr.mat(new THREE.MeshLambertMaterial({ color: 0x4b4f57, map: asphaltTex() })));
     // meios-fios e faixas
     const curb: Spec = ['matte', 0xbfc5cc], white: Spec = ['matte', 0xf3f3ee], yellow: Spec = ['matte', 0xf2c230];
     sb.box(xw, 0.12, 0.18, curb, xc, 0, roadZ0 + 0.03);
@@ -294,7 +298,7 @@ export class Env {
     const sc = this.sun.shadow.camera;
     sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 5; sc.far = 160; sc.updateProjectionMatrix();
     this.sun.target.position.set(W / 2, 0, (D - STORAGE_DEPTH) / 2);
-    this.lastT = -1;
+    this.lastT = -1; this.sunT = -1; this.sunVersion++;
     freezeStatic(this.group, [this.sun, ...this.cars.map((c) => c.g)]); // só sol (setTime) e carros se movem
   }
 
@@ -322,8 +326,13 @@ export class Env {
     lerpKeys(SUN_COL, t, this.sun.color, this.tmp);
     const arc = Math.sin(t * Math.PI);
     this.sun.intensity = 1.7 + 1.3 * Math.pow(arc, 0.6);
-    const R = 60;
-    this.sun.position.set(this.sun.target.position.x + (t * 2 - 1) * R * 0.8, 14 + 40 * arc, this.sun.target.position.z + R * 0.55);
+    // posição do sol em degraus de 0,5% do dia (~4 min de jogo, < 1°): cada passo refaz o mapa de sombra estático
+    if (force || this.sunT < 0 || Math.abs(t - this.sunT) >= 0.005) {
+      this.sunT = t;
+      const ts = t, as = Math.sin(ts * Math.PI), R = 60;
+      this.sun.position.set(this.sun.target.position.x + (ts * 2 - 1) * R * 0.8, 14 + 40 * as, this.sun.target.position.z + R * 0.55);
+      this.sunVersion++;
+    }
     lerpKeys(HEM_SKY, t, this.hemi.color, this.tmp);
     this.hemi.intensity = 1.0 + 0.2 * (1 - arc);
     const night = Math.max(0, Math.min(1, (t - 0.72) / 0.22));

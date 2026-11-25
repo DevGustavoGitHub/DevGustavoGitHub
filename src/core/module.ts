@@ -17,6 +17,19 @@ export interface GameContext {
   save: () => void;
   /** Serviços publicados por cada módulo em init() (ex.: ctx.services.world = {...}). */
   services: Services;
+  /** Ritmo de quadros (main.ts): JS do último quadro desenhado e intervalo alvo (limite de FPS do jogador). */
+  frame?: FrameInfo;
+}
+
+export interface FrameInfo {
+  /** ms de JS do último quadro desenhado (relógio + updates + render). */
+  workMs: number;
+  /** ms do intervalo alvo (1000/limite; sem limite = 1000/60). */
+  targetMs: number;
+  /** Limite de FPS em vigor (30, 60 ou 0 = sem limite). */
+  maxFps: number;
+  /** Segura o render (os updates continuam) enquanto shaders compilam em segundo plano (ver core/warm.ts). */
+  hold: number;
 }
 
 /** Cada área do projeto exporta `default function create(): GameModule` em src/<area>/index.ts. */

@@ -54,6 +54,8 @@ export interface WorldService {
   levelAt?(furnitureId: number, point: THREE.Vector3): number | null;
   /** Pontos de interesse para setas do tutorial (mundo). */
   poi?(kind: 'computer' | 'sign' | 'delivery' | 'trash' | 'recycle' | 'storageDoor' | 'counter' | 'furniture', id?: number): THREE.Vector3 | null;
+  /** Desempenho: o mapa de sombra é estático; quem move algo que projeta sombra (ex.: caixa arremessada) avisa aqui. */
+  shadowDirty?(): void;
 }
 
 /** Publicado pelo módulo `player`. */

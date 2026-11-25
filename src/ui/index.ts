@@ -204,7 +204,6 @@ export default function create(): GameModule {
           legacyPending = req; // fluxo antigo (bipar no painel + pagar)
           tryLegacy();
         }),
-        bus.on('quality:auto', (p: { quality: 'low' | 'medium' | 'high' }) => kit.settings.adopt({ quality: p.quality })),
         // Pedido automático do npc ("Pedido automático: 3 cx Arroz, 2 cx Feijão"): guarda para a aba Automático.
         bus.on('toast', (p: { text: string }) => {
           const items = parseAutoToast(p.text, kit.ctx.state);

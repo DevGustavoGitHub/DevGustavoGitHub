@@ -9,7 +9,9 @@ import createPlayer from './player';
 import createNpc from './npc';
 import createUi from './ui';
 import createAudio from './audio';
-import { TIERS, initialTier } from './world/quality';
+import { initialQuality, startPixelRatio, wantsAntialias } from './world/quality';
+import { DEFAULT_FPS_CAP, FramePacer, isFpsCap } from './core/pacer';
+import { warmUp } from './core/warm';
 
 const kv: KV = {
   getItem: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -17,13 +19,22 @@ const kv: KV = {
 };
 
 const app = document.getElementById('app')!;
-// Qualidade inicial (opção salva ou padrão por dispositivo); o world ajusta o resto em tempo real. Antialias só vale no carregamento.
-const tier0 = TIERS[initialTier()];
+// Qualidade inicial (opção salva ou "auto"); o world ajusta o resto em tempo real. Antialias (MSAA) só vale no
+// carregamento e só é ligado com pixel ratio efetivo ≤ 1,5 (world/quality.ts: wantsAntialias).
+const q0 = initialQuality();
 // stencil: contorno de destaque do world (silhueta de móveis fundidos); custo desprezível.
-const renderer = new THREE.WebGLRenderer({ antialias: tier0.antialias, powerPreference: 'high-performance', stencil: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, tier0.pixelRatio));
+const renderer = new THREE.WebGLRenderer({ antialias: wantsAntialias(q0), powerPreference: 'high-performance', stencil: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, startPixelRatio(q0)));
 renderer.shadowMap.enabled = true;
+// mapa de sombra estático: o world pede `needsUpdate` só quando o sol anda ou o cenário que projeta sombra muda
+renderer.shadowMap.autoUpdate = false;
 app.appendChild(renderer.domElement);
+
+/** Limite de FPS do jogador ('mercadinho:settings'.maxFps: 30, 60 ou 0 = sem limite; padrão 60). */
+function storedFpsCap(): 30 | 60 | 0 {
+  try { const v = (JSON.parse(localStorage.getItem('mercadinho:settings') ?? '{}') as { maxFps?: unknown }).maxFps; return isFpsCap(v) ? v : DEFAULT_FPS_CAP; } catch { return DEFAULT_FPS_CAP; }
+}
+const pacer = new FramePacer(storedFpsCap());
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x9ec9e8);
@@ -50,7 +61,9 @@ const ctx: GameContext = {
   uiRoot: document.getElementById('ui-root')!,
   save: () => { state.clock = { minute: clock.minute, phase: clock.phase }; save(kv, state); },
   services: {},
+  frame: { workMs: 0, targetMs: pacer.interval || 1000 / 60, maxFps: pacer.maxFps, hold: 0 },
 };
+const frame = ctx.frame!;
 
 // Ordem importa: world cria cenário, player usa o cenário, npc usa grade do world, ui por último.
 const modules: GameModule[] = [createWorld(), createPlayer(), createNpc(), createAudio(), createUi()];
@@ -82,23 +95,37 @@ function resize(): void {
 window.addEventListener('resize', resize);
 resize();
 
+// Pré-compila os shaders da cena e dos objetos que só aparecem depois (clientes, caixa na mão...) sem travar: o render
+// espera (a tela inicial já está por cima) e os updates seguem.
+void warmUp(ctx, { scene: true, hold: true });
+
+bus.on('settings:changed', (p?: { maxFps?: unknown }) => {
+  if (!isFpsCap(p?.maxFps)) return;
+  pacer.maxFps = p.maxFps;
+  frame.maxFps = pacer.maxFps; frame.targetMs = pacer.interval || 1000 / 60;
+});
+
 setInterval(() => ctx.save(), 15000); // autosave periódico
 bus.on('dayEnded', () => ctx.save());
 window.addEventListener('pagehide', () => ctx.save());
 // No Android (WebView) minimizar o app não dispara pagehide: salva também ao ficar oculto.
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') ctx.save(); });
 
-let last = performance.now();
+// Laço: o pacer pula callbacks do rAF além do limite de FPS (telas de 90/120 Hz) e entrega o dt real desde o último
+// quadro desenhado (limitado a 0,1 s), então física e animações não mudam com o limite.
 renderer.setAnimationLoop((now) => {
-  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000));
-  last = now;
+  const dt = pacer.tick(now);
+  if (dt === null) return;
+  const t0 = performance.now();
   clock.update(dt);
   for (const m of modules) m.update(dt);
-  renderer.render(scene, camera);
+  if (frame.hold <= 0) renderer.render(scene, camera);
+  frame.workMs = performance.now() - t0;
 });
 
 // Gancho para testes automatizados (Playwright): inspeção e controle do jogo.
 (window as any).__game = ctx;
+(window as any).__pacer = pacer;
 
 import './native'; // app Android (Capacitor): pause/voltar/sair
 

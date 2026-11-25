@@ -1,8 +1,10 @@
 /**
  * Corpo humano procedural com esqueleto (1 SkinnedMesh por pessoa; geometria COMPARTILHADA por variante).
  * Proporções realistas (pessoa de referência com 1,75 m, cabeça ≈ 1/7,5 da altura), olhando para +z.
- * Grupos de material do corpo: 0 roupa de cima (atlas tronco|mangas), 1 roupa de baixo, 2 pele, 3 calçado.
- * Cabeça (pele + retalho do rosto), cabelos, chapéus e óculos são malhas rígidas presas ao osso da cabeça.
+ * Partes do corpo (atributo `part` e grupos): 0 roupa de cima (atlas tronco|mangas), 1 roupa de baixo, 2 pele, 3 calçado.
+ * Desempenho: cada pessoa desenha o corpo inteiro com UM material (o shader escolhe textura ou cor pela parte; ver
+ * model.ts) e a cabeça + cabelo + chapéu + óculos numa malha fundida por combinação (`headCombo`), também com UM
+ * material: ~5 draw calls por pessoa em vez de ~10.
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -64,6 +66,11 @@ export function boneInverses(): THREE.Matrix4[] {
 
 /* ---------------- peças ---------------- */
 type Grp = 0 | 1 | 2 | 3;
+/** Atributo `part` (float por vértice) usado pelos materiais de uma passada só (model.ts). */
+function withPart<T extends THREE.BufferGeometry>(g: T, part: number): T {
+  g.setAttribute('part', new THREE.BufferAttribute(new Float32Array(g.attributes.position!.count).fill(part), 1));
+  return g;
+}
 type UvMode = readonly [number, number, number, number] | null; // [u0,u1,v0,v1] no atlas da roupa
 
 function prep(g: THREE.BufferGeometry, bone: BoneName | ((y: number) => [BoneName, BoneName, number]), uv: UvMode): THREE.BufferGeometry {
@@ -142,7 +149,7 @@ export function bodyGeometry(sex: 'm' | 'f', sleeves: Sleeves, legs: Legs): THRE
   const hit = bodyCache.get(key);
   if (hit) return hit;
   const parts: THREE.BufferGeometry[][] = [[], [], [], []];
-  const add = (grp: Grp, g: THREE.BufferGeometry, bone: Parameters<typeof prep>[1], uv: UvMode = null): void => { parts[grp]!.push(prep(g, bone, uv)); };
+  const add = (grp: Grp, g: THREE.BufferGeometry, bone: Parameters<typeof prep>[1], uv: UvMode = null): void => { parts[grp]!.push(withPart(prep(g, bone, uv), grp)); };
   const TORSO_UV = [0, 0.5, 0, 1] as const;
   add(0, profiled(sex === 'f' ? TORSO_F : TORSO_M), (y) => ['spine', 'chest', Math.min(1, Math.max(0, (y - 1.05) / 0.25))], TORSO_UV);
   add(1, profiled(sex === 'f' ? PELVIS_F : PELVIS_M, 14, 4), 'hips');
@@ -200,19 +207,48 @@ function headShape(g: THREE.BufferGeometry, f: number, bump = 0): THREE.BufferGe
   g.computeVertexNormals();
   return g;
 }
-let headGeo: THREE.BufferGeometry | null = null;
-/** Cabeça com 2 grupos: 0 pele (crânio, orelhas, nariz), 1 retalho do rosto (textura). Origem = centro da cabeça. */
-export function headGeometry(): THREE.BufferGeometry {
-  if (headGeo) return headGeo;
+let headSrc: { skin: THREE.BufferGeometry; patch: THREE.BufferGeometry } | null = null;
+/** Peças da cabeça: pele (crânio, orelhas, nariz) e retalho do rosto (textura). Origem = centro da cabeça. */
+function headParts(): { skin: THREE.BufferGeometry; patch: THREE.BufferGeometry } {
+  if (headSrc) return headSrc;
   const skull = headShape(new THREE.SphereGeometry(1, 20, 16), 1);
   const earL = new THREE.SphereGeometry(0.026, 8, 6).scale(0.42, 1, 0.7).translate(0.099, -0.004, -0.008);
   const earR = earL.clone().translate(-0.198, 0, 0);
   const nose = new THREE.SphereGeometry(0.017, 8, 6).scale(0.85, 1.45, 1).translate(0, -0.014, 0.108);
-  const skin = mergeGeometries([skull, earL, earR, nose])!;
-  const patch = headShape(new THREE.SphereGeometry(1, 18, 14, Math.PI / 2 - 1.2, 2.4, Math.PI * 0.28, Math.PI * 0.6), 1.013);
+  const skin = keep(mergeGeometries([skull, earL, earR, nose])!);
+  const patch = keep(headShape(new THREE.SphereGeometry(1, 18, 14, Math.PI / 2 - 1.2, 2.4, Math.PI * 0.28, Math.PI * 0.6), 1.013));
+  for (const g of [skull, earL, earR, nose]) g.dispose();
+  headSrc = { skin, patch };
+  return headSrc;
+}
+let headGeo: THREE.BufferGeometry | null = null;
+/** Cabeça com 2 grupos: 0 pele, 1 retalho do rosto (compatibilidade; o jogo usa `headCombo`). */
+export function headGeometry(): THREE.BufferGeometry {
+  if (headGeo) return headGeo;
+  const { skin, patch } = headParts();
   headGeo = keep(mergeGeometries([skin, patch], true)!);
-  for (const g of [skull, earL, earR, nose, skin, patch]) g.dispose();
   return headGeo;
+}
+/** Partes da cabeça fundida: 0 pele, 1 rosto (textura sobre a pele), 2 cabelo, 3 chapéu, 4 óculos. */
+export const HEAD_PART = { skin: 0, face: 1, hair: 2, hat: 3, glasses: 4 } as const;
+const comboCache = new Map<string, THREE.BufferGeometry>();
+/** Cabeça + cabelo + chapéu + óculos numa geometria só (atributo `part`), em cache por combinação. */
+export function headCombo(hair: HairStyle | null, hat: HatStyle | null, glasses: boolean): THREE.BufferGeometry {
+  const key = `${hair ?? '-'}|${hat ?? '-'}|${glasses ? 1 : 0}`;
+  const hit = comboCache.get(key);
+  if (hit) return hit;
+  const { skin, patch } = headParts();
+  const list: THREE.BufferGeometry[] = [withPart(skin.clone(), HEAD_PART.skin), withPart(patch.clone(), HEAD_PART.face)];
+  const hg = hair ? hairGeometry(hair) : null;
+  if (hg) list.push(withPart(hg.clone(), HEAD_PART.hair));
+  if (hat) list.push(withPart(hatGeometry(hat).clone(), HEAD_PART.hat));
+  if (glasses) list.push(withPart(glassesGeometry().clone(), HEAD_PART.glasses));
+  for (const g of list) { if (!g.index) g.setIndex([...Array(g.attributes.position!.count).keys()]); for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv' && k !== 'part') g.deleteAttribute(k); }
+  const g = keep(mergeGeometries(list)!);
+  for (const x of list) x.dispose();
+  g.computeBoundingSphere();
+  comboCache.set(key, g);
+  return g;
 }
 
 export type HairStyle = 'short' | 'buzz' | 'side' | 'long' | 'ponytail' | 'bun' | 'curly' | 'bob' | 'balding' | 'none';
@@ -302,6 +338,6 @@ export function glassesGeometry(): THREE.BufferGeometry {
 export function disposeBodies(): void {
   for (const g of geos) g.dispose();
   geos.length = 0;
-  bodyCache.clear(); hairCache.clear();
-  headGeo = null; glassesGeo = null; inverses = null;
+  bodyCache.clear(); hairCache.clear(); comboCache.clear();
+  headGeo = null; headSrc = null; glassesGeo = null; inverses = null;
 }

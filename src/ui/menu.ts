@@ -4,7 +4,7 @@ import { h } from './dom';
 import { icon } from './icons';
 import { UiKit } from './kit';
 import { toggle } from './widgets';
-import { LOOK_MAX, LOOK_MIN, clampLook, type FontSize, type Quality } from './settings';
+import { LOOK_MAX, LOOK_MIN, clampLook, type FontSize, type MaxFps, type Quality } from './settings';
 
 export interface MenuHooks {
   endDay(): void;
@@ -80,7 +80,7 @@ export class Menus {
    *  cartão vira uma grade de 2 colunas (linhas "rótulo | controle") e cabe sem rolagem (Fase 4). */
   showOptions(): void {
     const st = this.kit.settings;
-    const quality: [Quality, string][] = [['low', 'Baixa'], ['medium', 'Média'], ['high', 'Alta']];
+    const quality: [Quality, string][] = [['auto', 'Automática'], ['low', 'Baixa'], ['medium', 'Média'], ['high', 'Alta']];
     const volOut = h('output', null, `${Math.round(st.value.volume * 100)}%`);
     const vol = h('input', { type: 'range', min: 0, max: 100, value: Math.round(st.value.volume * 100), 'aria-label': 'Volume' });
     vol.addEventListener('input', () => { volOut.textContent = `${vol.value}%`; st.set({ volume: Number(vol.value) / 100 }); });
@@ -90,10 +90,15 @@ export class Menus {
     look.addEventListener('input', () => { const v = clampLook(Number(look.value)); lookOut.textContent = lookTxt(v); st.set({ lookSensitivity: v }); });
     const sw = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(st.value.haptics), 'aria-label': 'Vibração' });
     sw.addEventListener('click', () => { const v = !st.value.haptics; st.set({ haptics: v }); sw.setAttribute('aria-checked', String(v)); if (v) st.buzz(30); });
-    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Qualidade gráfica' });
-    const paint = (): void => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.q === st.value.quality));
-    for (const [q, label] of quality) seg.appendChild(h('button', { class: 'btn', 'data-q': q, on: { click: () => { st.set({ quality: q }); paint(); } } }, label));
+    const seg = h('div', { class: 'seg seg-q', role: 'group', 'aria-label': 'Qualidade gráfica' });
+    const paint = (): void => seg.querySelectorAll('button').forEach((b) => { const on = b.dataset.q === st.value.quality; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    for (const [q, label] of quality) seg.appendChild(h('button', { class: 'btn', 'data-q': q, 'aria-pressed': String(q === st.value.quality), on: { click: () => { st.set({ quality: q }); paint(); } } }, label));
     paint();
+    const fpsSeg = h('div', { class: 'seg seg-fps', role: 'group', 'aria-label': 'FPS máximo' });
+    const fpsOpts: [MaxFps, string][] = [[30, '30'], [60, '60'], [0, 'Sem limite']];
+    const paintFps = (): void => fpsSeg.querySelectorAll('button').forEach((b) => { const on = Number(b.dataset.fps) === st.value.maxFps; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    for (const [v, label] of fpsOpts) fpsSeg.appendChild(h('button', { class: 'btn', 'data-fps': String(v), 'aria-label': v ? `${v} FPS` : 'FPS sem limite', on: { click: () => { st.set({ maxFps: v }); paintFps(); } } }, label));
+    paintFps();
     const fontSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Tamanho do texto' });
     const sizes: [FontSize, string][] = [['small', 'P'], ['medium', 'M'], ['large', 'G']];
     const paintF = (): void => fontSeg.querySelectorAll('button').forEach((b) => { const on = b.dataset.f === st.value.fontSize; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
@@ -102,24 +107,25 @@ export class Menus {
     const swRm = toggle(st.value.reduceMotion, 'Reduzir movimento', (v) => { st.set({ reduceMotion: v }); swRm.setAttribute('aria-checked', String(v)); });
     const swCb = toggle(st.value.colorblind, 'Modo daltônico', (v) => { st.set({ colorblind: v }); swCb.setAttribute('aria-checked', String(v)); });
     /** Linha de opção: rótulo (+ valor) e controle; `inl` = controle na mesma linha do rótulo (interruptores). */
-    const row = (label: string, ctl: HTMLElement, o: { out?: HTMLElement; note?: string; inl?: boolean } = {}): HTMLElement =>
-      h('div', { class: `opt${o.inl ? ' inl' : ''}`, title: o.note },
+    const row = (label: string, ctl: HTMLElement, o: { out?: HTMLElement; note?: string; inl?: boolean; cls?: string } = {}): HTMLElement =>
+      h('div', { class: `opt${o.inl ? ' inl' : ''}${o.cls ? ` ${o.cls}` : ''}`, title: o.note },
         h('div', { class: 'lb' }, h('span', null, label), o.out ?? null, o.inl ? ctl : null),
         o.inl ? null : ctl,
         o.note ? h('small', { class: 'muted' }, o.note) : null);
     const close = (): void => { back.remove(); this.kit.modalClose('options'); };
     const back = h('div', { class: 'mx-modal mx-dim mx-z-confirm', role: 'dialog', 'aria-label': 'Opções' },
       h('div', { class: 'menu-card opt-card' },
-        h('div', { class: 'mx-row' }, h('h2', { style: 'flex:1' }, 'Opções'), UiKit.closeButton(close)),
+        // "Voltar" no cabeçalho: a grade de opções cabe sem rolagem no celular deitado (4 linhas × 2 colunas)
+        h('div', { class: 'mx-row' }, h('h2', { style: 'flex:1' }, 'Opções'), h('button', { class: 'btn primary opt-back', on: { click: close } }, 'Voltar'), UiKit.closeButton(close)),
         h('div', { class: 'opt-grid' },
           row('Volume', vol, { out: volOut }),
           row('Sensibilidade da câmera', look, { out: lookOut, note: 'Quanto a câmera gira ao arrastar o dedo ou o mouse.' }),
-          row('Qualidade gráfica', seg, { note: 'Baixa economiza bateria em celulares mais simples.' }),
+          row('Qualidade gráfica', seg, { note: 'Automática ajusta a resolução para o jogo ficar liso. Baixa economiza bateria.', cls: 'opt-q' }),
+          row('FPS máximo', fpsSeg, { note: '60 é o ideal. 30 gasta menos bateria e esquenta menos.', cls: 'opt-fps' }),
           row('Tamanho do texto', fontSeg),
           row('Vibração', sw, { inl: true }),
           row('Reduzir movimento', swRm, { inl: true, note: 'Desliga animações da interface e o tremor da câmera.' }),
-          row('Modo daltônico', swCb, { inl: true, note: 'Troca verde/vermelho por azul/laranja e mostra setas ↑↓ em preços e margens.' }),
-          h('button', { class: 'btn primary block opt-back', on: { click: close } }, 'Voltar'))));
+          row('Modo daltônico', swCb, { inl: true, note: 'Troca verde/vermelho por azul/laranja e mostra setas ↑↓ em preços e margens.' }))));
     this.layer.appendChild(back);
     this.kit.modalOpen('options', { onEsc: close });
   }

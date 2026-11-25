@@ -129,7 +129,7 @@ const R = {
 } satisfies Record<string, Px | Px[]>;
 const cellOf = (p: Px, inset = 1.5): Cell => ({ u0: (p.x + inset) / AW, v0: 1 - (p.y + p.h - inset) / AH, du: (p.w - inset * 2) / AW, dv: (p.h - inset * 2) / AH });
 
-let atlas: { c: HTMLCanvasElement; g: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mat: THREE.MeshStandardMaterial } | null = null;
+let atlas: { c: HTMLCanvasElement; g: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mat: THREE.MeshLambertMaterial } | null = null;
 
 function rr(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
@@ -266,7 +266,7 @@ function ensureAtlas(): NonNullable<typeof atlas> {
   const { c, g } = makeCanvas(AW, AH);
   drawStatic(g);
   const tex = canvasTex(c);
-  const mat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.5, roughness: 0.75, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.14 });
+  const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.14 });
   atlas = { c, g, tex, mat };
   drawSign('Mercadinho', '#d8342c', 7.5);
   drawDelivery(2);
@@ -274,7 +274,7 @@ function ensureAtlas(): NonNullable<typeof atlas> {
 }
 
 /** Material único dos decalques (alphaTest: recortes sem ordenação de transparência). */
-export const decalMaterial = (): THREE.MeshStandardMaterial => ensureAtlas().mat;
+export const decalMaterial = (): THREE.MeshLambertMaterial => ensureAtlas().mat;
 
 export const DECAL = {
   posters: (): Cell[] => { ensureAtlas(); return R.posters.map((p) => cellOf(p)); },

@@ -45,15 +45,19 @@ export const phase4Css = `
   .opt-card .opt .lb{font-size:14px;line-height:1.15;gap:6px}
   .opt-card .opt input[type=range]{height:44px;min-width:0}
   .opt-card .seg .btn{min-height:44px;font-size:14px;padding:0 4px}
-  .opt-card .opt-back{min-height:48px}
+  .opt-card .opt.opt-q{grid-template-columns:minmax(64px,.7fr) minmax(0,2fr)}
+  .opt-card .seg-q{grid-template-columns:1.75fr 1fr 1fr 1fr;grid-auto-columns:auto}
+  .opt-card .seg-q .btn{font-size:13px;padding:0 2px}
+  .opt-card .seg-fps{grid-template-columns:1fr 1fr 1.6fr;grid-auto-columns:auto}
+  .opt-card .seg-fps .btn{line-height:1.05}
+  .opt-card .opt-back{min-height:44px}
   .menu-sub{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
   .menu-sub .btn{min-height:48px;padding:0 8px}
   .title-screen{flex-direction:row;gap:clamp(24px,7vw,72px)}
   .title-screen .logo .mk{width:64px;height:64px;border-radius:20px;margin-bottom:6px}
   .title-screen .menu-btns{width:min(320px,44vw)}
 }
-.opt-card .opt-back{margin-top:4px}
-@media (orientation:landscape) and (max-height:520px){.opt-card .opt-back{margin-top:0}}
+.opt-card .opt-back{min-height:44px;padding:0 18px;margin-right:4px}
 
 /* ---------- pagamento (troco / maquininha) sem rolagem ---------- */
 .pay-info b{overflow:hidden;text-overflow:ellipsis}

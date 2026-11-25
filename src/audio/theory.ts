@@ -403,5 +403,6 @@ export function parseSettings(raw: unknown): Partial<AudioSettings> {
   const out: Partial<AudioSettings> = {};
   if (typeof r.volume === 'number' && Number.isFinite(r.volume)) out.volume = clamp01(r.volume);
   if (r.quality === 'low' || r.quality === 'medium' || r.quality === 'high') out.quality = r.quality;
+  else if (r.quality === 'auto') out.quality = 'medium'; // gráfico automático: vozes como na qualidade média
   return out;
 }

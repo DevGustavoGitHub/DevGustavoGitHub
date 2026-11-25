@@ -10,18 +10,27 @@ type MatOpts = {
   opacity?: number; side?: THREE.Side; flat?: boolean; vertexColors?: boolean; depthWrite?: boolean;
 };
 
-const matCache = new Map<string, THREE.MeshStandardMaterial>();
-/** Material padrão (MeshStandardMaterial) com cache por parâmetros. */
-export function stdMat(color: number, o: MatOpts = {}): THREE.MeshStandardMaterial {
+/**
+ * Superfícies foscas (rugosidade ≥ ROUGH_LAMBERT, sem metal) usam MeshLambertMaterial: o difuso é o mesmo do PBR
+ * (BRDF de Lambert por fragmento) e só some um brilho especular quase invisível nessa rugosidade (diferença média
+ * < 2 níveis de 255 nas vistas comparadas; docs/PERF.md), com um shader de fragmento bem mais barato no celular.
+ */
+export const ROUGH_LAMBERT = 0.7;
+type AnyMat = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
+const matCache = new Map<string, AnyMat>();
+/** Material padrão com cache por parâmetros (Lambert se fosco e não metálico; senão Standard). */
+export function stdMat(color: number, o: MatOpts = {}): AnyMat {
   const key = `${color}|${o.rough ?? 0.85}|${o.metal ?? 0}|${o.emissive ?? 0}|${o.ei ?? 0}|${o.opacity ?? 1}|${o.side ?? 0}|${o.flat ? 1 : 0}|${o.vertexColors ? 1 : 0}|${o.depthWrite ?? 1}`;
   let m = matCache.get(key);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({
-      color, roughness: o.rough ?? 0.85, metalness: o.metal ?? 0,
-      emissive: o.emissive ?? 0x000000, emissiveIntensity: o.ei ?? 1,
+    const base = {
+      color, emissive: o.emissive ?? 0x000000, emissiveIntensity: o.ei ?? 1,
       flatShading: o.flat ?? false, vertexColors: o.vertexColors ?? false,
       side: o.side ?? THREE.FrontSide,
-    });
+    };
+    m = (o.metal ?? 0) === 0 && (o.rough ?? 0.85) >= ROUGH_LAMBERT
+      ? new THREE.MeshLambertMaterial(base)
+      : new THREE.MeshStandardMaterial({ ...base, roughness: o.rough ?? 0.85, metalness: o.metal ?? 0 });
     if (o.opacity !== undefined && o.opacity < 1) {
       m.transparent = true; m.opacity = o.opacity; m.depthWrite = o.depthWrite ?? false;
     }

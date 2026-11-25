@@ -465,7 +465,9 @@ describe('QA sistemas — fixture', () => {
     for (let x = 1; x < b.width - 2; x++) if (api.canPlace(s, 'counter', x, b.depth - 4, 0)) { api.buyFurniture(s, 'counter', x, b.depth - 4, 0); break; }
     for (let i = 0, x = 1; i < 3 && x < b.width - 2; x += 2) if (api.canPlace(s, 'rack', x, -3, 0)) { api.buyFurniture(s, 'rack', x, -3, 0); i++; }
     for (const f of s.furniture) for (let l = 0; l < (f.levels?.length ?? 0); l++) {
-      api.orderBoxes(s, f.levels![l]!.productId!, 1);
+      const pid = f.levels![l]!.productId;
+      if (!pid) continue; // as 2 prateleiras do jogo novo começam sem produto
+      api.orderBoxes(s, pid, 1);
       const i = s.sidewalk.length - 1;
       api.placeUnitsInLevel(s, i, f.id, l, 999);
       if (s.sidewalk[i]!.units === 0) api.discardBox(s, i); else api.storeBox(s, i);

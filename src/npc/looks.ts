@@ -335,6 +335,47 @@ export function outfitMaterial(o: Outfit): THREE.MeshLambertMaterial {
   return m;
 }
 
+/* ============================== materiais de uma passada (desempenho) ==============================
+ * Corpo: textura da roupa na parte 0 e cores lisas nas partes 1–3 (calça, pele, calçado) → 1 draw call.
+ * Cabeça fundida: pele (0), rosto desenhado sobre a pele (1, a transparência vira mistura no shader: fica opaco),
+ * cabelo (2), chapéu (3), óculos (4) → 1 draw call. Um material POR PESSOA (só muda as cores = uniforms) e o mesmo
+ * programa de shader para todas (customProgramCacheKey). Não descarte esses materiais ao remover a pessoa: o
+ * programa compartilhado seria liberado quando a última saísse e a próxima pessoa recompilaria (travada).
+ */
+type Shader = { uniforms: Record<string, THREE.IUniform>; vertexShader: string; fragmentShader: string };
+/** Corpo: parte 0 = textura (roupa); 1, 2, 3 = uPart[0..2] (calça, pele, calçado). */
+const BODY_FRAG = `float p = vPart;
+vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+diffuseColor.rgb *= p < 0.5 ? sampledDiffuseColor.rgb : ( p < 1.5 ? uPart[0] : ( p < 2.5 ? uPart[1] : uPart[2] ) );`;
+/** Cabeça: 0 pele = uPart[0]; 1 rosto = textura misturada sobre a pele (alfa); 2 cabelo, 3 chapéu, 4 óculos = uPart[1..3]. */
+const HEAD_FRAG = `float p = vPart;
+vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+vec3 partColor = p < 1.5 ? uPart[0] : ( p < 2.5 ? uPart[1] : ( p < 3.5 ? uPart[2] : uPart[3] ) );
+diffuseColor.rgb *= ( p > 0.5 && p < 1.5 ) ? mix( uPart[0], sampledDiffuseColor.rgb, sampledDiffuseColor.a ) : partColor;`;
+function partMaterial(key: string, map: THREE.Texture, colors: THREE.Color[], side: THREE.Side, frag: string): THREE.MeshLambertMaterial {
+  const m = new THREE.MeshLambertMaterial({ map, side });
+  m.onBeforeCompile = (sh: Shader) => {
+    sh.uniforms.uPart = { value: colors };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float part;\nvarying float vPart;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPart = part;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform vec3 uPart[${colors.length}];\nvarying float vPart;`)
+      .replace('#include <map_fragment>', frag);
+  };
+  m.customProgramCacheKey = () => key;
+  return m;
+}
+const colorOf = (hex: string): THREE.Color => new THREE.Color(hex);
+/** Corpo de uma pessoa: roupa (textura do conjunto) + calça, pele e calçado (cores). */
+export function bodyMaterial(o: Outfit, pants: string, skin: string, shoes: string): THREE.MeshLambertMaterial {
+  return partMaterial('npc-body-1', outfitMaterial(o).map!, [colorOf(pants), colorOf(skin), colorOf(shoes)], THREE.FrontSide, BODY_FRAG);
+}
+/** Cabeça fundida: pele, rosto (textura do preset), cabelo, chapéu e óculos (cores). DoubleSide por causa do cabelo. */
+export function headMaterial(face: number, skin: string, hair: string, hat: string): THREE.MeshLambertMaterial {
+  return partMaterial('npc-head-1', faceMaterial(face, hair).map!, [colorOf(skin), colorOf(hair), colorOf(hat), colorOf('#15171a')], THREE.DoubleSide, HEAD_FRAG);
+}
+
 export function disposeLooks(): void {
   for (const m of faceMats.values()) m.dispose();
   for (const m of outfitMats.values()) m.dispose();

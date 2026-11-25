@@ -20,7 +20,9 @@ import {
 import { BoxLayer, ItemLayer, BOX_H, BOX_W, BOX_D, genericVisual, productVisual, makeProductMesh, makeBoxMesh, type BoxInst } from './products';
 import { SHAPES } from './look';
 import { combine, meshesOf } from './batch';
-import { TIERS, ORDER, initialTier, isTier, isMobileDevice, persistTier, storedTier, type Tier } from './quality';
+import { TIERS, autoStart, autoSteps, initialQuality, isMobileDevice, isQuality, saveAutoStep, type Quality } from './quality';
+import { DynamicResolution, SlowWatch } from './drs';
+import { registerWarm, warmUp, lastWarm } from '../core/warm';
 import { NavGrid, footprintOf } from './nav';
 import { BuildMode } from './build';
 import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup, freezeSelf } from './kit';
@@ -28,6 +30,9 @@ import { Picks } from './pick';
 import { CheckoutScreens, type Display } from './screens';
 import { PriceTags } from './tags';
 import { TipJars, JAR } from './tipjar';
+
+/** Dica única "Jogo lento? use Automática" (mostrada no máximo uma vez). */
+const QHINT_KEY = 'mercadinho:qhint';
 
 /** Autoteste dos visuais genéricos (qualquer shape/cor/categoria, inclusive desconhecidos, gera geometria válida). */
 function genericProductsSelfTest(): { ok: boolean; combos: number; bad: string[]; catalog: number } {
@@ -356,6 +361,7 @@ export default function create(): GameModule {
     }
     const merged = combine(parts);
     for (const mesh of meshesOf(merged, furniStatic, { order: 2 })) { staticGeos.push(mesh.geometry); freezeSelf(mesh); }
+    shadowsDirty = true; // a casca dos móveis projeta sombra
   }
   /** Itens expostos POR NÍVEL (cada nível só com o seu produto), 1 InstancedMesh por produto na ItemLayer. */
   function rebuildItems(v: View, lvls: Map<number, LevelView[]>): void {
@@ -416,6 +422,7 @@ export default function create(): GameModule {
     }
     boxLayer.setSource('floor', list);
     picksDirty = true;
+    shadowsDirty = true;
   }
   const boxSigOf = (v: View): string => v.sidewalk.map((b) => `${b.productId}:${b.units}:${b.x ?? '-'}:${b.z ?? '-'}:${b.carried ? 1 : 0}:${b.open ? 1 : 0}:${b.rot ?? ''}`).join(',');
 
@@ -441,6 +448,7 @@ export default function create(): GameModule {
       }
     }
     boxLayer.setSource('rack', list);
+    shadowsDirty = true; // caixas projetam sombra
   }
 
   /** Altura da pilha onde uma caixa seria largada (empilha a < 0,3 m de outra), ignorando `self`. */
@@ -518,6 +526,7 @@ export default function create(): GameModule {
       shellKey = sk; bounds = nb; doorAt = doorPos(bounds);
       env.rebuild(bounds);
       shop.rebuild(bounds, s.storageUnlocked, dec, s.storeName);
+      shadowsDirty = true;
       decorKey = dk;
       env.setTime(ctx.clock.minute, true);
       navKey = ''; rackKey = ''; boxKey = ''; furniKey = ''; demoCache = null; picksDirty = true;
@@ -601,6 +610,7 @@ export default function create(): GameModule {
     makeProductMesh: (pid) => makeProductMesh(pid),
     makeBoxMesh: (pid, open, units) => makeBoxMesh(pid, open, units),
     levelAt: (id, point) => levelAt(id, point),
+    shadowDirty: () => { shadowsDirty = true; },
     poi: (kind, id) => {
       const v = new THREE.Vector3();
       switch (kind) {
@@ -619,40 +629,78 @@ export default function create(): GameModule {
     },
   };
 
-  /* ---------------- qualidade (tiers) + adaptação automática ---------------- */
-  let tier: Tier = 'medium';
-  let firstSettings = true;
-  let autoOn = true;
-  const fpsWin = { frames: 0, ms: 0, last: 0, since: 0 };
-  function applyTier(t: Tier): void {
-    tier = t;
-    const cfg = TIERS[t];
+  /* ---------------- qualidade: tiers fixos, modo automático (resolução dinâmica) e sombra estática ----------------
+   * Fixo (Baixa/Média/Alta): exatamente o que o jogador escolheu; nunca muda sozinho (no máximo uma dica em toast).
+   * Automático: resolução dinâmica (drs.ts) em degraus de pixel ratio; sombras só saem no último degrau. Nada disso é
+   * gravado como escolha do jogador (só o último degrau estável em 'mercadinho:drs').
+   * Sombra: mapa estático (renderer.shadowMap.autoUpdate = false no main); `shadowsDirty` refaz o mapa quando o sol
+   * anda (env.sunVersion), quando o que projeta sombra muda (móveis, caixas, árvores) ou quando a qualidade muda. */
+  let quality: Quality = 'auto';
+  let autoOn = true; // adaptação automática (resolução dinâmica / dica); WebDriver desliga
+  let drs: DynamicResolution | null = null;
+  const slowWatch = new SlowWatch();
+  let modalOpen = false;
+  let lastFrameAt = 0;
+  let shadowsDirty = true;
+  let sunSeen = -1;
+  const AUTO_FOG: [number, number] = TIERS.high.fog;
+  /** Aplica pixel ratio, sombra e neblina. Ligar/desligar sombras muda TODOS os shaders: recompila em segundo plano. */
+  function applyRender(pr: number, shadow: number, fog: readonly [number, number]): void {
     const r = ctx.renderer;
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, cfg.pixelRatio));
-    r.setSize(window.innerWidth, window.innerHeight, false);
-    env.setShadow(cfg.shadow);
-    if (ctx.scene.fog) { const fg = ctx.scene.fog as THREE.Fog; fg.near = cfg.fog[0]; fg.far = cfg.fog[1]; }
-    fpsWin.frames = 0; fpsWin.ms = 0; fpsWin.since = performance.now();
+    const target = Math.min(window.devicePixelRatio || 1, pr);
+    if (Math.abs(r.getPixelRatio() - target) > 1e-3) { r.setPixelRatio(target); r.setSize(window.innerWidth, window.innerHeight, false); }
+    const wasOn = env.sun.castShadow;
+    env.setShadow(shadow);
+    if (ctx.scene.fog) { const fg = ctx.scene.fog as THREE.Fog; fg.near = fog[0]; fg.far = fog[1]; }
+    shadowsDirty = true;
+    if (wasOn !== shadow > 0 && warmReady) void warmUp(ctx, { scene: true, hold: true });
   }
-  function watchFps(): void {
+  function applyQuality(q: Quality): void {
+    quality = q;
+    slowWatch.reset();
+    if (q === 'auto') {
+      const steps = autoSteps();
+      drs = new DynamicResolution(steps, autoStart(steps));
+      applyRender(drs.step.pr, drs.step.shadow, AUTO_FOG);
+    } else {
+      drs = null;
+      const cfg = TIERS[q];
+      applyRender(cfg.pixelRatio, cfg.shadow, cfg.fog);
+    }
+  }
+  /** Por quadro desenhado: resolução dinâmica (auto) ou dica única (qualidade fixa lenta). */
+  function watchPerf(): void {
     const now = performance.now();
-    const gap = fpsWin.last ? now - fpsWin.last : 0;
-    fpsWin.last = now;
-    if (!autoOn || tier === 'low' || document.visibilityState !== 'visible') { fpsWin.frames = 0; fpsWin.ms = 0; return; }
-    if (gap > 1000 || now - fpsWin.since < 4000) { if (gap > 1000) fpsWin.since = now; fpsWin.frames = 0; fpsWin.ms = 0; return; }
-    fpsWin.frames++; fpsWin.ms += gap;
-    if (fpsWin.ms < 3000) return;
-    const fps = (fpsWin.frames / fpsWin.ms) * 1000;
-    fpsWin.frames = 0; fpsWin.ms = 0;
-    if (fps >= 30) return;
-    const lower = ORDER[Math.max(0, ORDER.indexOf(tier) - 1)]!;
-    applyTier(lower); persistTier(lower);
-    ctx.bus.emit('quality:auto', { quality: lower, fps: Math.round(fps) });
-    ctx.bus.emit('toast', { text: `Desempenho baixo (${Math.round(fps)} fps): qualidade gráfica reduzida para ${lower === 'low' ? 'baixa' : 'média'}.`, kind: 'info' });
+    const interval = lastFrameAt ? now - lastFrameAt : 0;
+    lastFrameAt = now;
+    const f = ctx.frame;
+    if (!autoOn || modalOpen || (f && f.hold > 0) || document.visibilityState !== 'visible') { drs?.reset(); slowWatch.reset(); return; }
+    const target = f?.targetMs ?? 1000 / 60;
+    if (drs) {
+      if (drs.frame(now, interval, f?.workMs ?? 0, target) !== null) {
+        const s = drs.step;
+        applyRender(s.pr, s.shadow, AUTO_FOG);
+        saveAutoStep(s);
+      }
+    } else if (quality !== 'low' && slowWatch.frame(now, interval, target)) {
+      let seen = false;
+      try { seen = localStorage.getItem(QHINT_KEY) === '1'; localStorage.setItem(QHINT_KEY, '1'); } catch { /* privado */ }
+      if (!seen) ctx.bus.emit('toast', { text: 'Jogo lento? Em Opções, use Qualidade gráfica: Automática.', kind: 'info' });
+    }
   }
-  const qualityInfo = (): { tier: Tier; pixelRatio: number; shadows: number; antialias: boolean; auto: boolean; mobile: boolean } => ({
-    tier, pixelRatio: ctx.renderer.getPixelRatio(), shadows: TIERS[tier].shadow, antialias: !!ctx.renderer.getContextAttributes()?.antialias, auto: autoOn, mobile: isMobileDevice(),
+  const qualityInfo = (): { quality: Quality; tier: Quality; pixelRatio: number; shadows: number; antialias: boolean; auto: boolean; adaptive: boolean; mobile: boolean; step: number | null; steps: number; drsLog: unknown[]; shadowAuto: boolean } => ({
+    quality, tier: quality, pixelRatio: ctx.renderer.getPixelRatio(), shadows: env.sun.castShadow ? env.sun.shadow.mapSize.x : 0,
+    antialias: !!ctx.renderer.getContextAttributes()?.antialias, auto: quality === 'auto', adaptive: autoOn, mobile: isMobileDevice(),
+    step: drs ? drs.index : null, steps: drs ? drs.steps.length : 0, drsLog: drs ? drs.log.slice() : [], shadowAuto: ctx.renderer.shadowMap.autoUpdate,
   });
+  /* ---------------- aquecimento de shaders (objetos que só aparecem depois) ---------------- */
+  let warmReady = false;
+  function warmSamples(add: (o: THREE.Object3D) => void): void {
+    add(makeProductMesh(PRODUCTS[0]!.id)); // esteira/cesta (Mesh com o material dos produtos)
+    const bm = makeBoxMesh(PRODUCTS[0]!.id, true, 6); bm.userData.setOpen?.(1); add(bm); // caixa animável (mãos/repositor)
+    add(tipJars.sample()); // pote de gorjeta, "+R$" e painel
+    add(build.sample()); // fantasma/grade do modo construção
+  }
 
   /* ---------------- câmera travada (testes/prints: independe do player) ---------------- */
   let lock: [number, number, number, number, number, number] | null = null;
@@ -675,8 +723,11 @@ export default function create(): GameModule {
       demo: (on = true) => { demo = on; demoCache = null; boxKey = ''; rackKey = ''; navKey = ''; dirtKey = ''; furniKey = ''; entries.forEach((e) => furniGroup.remove(e.group)); entries.clear(); lastHash = 0; sync(false); },
       nodes: () => root.children.map((c) => ({ name: c.name || c.type, type: c.type, children: c.children.length })),
       quality: qualityInfo,
-      setTier: (t: Tier) => applyTier(t),
-      autoQuality: (on: boolean) => { autoOn = on; },
+      /** Debug/testes: aplica uma qualidade (low/medium/high/auto) sem gravar como escolha do jogador. */
+      setTier: (t: Quality) => { if (isQuality(t)) applyQuality(t); },
+      /** Liga/desliga a adaptação automática (resolução dinâmica e dica). */
+      autoQuality: (on: boolean) => { autoOn = on; drs?.reset(); slowWatch.reset(); },
+      warm: () => lastWarm(),
       testGenericProducts: () => genericProductsSelfTest(),
       stats: () => ({ calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, geometries: ctx.renderer.info.memory.geometries, textures: ctx.renderer.info.memory.textures }),
       furnitureViews: () => entries.size,
@@ -739,10 +790,11 @@ export default function create(): GameModule {
         walkable: (x, z) => nav.isWalkable(x, z),
         stackHeight,
       });
-      const t0 = initialTier();
-      autoOn = !navigator.webdriver || /[?&]autoq=1/.test(location.search); // testes automatizados (WebDriver) não são rebaixados
-      applyTier(t0);
+      autoOn = !navigator.webdriver || /[?&]autoq=1/.test(location.search); // testes automatizados (WebDriver): resolução fixa
+      applyQuality(initialQuality());
       sync(true);
+      offs.push(registerWarm(warmSamples));
+      warmReady = true;
       ctx.services.world = service;
       // câmera inicial em 1ª pessoa (o player assume em seguida)
       ctx.camera.position.set(bounds.width / 2, 1.6, bounds.depth - 1.2);
@@ -751,12 +803,10 @@ export default function create(): GameModule {
       const on = ctx.bus.on.bind(ctx.bus);
       offs.push(
         on('settings:changed', (p: { quality?: unknown }) => {
-          // o primeiro evento é a emissão inicial da UI: só vale se o jogador já escolheu algo antes (senão vence o padrão por dispositivo)
-          const first = firstSettings; firstSettings = false;
-          if (!isTier(p?.quality)) return;
-          if (first && storedTier() === null) return;
-          applyTier(p.quality);
+          // escolha do jogador (ou emissão inicial da UI, que lê o mesmo localStorage): só reaplica se mudou
+          if (isQuality(p?.quality) && p.quality !== quality) applyQuality(p.quality);
         }),
+        on('ui:modal', (m?: { open?: boolean }) => { modalOpen = !!m?.open; drs?.reset(); }),
         on('stateChanged', () => { const t0 = pnow(); sync(false); if (prof.on) { prof.ev += performance.now() - t0; prof.evs++; } }),
         on('dayStarted', () => { sync(false); tipJars.resetDay(); }),
         on('checkout:done', (p: { counterId?: number; tip?: number }) => {
@@ -780,7 +830,7 @@ export default function create(): GameModule {
     },
     update(dt) {
       const T0 = pnow();
-      watchFps();
+      watchPerf();
       acc += dt;
       if (acc >= 0.25) { acc = 0; sync(false); }
       const min = ctx.clock.minute;
@@ -808,6 +858,9 @@ export default function create(): GameModule {
         }
       }
       build.update(dt);
+      // mapa de sombra estático: refaz só quando o sol andou ou algo que projeta sombra mudou
+      if (env.sunVersion !== sunSeen) { sunSeen = env.sunVersion; shadowsDirty = true; }
+      if (shadowsDirty) { shadowsDirty = false; ctx.renderer.shadowMap.needsUpdate = true; }
       if (prof.on) { const d = performance.now() - T0; prof.frames++; prof.upd += d; prof.max = Math.max(prof.max, d); }
     },
     dispose() {

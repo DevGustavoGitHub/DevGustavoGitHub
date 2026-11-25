@@ -91,6 +91,14 @@ export class TipJars {
 
   resetDay(): void { for (const j of this.jars.values()) { j.sum = 0; this.fill(j); } }
 
+  /** Aquecimento de shaders (core/warm.ts): pote, moedas e sprite do "+R$" com os mesmos materiais. */
+  sample(): THREE.Object3D {
+    const g = new THREE.Group();
+    this.build(g);
+    g.add(new THREE.Sprite(this.pops[0]!.mat));
+    return g;
+  }
+
   tip(counterId: number | undefined, cents: number): void {
     if (!this.enabled || !(cents > 0)) return;
     const j = (counterId !== undefined ? this.jars.get(counterId) : undefined) ?? this.jars.values().next().value as Jar | undefined;
