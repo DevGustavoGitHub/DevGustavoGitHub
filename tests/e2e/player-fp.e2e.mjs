@@ -322,10 +322,8 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   check('caixa cheia na lixeira cai ao lado (dropBox) com aviso', !!full && !full.carried && full.d > 0.4 && full.d < 2.2 && (await evs('toast')).length > 0, JSON.stringify(full));
   await place(6, 6.5, 0, -0.55);
   await giveBox('cafe', 4, false);
-  // teleporte do teste + arremesso imediato: a caixa na mão segue a câmera com suavização e, com o limite de 60 FPS
-  // (quadros pulados), ainda podia estar no lugar antigo (perto da lixeira) — dá tempo para ela chegar às mãos
-  await until(() => { const p = __player.pos(), e = __game.camera.position; return Math.hypot(e.x - p.x, e.z - p.z) < 0.05; }, null, 3000);
-  await page.waitForTimeout(450);
+  // arremesso logo depois do teleporte (sem quadro processado no meio): a mira assistida antiga (lixeira) não pode valer —
+  // o player só usa a lixeira se ela estiver à frente na pose atual (antes a caixa voava para a vitrine, de forma intermitente)
   await frames(3);
   await page.evaluate(() => __player.throwBox());
   await until(() => __player.flying() === 0, null, 6000);

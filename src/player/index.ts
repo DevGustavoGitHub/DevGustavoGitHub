@@ -834,8 +834,15 @@ export default function create(): GameModule {
     const bin = binPos();
     // mira assistida: lixeira mirada, ou o ponto do chão a 1–9 m; senão um arremesso padrão para a frente
     let aim: THREE.Vector3 | null = null;
-    if (target?.pick.kind === 'trash') aim = tv2.set(bin.x, 1.05, bin.z);
-    else if (target?.pick.kind === 'recycle') { const rb = recBinPos(); aim = tv2.set(rb.x, 1.05, rb.z); }
+    // a mira assistida só vale se a lixeira mirada está MESMO à frente agora: o alvo (`target`) é do último quadro
+    // processado e, sem quadro novo depois de virar/teleportar (limite de FPS pula quadros), apontava para trás
+    const ahead = (x: number, z: number): boolean => {
+      const dx = x - cam.position.x, dz = z - cam.position.z, h = Math.hypot(fwd.x, fwd.z);
+      return h > 0.01 && (dx * fwd.x + dz * fwd.z) / ((Math.hypot(dx, dz) || 1) * h) > 0.85;
+    };
+    const rbp = recBinPos();
+    if (target?.pick.kind === 'trash' && ahead(bin.x, bin.z)) aim = tv2.set(bin.x, 1.05, bin.z);
+    else if (target?.pick.kind === 'recycle' && ahead(rbp.x, rbp.z)) aim = tv2.set(rbp.x, 1.05, rbp.z);
     else if (fwd.y < -0.03) {
       const t = -cam.position.y / fwd.y;
       const px = cam.position.x + fwd.x * t, pz = cam.position.z + fwd.z * t;
