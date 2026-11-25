@@ -17,6 +17,11 @@ import { DECAL, brickTex, decalMaterial, drawSign, tileTex, woodTex } from './te
 export { Env, ROAD_WIDTH } from './env';
 
 /** Medidas da fachada (metros). */
+/**
+ * Parede entre o salão e o depósito (pós-teste 3): fina e encostada em z = 0, do lado do depósito. Com a espessura das
+ * outras (0,2 m) ela ocupava a 1ª fileira do depósito e a estante encostada nela atravessava a parede.
+ */
+export const PARTITION_T = 0.04;
 export const FACADE = { t: 0.2, sill: 0.55, winTop: 2.45, doorTop: 2.45, band0: WALL_HEIGHT, band1: 4.2, pierDoor: 0.7, pierCorner: 0.55, pierMid: 0.9 };
 
 const M_IN = 0, M_OUT = 1, M_TRIM = 2, M_BRICK = 3, M_STORE = 4, M_BAND = 5;
@@ -116,7 +121,10 @@ export class Shop {
       const sg = tr.geo(new THREE.PlaneGeometry(W, STORAGE_DEPTH + t)); sg.rotateX(-Math.PI / 2); scaleUV(sg, W / 2, (STORAGE_DEPTH + t) / 2);
       const sm = tr.mat(new THREE.MeshLambertMaterial({ color: 0xaab1b9, map: tileTex() }));
       const sf = new THREE.Mesh(sg, sm); sf.position.set(W / 2, 0.01, -(STORAGE_DEPTH + t) / 2); sf.receiveShadow = true; g.add(sf);
-      sb.box(W - 0.4, 0.004, 0.12, ['matte', 0xf2c230], W / 2, 0.016, -0.42);
+      // faixa amarela só na passagem (área que fica livre), não mais de parede a parede por baixo das estantes
+      const yl: Spec = ['matte', 0xf2c230], qx0 = W / 2 - DOOR_WIDTH / 2, qx1 = W / 2 + DOOR_WIDTH / 2;
+      sb.box(DOOR_WIDTH, 0.004, 0.08, yl, W / 2, 0.016, -0.96);
+      for (const x of [qx0 + 0.04, qx1 - 0.04]) sb.box(0.08, 0.004, 0.92, yl, x, 0.016, -0.5);
     }
     /* ---- teto com luminárias ---- */
     const ceilMat = tr.mat(new THREE.MeshLambertMaterial({ color: 0xf5f6f8, emissive: 0xffffff, emissiveIntensity: 0.24 }));
@@ -139,9 +147,10 @@ export class Shop {
       wb.box(W, W + t, 0, H, zBack, 0, [M_OUT, M_STORE, T, T, T, T]);
       wb.box(-t, W + t, 0, H, zBack - t, zBack, [T, T, T, T, M_STORE, M_OUT]);
       const px0 = W / 2 - DOOR_WIDTH / 2, px1 = W / 2 + DOOR_WIDTH / 2;
-      wb.box(0, px0, 0, H, -t, 0, [T, T, T, T, M_IN, M_STORE]);
-      wb.box(px1, W, 0, H, -t, 0, [T, T, T, T, M_IN, M_STORE]);
-      wb.box(px0, px1, 2.5, H, -t, 0, [T, T, T, T, M_IN, M_STORE]);
+      const pt = PARTITION_T;
+      wb.box(0, px0, 0, H, -pt, 0, [T, T, T, T, M_IN, M_STORE]);
+      wb.box(px1, W, 0, H, -pt, 0, [T, T, T, T, M_IN, M_STORE]);
+      wb.box(px0, px1, 2.5, H, -pt, 0, [T, T, T, T, M_IN, M_STORE]);
     }
     this.buildFront(wb, sb, W, D, decor, name);
     const mats = [
@@ -289,9 +298,10 @@ export class Shop {
       this.storageDoorBox = { x: cx, y: 1.15, z: 0.06, w: 1.5, h: 2.34, d: 0.16 };
     } else {
       const x0 = cx - DOOR_WIDTH / 2, x1 = cx + DOOR_WIDTH / 2;
-      sb.box(0.08, 2.5, 0.06, met, x0 + 0.04, 0, 0.03);
-      sb.box(0.08, 2.5, 0.06, met, x1 - 0.04, 0, 0.03);
-      sb.box(DOOR_WIDTH, 0.08, 0.06, met, cx, 2.46, 0.03);
+      // batentes envolvem a parede fina (dos dois lados) só na passagem: a abertura parece uma parede de verdade
+      sb.box(0.1, 2.5, 0.16, met, x0 + 0.05, 0, -0.02);
+      sb.box(0.1, 2.5, 0.16, met, x1 - 0.05, 0, -0.02);
+      sb.box(DOOR_WIDTH, 0.1, 0.16, met, cx, 2.45, -0.02);
       decal(sb, DECAL.plate(), 0.9, 0.225, cx, 2.76, 0.012);
       this.storageDoorBox = null;
     }

@@ -56,7 +56,8 @@ export class Collider {
       { x0: gx1, z0: b.depth, x1: b.width + WALL_T, z1: b.depth + WALL_T, h: WALL_HEIGHT },
     ];
     if (s.storageUnlocked) {
-      list.push({ x0: -WALL_T, z0: -WALL_T, x1: gx0, z1: 0, h: WALL_HEIGHT }, { x0: gx1, z0: -WALL_T, x1: b.width + WALL_T, z1: 0, h: WALL_HEIGHT });
+      // parede fina entre salão e depósito (pós-teste 3: PARTITION_T = 0,04 m do lado do depósito)
+      list.push({ x0: -WALL_T, z0: -0.04, x1: gx0, z1: 0, h: WALL_HEIGHT }, { x0: gx1, z0: -0.04, x1: b.width + WALL_T, z1: 0, h: WALL_HEIGHT });
     }
     this.wallList = list;
     return list;
