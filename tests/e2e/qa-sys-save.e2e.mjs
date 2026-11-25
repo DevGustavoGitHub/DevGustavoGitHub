@@ -266,7 +266,7 @@ if (bk) {
   await page.evaluate(() => document.querySelector('#bk-restart')?.click());
   await page.waitForTimeout(800);
   const r = await snap();
-  check('[falência] recomeço: R$ 300, dívida zerada, layout inicial', r.money === 30000 && r.loan === 0 && r.furniture === 3, JSON.stringify(r));
+  check('[falência] recomeço: R$ 300, dívida zerada, layout inicial (balcão, 2 prateleiras, mesa do computador)', r.money === 30000 && r.loan === 0 && r.furniture === 4, JSON.stringify(r));
   await reload();
   const r2 = await snap();
   check('[falência] recomeço persistiu após recarregar', r2.money === r.money && r2.furniture === r.furniture, JSON.stringify({ r: r.money, r2: r2.money }));

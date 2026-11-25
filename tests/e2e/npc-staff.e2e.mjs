@@ -33,10 +33,10 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(1500);
 console.log('staff', JSON.stringify(await page.evaluate(() => __npc.staff())));
-let maxShelf = 0;
+let maxShelf = 0, minDirt = 99;
 for (let i = 0; i < 150; i++) {
   const st = await page.evaluate(() => { if (__game.clock.minute < 1100) __game.clock.minute += 6; const s = __game.state; return { boxes: s.sidewalk.length, dirt: s.dirt.length, shelf: s.shelf.macarrao + s.shelf.feijao, sold: __npc.stats.sold, staff: __npc.staff().map((x) => x.role + ':' + x.job).join(','), money: s.money, frame: __game.renderer.info.render.frame }; });
-  maxShelf = Math.max(maxShelf, st.shelf);
+  maxShelf = Math.max(maxShelf, st.shelf); minDirt = Math.min(minDirt, st.dirt);
   if (i % 5 === 0) console.log('t', i, JSON.stringify(st));
   if (i === 8) await page.screenshot({ path: `${OUT}/04-staff.png` });
   if (st.boxes === 0 && st.dirt === 0 && st.sold >= 3) break;
@@ -46,7 +46,7 @@ const r = await page.evaluate(() => ({ b: __before, s: { boxes: __game.state.sid
 console.log(JSON.stringify(r));
 check('repositor esvaziou as caixas', r.s.boxes === 0, `${r.b.boxes} -> ${r.s.boxes}`);
 check('prateleira reabastecida (pico observado)', maxShelf > r.b.shelf, `${r.b.shelf} -> pico ${maxShelf}`);
-check('faxineiro limpou a sujeira', r.s.dirt === 0, `${r.b.dirt} -> ${r.s.dirt}`);
+check('faxineiro limpou a sujeira (chegou a 0; clientes podem sujar de novo)', minDirt === 0, `${r.b.dirt} -> mín ${minDirt}, fim ${r.s.dirt}`);
 check('caixa automático vendeu', r.sold >= 1, String(r.sold));
 check('3 funcionários ativos', r.staff.length === 3);
 check('sem erros de console', errors.length === 0, errors.slice(0, 3).join(' | '));

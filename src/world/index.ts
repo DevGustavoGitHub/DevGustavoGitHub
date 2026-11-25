@@ -500,8 +500,14 @@ export default function create(): GameModule {
     if (prof.on) { prof.sync += performance.now() - t0; prof.syncs++; }
   }
   let lastHash = 0, lastPriceHash = 0;
+  let deskSig = '';
   function syncInner(force: boolean): void {
     const s: StoreState = ctx.state;
+    // a mesa do computador é um móvel do estado; se algum caminho a perdeu, o sim a recria (1 tentativa por layout)
+    if (!demo && !s.furniture.some((f) => f.type === 'desk')) {
+      const sig = `${s.furniture.length}|${s.nextFurnitureId}|${s.expansion}|${s.storageUnlocked}`;
+      if (sig !== deskSig) { deskSig = sig; try { api.ensureDesk(s); } catch { /* sim antigo */ } }
+    }
     const extra = (demo ? 1 : 0) + ((hiddenId ?? -1) + 2) * 4 + (s.upgrades.includes('tipjar') ? 1000003 : 0) + (s.upgrades.includes('recycler') ? 2000003 : 0);
     if (!force && !picksDirty && stateHash(s, extra) === lastHash) return; // nada mudou: sem alocações
     const nb = storeBounds(s.expansion);
