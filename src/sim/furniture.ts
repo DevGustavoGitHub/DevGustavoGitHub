@@ -13,8 +13,8 @@ export type Rot = 0 | 90 | 180 | 270;
  * geladeira 4 (porta com 4 prateleiras), freezer 3 (cestos). Cada nível guarda um produto (capacidade = slotCapacity).
  */
 const CATALOG: FurnitureSpec[] = [
-  { type: 'shelf', name: 'Prateleira', cost: 30000, minLevel: 1, slots: 4, categories: ['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos'] },
-  { type: 'fridge', name: 'Geladeira', cost: 50000, minLevel: 2, slots: 4, categories: ['bebidas', 'laticinios', 'hortifruti', 'frios'] },
+  { type: 'shelf', name: 'Prateleira', cost: 15000, minLevel: 1, slots: 4, categories: ['mercearia', 'limpeza', 'padaria', 'hortifruti', 'higiene', 'eletronicos'] },
+  { type: 'fridge', name: 'Geladeira', cost: 16000, minLevel: 2, slots: 4, categories: ['bebidas', 'laticinios', 'hortifruti', 'frios'] },
   { type: 'freezer', name: 'Freezer', cost: 150000, minLevel: 10, slots: 3, categories: ['congelados'] },
   { type: 'counter', name: 'Caixa registradora', cost: 100000, minLevel: 4, slots: 0, categories: [] },
   /** rack: `slots` = nº de caixas que a estante guarda no depósito. */

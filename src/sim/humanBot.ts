@@ -405,6 +405,14 @@ const spec = (type: FurnitureType) => furnitureCatalog().find((c) => c.type === 
 function investCareful(s: StoreState): void {
   const can = (cost: number): boolean => s.money - cost >= reserve(s) + 10000;
   let furniture = false;
+  // licença nova (categoria nova = clientes novos) antes de mais uma prateleira de mercearia
+  for (const l of LICENSES) {
+    if (furniture || s.licenses.includes(l.id) || s.level < l.minLevel) continue;
+    const first = BY_POP.find((p) => p.category === l.id);
+    if (!first || !can(l.cost + spec(furnitureForProduct(first.id)).cost)) break;
+    buyLicense(s, l.id);
+    furniture = buyAndPlace(s, furnitureForProduct(first.id), first.id);
+  }
   for (const p of BY_POP) {
     if (furniture || !s.licenses.includes(p.category) || productCapacity(s, p.id) > 0) continue;
     const f = spec(furnitureForProduct(p.id));
@@ -414,13 +422,6 @@ function investCareful(s: StoreState): void {
   if (!tip.owned && s.level >= tip.minLevel && can(tip.cost)) buyUpgrade(s, 'tipjar');
   const cc = employeeCost(s, 'cashier');
   if (cc && s.employees.cashier === 0 && s.level >= cc.minLevel && can(cc.cost + 3 * cc.dailyWage)) hireOrUpgrade(s, 'cashier');
-  for (const l of LICENSES) {
-    if (furniture || s.licenses.includes(l.id) || s.level < l.minLevel) continue;
-    const first = BY_POP.find((p) => p.category === l.id);
-    if (!first || !can(l.cost + spec(furnitureForProduct(first.id)).cost)) break;
-    buyLicense(s, l.id);
-    furniture = buyAndPlace(s, furnitureForProduct(first.id), first.id);
-  }
   const ec = expansionCost(s);
   if (!furniture && ec !== null && s.level >= (expansionMinLevel(s) ?? 99) && can(ec + 30000)) buyExpansion(s);
 }

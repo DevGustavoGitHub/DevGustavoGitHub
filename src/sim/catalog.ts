@@ -33,7 +33,7 @@ export interface Product {
 /** Fase 3: a 2ª licença sai no nível 2 (como no original); as demais seguem espaçadas até o nível 25. */
 export const LICENSES: License[] = [
   { id: 'mercearia', name: 'Mercearia', minLevel: 1, cost: 0 },
-  { id: 'bebidas', name: 'Bebidas', minLevel: 2, cost: 40000 },
+  { id: 'bebidas', name: 'Bebidas', minLevel: 2, cost: 10000 },
   { id: 'laticinios', name: 'Laticínios', minLevel: 4, cost: 150000 },
   { id: 'padaria', name: 'Padaria', minLevel: 6, cost: 350000 },
   { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 700000 },
@@ -46,8 +46,8 @@ export const LICENSES: License[] = [
 
 export const PRODUCTS: Product[] = [
   { id: 'arroz', name: 'Arroz 5kg', category: 'mercearia', baseWholesale: 2200, markup: 1.4, boxSize: 6, slotCapacity: 8, popularity: 5, color: '#e8dfc4', shape: 'bag' },
-  { id: 'feijao', name: 'Feijão 1kg', category: 'mercearia', baseWholesale: 600, markup: 1.45, boxSize: 12, slotCapacity: 12, popularity: 5, color: '#7a4a2b', shape: 'bag' },
-  { id: 'macarrao', name: 'Macarrão 500g', category: 'mercearia', baseWholesale: 350, markup: 1.5, boxSize: 20, slotCapacity: 16, popularity: 4, color: '#f0c75e', shape: 'bag' },
+  { id: 'feijao', name: 'Feijão 1kg', category: 'mercearia', baseWholesale: 600, markup: 1.55, boxSize: 12, slotCapacity: 12, popularity: 5, color: '#7a4a2b', shape: 'bag' },
+  { id: 'macarrao', name: 'Macarrão 500g', category: 'mercearia', baseWholesale: 350, markup: 1.65, boxSize: 20, slotCapacity: 16, popularity: 4, color: '#f0c75e', shape: 'bag' },
   { id: 'cafe', name: 'Café 500g', category: 'mercearia', baseWholesale: 1300, markup: 1.35, boxSize: 10, slotCapacity: 10, popularity: 4, color: '#5a3520', shape: 'box' },
   { id: 'refri', name: 'Refrigerante 2L', category: 'bebidas', baseWholesale: 550, markup: 1.5, boxSize: 6, slotCapacity: 10, popularity: 5, color: '#d83a3a', shape: 'bottle' },
   { id: 'agua', name: 'Água 1,5L', category: 'bebidas', baseWholesale: 180, markup: 1.7, boxSize: 12, slotCapacity: 12, popularity: 3, color: '#7ec8f0', shape: 'bottle' },

@@ -110,7 +110,7 @@ export const BANKRUPTCY = { floor: 0 as Cents, stockRecovery: 0.5, restartMoney:
  * Capacidade: +`extra` clientes simultâneos (api.customerCapacity).
  */
 export const UPGRADES = {
-  tipjar: { name: 'Pote de gorjeta', description: 'Clientes satisfeitos deixam gorjetas 50% maiores.', cost: 15000 as Cents, minLevel: 2, mult: 1.5 },
+  tipjar: { name: 'Pote de gorjeta', description: 'Clientes satisfeitos deixam gorjetas 50% maiores.', cost: 10000 as Cents, minLevel: 2, mult: 1.5 },
   capacity: { name: 'Capacidade de clientes', description: 'Mais 4 clientes podem estar na loja ao mesmo tempo.', cost: 150000 as Cents, minLevel: 4, extra: 4 },
   dolly: { name: 'Carrinho de carga', description: 'Carregue até 3 caixas de uma vez em vez de 1.', cost: 500000 as Cents, minLevel: 6, carry: 3 },
 };

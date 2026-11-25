@@ -27,6 +27,7 @@ import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup, freezeSelf } f
 import { Picks } from './pick';
 import { CheckoutScreens, type Display } from './screens';
 import { PriceTags } from './tags';
+import { TipJars } from './tipjar';
 
 /** Autoteste dos visuais genéricos (qualquer shape/cor/categoria, inclusive desconhecidos, gera geometria válida). */
 function genericProductsSelfTest(): { ok: boolean; combos: number; bad: string[]; catalog: number } {
@@ -126,6 +127,7 @@ function effectiveDecor(d: Decor): Decor {
 
 export default function create(): GameModule {
   let ctx!: GameContext;
+  const tipJars = new TipJars();
   const root = new THREE.Group(); root.name = 'world';
   let shop!: Shop; let env!: Env;
   const furniGroup = new THREE.Group(); furniGroup.name = 'furniture';
@@ -313,6 +315,9 @@ export default function create(): GameModule {
       furniGroup.remove(e.group); entries.delete(id); geoChanged = true;
     }
     screens.prune(new Set(v.furniture.filter((f) => f.type === 'counter').map((f) => f.id)));
+    const cg = new Map<number, THREE.Object3D>();
+    for (const f of v.furniture) if (f.type === 'counter') { const en = entries.get(f.id); if (en) cg.set(f.id, en.group); }
+    tipJars.sync(ctx.state.upgrades.includes('tipjar'), cg);
     const lvls = new Map<number, LevelView[]>();
     for (const f of v.furniture) if (isDisplayType(f.type)) lvls.set(f.id, levelsOf(v, f));
     const lp = (f: Furniture): string => (lvls.get(f.id) ?? []).map((l) => l.pid ?? '').join('/');
@@ -770,7 +775,11 @@ export default function create(): GameModule {
           applyTier(p.quality);
         }),
         on('stateChanged', () => { const t0 = pnow(); sync(false); if (prof.on) { prof.ev += performance.now() - t0; prof.evs++; } }),
-        on('dayStarted', () => sync(false)),
+        on('dayStarted', () => { sync(false); tipJars.resetDay(); }),
+        on('checkout:done', (p: { counterId?: number; tip?: number }) => {
+          if (!(p?.tip && p.tip > 0) || !ctx.state.upgrades.includes('tipjar')) return;
+          tipJars.tip(p.counterId, p.tip); ctx.bus.emit('sfx', { name: 'coin' });
+        }),
         on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string; stockIndex?: number }) => { sync(false); picks.highlight(null); build.start(p); }),
         on('build:edit', (p: { furnitureId: number }) => { sync(false); picks.highlight(null); build.edit(p.furnitureId); }),
         on('build:box', (p: { boxIndex: number }) => { sync(false); picks.highlight(null); build.startBox(p?.boxIndex); }),
@@ -797,6 +806,7 @@ export default function create(): GameModule {
       }
       shop.setOpenSign(ctx.clock.phase === 'open');
       shop.update(dt, near, env.night);
+      tipJars.update(dt);
       const TE = pnow();
       env.update(dt);
       if (prof.on) prof.env += performance.now() - TE;
@@ -818,7 +828,7 @@ export default function create(): GameModule {
       build.dispose();
       entries.forEach((e) => furniGroup.remove(e.group));
       entries.clear();
-      boxLayer.dispose(); itemLayer.dispose(); screens.dispose(); tags.dispose(); picks.dispose();
+      boxLayer.dispose(); itemLayer.dispose(); screens.dispose(); tipJars.dispose(); tags.dispose(); picks.dispose();
       staticGeos.forEach((g) => g.dispose()); staticGeos.length = 0;
       dirtMesh?.dispose(); dirtGeo?.dispose(); dirtMat?.dispose(); dirtTex?.dispose();
       shop.dispose(); env.dispose();
