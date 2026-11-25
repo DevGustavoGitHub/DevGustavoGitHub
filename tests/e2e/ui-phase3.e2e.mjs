@@ -244,7 +244,7 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   /* ---------- 7) Noite + Terminar o dia + resumo ---------- */
   await page.evaluate(() => { const c = window.__game.clock; if (c.phase === 'prep') c.openStore(); if (c.phase === 'open') { c.minute = 21 * 60; c.closeStore(); } });
   await page.waitForSelector('#end-day', { timeout: 9000 });
-  check(`[${tag}] noite: aviso "Nenhum cliente novo virá à noite"`, /Nenhum cliente novo virá à noite/.test(await page.locator('.mcard.night').innerText()));
+  check(`[${tag}] noite: aviso "Nenhum cliente novo à noite" (com o botão Terminar o dia dentro)`, /Nenhum cliente novo/.test(await page.locator('.mcard.night').innerText()));
   await page.evaluate(() => window.__game.bus.emit('storeEmpty'));
   await page.waitForTimeout(400);
   check(`[${tag}] storeEmpty não abre o relatório sozinho`, (await page.locator('.summary').count()) === 0);
