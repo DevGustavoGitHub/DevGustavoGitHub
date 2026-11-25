@@ -120,7 +120,7 @@ export const UPGRADES = {
   tipjar: { name: 'Pote de gorjeta', description: 'Clientes satisfeitos deixam gorjetas 50% maiores.', cost: 10000 as Cents, minLevel: 2, mult: 1.5 },
   capacity: { name: 'Capacidade de clientes', description: 'Mais 4 clientes podem estar na loja ao mesmo tempo.', cost: 60000 as Cents, minLevel: 4, extra: 4 }, // pós-teste 3: R$ 1.500 → 600
   recycler: { name: 'Lixeira de reciclagem', description: 'Caixas de papelão vazias jogadas na lixeira verde rendem R$ 0,25 cada; o repositor também recicla.', cost: 40000 as Cents, minLevel: 5 },
-  dolly: { name: 'Carrinho de carga', description: 'Carregue até 3 caixas de uma vez em vez de 1.', cost: 150000 as Cents, minLevel: 6, carry: 3 }, // pós-teste 3: R$ 5.000 → 1.500
+  dolly: { name: 'Carrinho de carga', description: 'Carregue até 3 caixas de uma vez em vez de 1. O repositor também leva +1 caixa por viagem.', cost: 150000 as Cents, minLevel: 6, carry: 3 }, // pós-teste 3: R$ 5.000 → 1.500
 };
 export const BASE_CARRY = 1;
 /** Crédito por caixa vazia reciclada (melhoria 'recycler'). */

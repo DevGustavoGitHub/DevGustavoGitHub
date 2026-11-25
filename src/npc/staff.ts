@@ -124,7 +124,11 @@ export class Stocker extends Staff {
     this.job = 'toStoreRoom';
   }
 
-  private get cap(): number { return this.level >= 4 ? 3 : this.level >= 2 ? 2 : 1; }
+  /** Caixas por viagem: pelo nível do repositor (1 / 2 / 3) e +1 com o carrinho de carga (melhoria 'dolly'; pós-teste 3). */
+  private get cap(): number {
+    const base = this.level >= 4 ? 3 : this.level >= 2 ? 2 : 1;
+    return base + (this.env.ctx.state.upgrades.includes('dolly') ? 1 : 0);
+  }
 
   /** Fração de ocupação da prateleira do produto (0 = vazia). */
   private fill(pid: string): number {
