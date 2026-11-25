@@ -211,7 +211,7 @@ if (JS_PR > 0) {
 }
 await page.evaluate(() => {
   const s = window.__game.state;
-  window.__player.teleport(s.expansion >= 2 ? 5 : 4, s.expansion >= 2 ? 10 : 7, 0, 0);
+  { const b = window.__world.bounds(); window.__player.teleport(b.width / 2 - 1.5, b.depth - 2.2, 0, 0); } // meio da loja (salão inicial 10×8)
   window.__player.lookAt(10, 1.1, 3);
   window.__game.clock.openStore();
   window.__npc.timeScale = 1;

@@ -61,7 +61,8 @@ try {
   // cena típica: expansão 1, depósito, 18 móveis abastecidos, 6 caixas (2 abertas), sujeira
   const setup = (exp) => page.evaluate((exp) => {
     const s = window.__game.state;
-    s.expansion = exp; s.storageUnlocked = true;
+    // pós-teste 3: o salão começa em 10×8; expansão exp+1 = tamanhos antigos (12+4·exp × 10+2·exp) deste cenário
+    s.expansion = exp + 1; s.storageUnlocked = true;
     const W = 12 + 4 * exp;
     s.furniture.length = 0;
     const prods = ['arroz', 'feijao', 'macarrao', 'cafe', 'refri', 'agua', 'leite', 'queijo', 'pao', 'detergente', 'sorvete'];

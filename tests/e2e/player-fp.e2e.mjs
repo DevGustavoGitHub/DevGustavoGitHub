@@ -159,12 +159,12 @@ const aimFurniture = async (f) => { // fica 1,9 m à frente (lado do cliente) e 
   const p1 = await page.evaluate(() => __player.pos());
   check('joystick move para frente (−z)', p1.z < p0.z - 0.6, `${p0.z.toFixed(2)} → ${p1.z.toFixed(2)}`);
   check('colisão: para antes da parede do fundo (raio 0,3)', p1.z >= 0.28, p1.z.toFixed(3));
-  await place(2, 9.0, Math.PI, 0);
+  const depth = await page.evaluate(() => __world.bounds().depth); // pós-teste 3: salão inicial 10×8
+  await place(2, depth - 1, Math.PI, 0);
   await page.keyboard.down('KeyW'); await page.waitForTimeout(900); await page.keyboard.up('KeyW');
   await frames();
   const p2 = await page.evaluate(() => __player.pos());
-  const depth = await page.evaluate(() => 10 + 2 * __game.state.expansion);
-  check('colisão: não atravessa a fachada (fora da porta)', p2.z <= depth - 0.28 && p2.z > 9.2, p2.z.toFixed(3));
+  check('colisão: não atravessa a fachada (fora da porta)', p2.z <= depth - 0.28 && p2.z > depth - 0.8, p2.z.toFixed(3));
 }
 
 // 4) alvo + rótulo: caixa no chão → "Pegar" (anel verde), pegar pelo botão

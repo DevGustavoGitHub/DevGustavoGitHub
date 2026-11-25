@@ -55,7 +55,7 @@ await page.waitForTimeout(800);
 await page.evaluate(() => { const b = [...document.querySelectorAll('.title-screen .btn')].find((x) => /Jogar|Continuar/.test(x.textContent)); b?.click(); });
 await page.waitForFunction(() => !document.querySelector('.title-screen'), null, { timeout: 15000 }).catch(() => {});
 // o jogador fica parado no meio da loja (sem caixa na mão); funcionários fazem o trabalho
-await page.evaluate(() => { const s = window.__game.state; window.__player.teleport?.(4, s.expansion >= 2 ? 11 : 8, 0, 0); window.__npc.sync(); });
+await page.evaluate(() => { const b = window.__world.bounds(); window.__player.teleport?.(b.width / 2 - 1.5, b.depth - 2.2, 0, 0); window.__npc.sync(); }); // meio da loja (salão inicial 10×8 desde o pós-teste 3)
 
 /** Métricas do estado do jogo + conservação de unidades. */
 const probe = () => page.evaluate(() => {
