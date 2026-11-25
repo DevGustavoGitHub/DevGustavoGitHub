@@ -53,7 +53,6 @@ export class PayPanel {
   private done = false;
   private doneT = 0;
   private keyHandler = (e: KeyboardEvent): void => this.onKey(e);
-  private onResize = (): void => this.reorderPad();
   private refresh: () => void = () => {};
 
   constructor(private kit: UiKit, private layer: HTMLElement) {}
@@ -87,11 +86,9 @@ export class PayPanel {
       this.body);
     if (cash) this.renderCash(); else this.renderCard();
     this.layer.appendChild(this.el);
-    this.reorderPad();
     this.layer.classList.add('hud-over');
     this.kit.modalOpen('pay', { onEsc: () => void this.cancel() });
     window.addEventListener('keydown', this.keyHandler);
-    window.addEventListener('resize', this.onResize);
     this.kit.sfx('pop');
     this.display();
   }
@@ -158,28 +155,13 @@ export class PayPanel {
       h('div', { class: 'pay-screen' }, h('span', null, 'Total', h('small', { class: 'due-in' }, `cobrar ${money(this.req?.total ?? 0)}`)), screen),
       h('div', { class: 'pay-due' }, `Valor da compra: ${money(this.req?.total ?? 0)}`),
       h('div', { class: 'pay-pad' },
-        [1, 2, 3].map(digit), key('⌫', () => { this.typed = this.typed.slice(0, -1); }, 'blue', 'Apagar', icon('backspace', 26)),
+        [1, 2, 3].map(digit),
         [4, 5, 6].map(digit),
-        [7, 8, 9].map(digit), digit(0),
-        h('button', { class: 'pk green ok', id: 'pay-ok', on: tapOn(() => this.confirmCard()) }, 'OK'),
-        key('C', () => { this.typed = ''; }, 'red', 'Limpar')));
+        [7, 8, 9].map(digit),
+        key('⌫', () => { this.typed = this.typed.slice(0, -1); }, 'blue', 'Apagar', icon('backspace', 26)), digit(0),
+        key('C', () => { this.typed = ''; }, 'red', 'Limpar'),
+        h('button', { class: 'pk green ok', id: 'pay-ok', on: tapOn(() => this.confirmCard()) }, 'OK')));
     this.refresh();
-  }
-
-  /**
-   * Ordem das teclas conforme as colunas que o CSS deu à grade (medidas depois de montar): 3 colunas
-   * (1-9 / ⌫ 0 , / OK C), 4 colunas em telas baixas ou 5 colunas (3 linhas) nas muito baixas — sem rolagem.
-   */
-  private reorderPad(): void {
-    const pad = this.el?.querySelector<HTMLElement>('.pay-pad');
-    if (!pad) return;
-    const k = (s: string): Element | null => pad.querySelector(`[data-key="${s}"]`);
-    const ok = pad.querySelector('#pay-ok');
-    const cols = getComputedStyle(pad).gridTemplateColumns.split(' ').filter(Boolean).length;
-    const order = cols >= 5 ? ['1', '2', '3', '⌫', 'C', '4', '5', '6', '0', '7', '8', '9', 'OK']
-      : cols === 4 ? ['1', '2', '3', '⌫', '4', '5', '6', '7', '8', '9', '0', 'C', 'OK']
-        : ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'C', 'OK'];
-    for (const s of order) { const e = s === 'OK' ? ok : k(s); if (e) pad.appendChild(e); }
   }
 
   private typeChar(c: string): void {
@@ -262,7 +244,6 @@ export class PayPanel {
   close(): void {
     window.clearTimeout(this.doneT);
     window.removeEventListener('keydown', this.keyHandler);
-    window.removeEventListener('resize', this.onResize);
     this.el?.remove();
     this.el = null;
     this.req = null;

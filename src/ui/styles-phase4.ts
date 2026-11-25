@@ -68,9 +68,8 @@ export const phase4Css = `
   .pay-act .pk{min-height:44px}
 }
 @media (max-height:380px){
-  .pay-pad{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:minmax(44px,1fr);gap:5px}
-  .pay-pad .pk.ok{grid-column:span 2}
-  .pay-pad .pk{font-size:22px}
+  .pay-pad{gap:4px;grid-auto-rows:minmax(40px,1fr)}
+  .pay-pad .pk{font-size:20px;min-height:40px}
 }
 
 /* ---------- comemoração e resumo do dia sem rolagem ---------- */

@@ -54,13 +54,13 @@ export function isCardAmountCorrect(typed: Cents, total: Cents): boolean {
 }
 
 /**
- * Quanto o cliente entrega em dinheiro: arredonda o total para cima até um múltiplo de uma cédula "natural"
+ * Quanto o cliente entrega em dinheiro: ~20% das vezes o valor exato; senão arredonda o total para cima até um múltiplo de uma cédula "natural"
  * (R$ 10, 20, 50 ou 100; R$ 100 só se o total passar de R$ 25). Paga no máximo UM passo acima do total, então
  * o troco é sempre < R$ 100 e cabe na gaveta de 10 denominações (DRAWER_DENOMS).
  */
 export function customerCashPayment(total: Cents, rand: () => number): Cents {
   if (total <= 0) return 0;
-  if (total % 100 === 0 && rand() < 0.15) return total; // paga exato
+  if (rand() < 0.2) return total; // ~20%: paga o valor EXATO (qualquer total) => troco R$ 0,00
   const steps = total > 2500 ? [1000, 2000, 5000, MAX_PAY_STEP] : [1000, 2000, 5000];
   const step = steps[Math.floor(rand() * steps.length)] ?? 1000;
   return Math.ceil(total / step) * step;
