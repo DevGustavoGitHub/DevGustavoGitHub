@@ -157,7 +157,7 @@ campos opcionais de WorldService/PlayerService), `src/core/outline.ts` (contorno
   | trash | caixa vazia na mão | Jogar fora |
   | dirt | — | Limpar (animação ~0,9 s de esfregão na tela, depois `api.cleanDirt`) |
   | sign | — | Abrir loja / Fechar loja → `store:sign` |
-  | computer | — | Usar computador → `ui:openTablet {}` |
+  | computer | id do móvel `desk` | Usar computador → `ui:openTablet {}`; secundária **Mover** → `build:edit {furnitureId}` (sem VENDER/GUARDAR) |
   | seat | balcão sem funcionário | Sentar no caixa |
   | storageDoor | depósito trancado | Depósito (licença) → `ui:openTablet {tab:'services'}` |
 - Carregando caixa e sem alvo: botões extras **Largar** (→ `build:box {boxIndex}`) e **Arremessar**.
@@ -580,3 +580,12 @@ O player faz raycast do centro; no móvel, calcula o nível com `world.levelAt(f
 - **Rótulos e etiquetas (world):** produtos ganham rótulo procedural (nome curto + pictograma) num ÚNICO atlas 2048 px (src/world/labels.ts + atlas.ts productMaterial; UV por produto, instancing intacto, vale em prateleira/caixa na mão/esteira); etiquetas de preço por nível são amarelas com miniatura do produto, nome curto e "R$ x,xx" grande ("--" se vazio), em cache como antes.
 - Lixeira de reciclagem (melhoria 'recycler', nível 5, R$ 400): `api.recycleBox(state, i): Cents` (só caixa vazia, +R$ 0,25, ledger.recycled/recycleIncome → DayReport.recycled/recycleIncome, dentro de income); world: PickInfo.kind 'recycle', `WorldService.recycleBin?()`, `poi('recycle')`, evento `recycle:done {x,z,amount}`; player emite player:action {kind:'recycleBox'}; repositor recicla as vazias.
 - Layout2: jogo novo sem produto nas prateleiras (etiqueta de nível sem unidades = "--"; bots usam `labelStarterShelves`); lixeira de reciclagem só existe com 'recycler'; `PickInfo.kind 'tipjar'` (informativo, painel "Gorjetas do dia" via `world.highlight`); mesa do computador no canto esquerdo da frente; balcão redesenhado (mesmos SEAT/BELT_SLOTS/HANDOFF/SCANNER); prateleira desenha 1 embalagem por unidade (grid = slotCapacity, fileira da frente primeiro).
+
+## Mesa do computador como móvel (pós-teste 3)
+- `FurnitureType` ganhou `'desk'` (footprint 1×1; fora do catálogo: não se compra). O sim garante exatamente uma mesa
+  (`api.ensureDesk`, chamado em `newGame`, `deserialize`, falência e expansão): sem mesa, cria colada à ponta do operador
+  do 1º balcão (direita, depois esquerda; mesma rotação), senão no 1º tile válido. `sellFurniture`/`storeFurniture`
+  recusam a mesa ("Use MOVER"); saves com mesa inválida/duplicada não a mandam para "Para montar".
+- World: a mesa é desenhada como qualquer móvel (mesmo estilo do balcão: corpo azul-claro, faixa vermelha, painéis claros
+  com moldura azul) e o proxy de pick é `{ kind: 'computer', id }`; a navegação a bloqueia pelo footprint; `poi('computer')`
+  e `__world.desk()` vêm do móvel. O modo de construção move/gira a mesa e esconde VENDER/GUARDAR.
