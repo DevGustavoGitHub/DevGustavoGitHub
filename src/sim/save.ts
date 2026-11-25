@@ -91,6 +91,8 @@ function sanitizeFields(s: StoreState, d: Raw, base: StoreState): void {
   const oldLedger = l.happy === undefined && l.angry === undefined;
   L.happy = oldLedger ? L.served : intOr(l.happy, 0, 0);
   L.angry = oldLedger ? L.lost : intOr(l.angry, 0, 0);
+  L.recycled = intOr(l.recycled, 0, 0);
+  L.recycleIncome = intOr(l.recycleIncome, 0, 0);
   const dc = isObj(d.decor) ? d.decor : {};
   for (const k of ['wallColor', 'floorColor', 'signColor'] as const) {
     const v = dc[k];

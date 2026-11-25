@@ -56,6 +56,9 @@ function decal(b: Batch, cell: Cell, w: number, h: number, x: number, y: number,
 /** Silhueta (caixas locais) da caçamba, usada no contorno de destaque. */
 export const TRASH_SILHOUETTE: [number, number, number, number, number, number][] = [[0, 0.55, 0, 0.82, 0.95, 0.84], [0, 1.12, -0.12, 0.86, 0.22, 0.66]];
 
+/** Silhueta (caixas locais) da lixeira de reciclagem. */
+export const RECYCLE_SILHOUETTE: [number, number, number, number, number, number][] = [[0, 0.5, 0, 0.74, 1.05, 0.68]];
+
 export class Env {
   readonly group = new THREE.Group();
   /** Tiles bloqueados (árvores, postes, hidrante, lixeiras) na calçada da loja. */
@@ -71,6 +74,10 @@ export class Env {
   private cloudMesh: THREE.InstancedMesh | null = null;
   private clouds: { x: number; y: number; z: number; parts: { dx: number; dy: number; dz: number; r: number }[] }[] = [];
   private cloudT = 0;
+  private recyclerGlow: THREE.Group | null = null;
+  private recyclerOn = false;
+  /** Visual da lixeira de reciclagem ativada (melhoria 'recycler'). */
+  setRecycler(on: boolean): void { this.recyclerOn = on; if (this.recyclerGlow) this.recyclerGlow.visible = on; }
   private b: Bounds = { width: 12, depth: 10 };
   private cTop = new THREE.Color(); private cHor = new THREE.Color(); private tmp = new THREE.Color();
   private lastT = -1;
@@ -200,6 +207,12 @@ export class Env {
     sb.box(0.4, 0.06, 0.02, ['matte', 0x123d22], rx, 0.78, rz + 0.305);
     decal(sb, DECAL.recycle(), 0.3, 0.3, rx, 0.5, rz + 0.306);
     block(rx, rz);
+    // "ativada" (melhoria comprada): tampa verde brilhante + faixa luminosa na frente
+    const glowMat = stdMat(0x57ff8a, { emissive: 0x2dff6a, ei: 1.1 });
+    this.recyclerGlow = new THREE.Group();
+    const lidG = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(0.74, 0.04, 0.68)), glowMat); lidG.position.set(rx, 1.07, rz);
+    const stripG = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(0.5, 0.05, 0.02)), glowMat); stripG.position.set(rx, 0.9, rz + 0.31);
+    this.recyclerGlow.add(lidG, stripG); this.recyclerGlow.visible = this.recyclerOn; g.add(this.recyclerGlow);
     // caçamba cinza (lixeira do jogo): corpo, tampa entreaberta, papelão saindo, rodas, pictograma
     const tb = trashBinPos(b);
     const gray: Spec = ['matte', 0x6b7380];
@@ -340,7 +353,7 @@ export class Env {
       this.group.remove(ch);
     }
     this.tr.disposeAll();
-    this.cloudMesh = null;
+    this.cloudMesh = null; this.recyclerGlow = null;
   }
   dispose(): void {
     this.clearGeo();

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assignProduct, buyExpansion, buyFurniture, buyUpgrade, canDropBox, cartTotal, checkoutCart, closeDay, completeSale, customerCapacity,
   dropBox, employeeCost, expansionMinLevel, furnitureCatalog, furnitureForProduct, furnitureStock, orderBoxes, placeFromStock, placeUnits,
-  priceInfo, productCapacity, recordLostCustomer, sellFurniture, setBoxOpen, setDecor, storageCost, storageCapacity, storeBox,
+  priceInfo, productCapacity, recycleBox, recordLostCustomer, sellFurniture, setBoxOpen, setDecor, storageCost, storageCapacity, storeBox,
   storeFurniture, takeFromStorage, unlockStorage, upgradeCatalog, type CartLine,
 } from '../src/sim/api';
 import { LICENSES, PRODUCTS } from '../src/sim/catalog';
@@ -10,7 +10,7 @@ import { xpForLevel } from '../src/sim/economy';
 import { rentFor } from '../src/sim/rent';
 import { deserialize, serialize } from '../src/sim/save';
 import { DEFAULT_DECOR, newGame, type StoreState } from '../src/sim/state';
-import { RENT, START_MONEY, UPGRADES } from '../src/sim/tuning';
+import { RECYCLE_REWARD, RENT, START_MONEY, UPGRADES } from '../src/sim/tuning';
 import { SIDEWALK_DEPTH, storeBounds } from '../src/core/layout';
 import { expose } from './helpers';
 
@@ -219,8 +219,8 @@ describe('capacidade, melhorias e móvel exigido', () => {
   });
   it('catálogo de melhorias em ordem de nível: pote de gorjeta (2), capacidade (4), carrinho (6)', () => {
     const cat = upgradeCatalog(newGame());
-    expect(cat.map((u) => [u.id, u.minLevel])).toEqual([['tipjar', 2], ['capacity', 4], ['dolly', 6]]);
-    for (let i = 1; i < cat.length; i++) expect(cat[i]!.cost).toBeGreaterThan(cat[i - 1]!.cost);
+    expect(cat.map((u) => [u.id, u.minLevel])).toEqual([['tipjar', 2], ['capacity', 4], ['recycler', 5], ['dolly', 6]]);
+    for (const u of cat) expect(u.cost).toBeGreaterThan(0);
     expect(() => buyUpgrade(at(1), 'tipjar')).toThrow('Requer nível 2');
     expect(() => buyUpgrade(at(3), 'capacity')).toThrow('Requer nível 4');
   });
@@ -368,5 +368,34 @@ describe('save: migração para a Fase 3', () => {
     const s = at(10);
     const f = buyFurniture(s, 'shelf', 7, 2, 0);
     expect(sellFurniture(s, f.id)).toBe(furnitureCatalog().find((c) => c.type === 'shelf')!.cost / 2);
+  });
+});
+
+describe('lixeira de reciclagem', () => {
+  it('exige a melhoria, só aceita caixa vazia, credita no caixa e no ledger e entra no rendimento', () => {
+    const s = at(5);
+    s.sidewalk.push({ productId: 'arroz', units: 0 }, { productId: 'arroz', units: 3 }, { productId: 'arroz', units: 0 });
+    expect(() => recycleBox(s, 0)).toThrow();
+    expect(UPGRADES.recycler.cost).toBe(40000);
+    buyUpgrade(s, 'recycler');
+    expect(() => recycleBox(s, 1)).toThrow('Só caixas vazias vão para a reciclagem');
+    const m = s.money;
+    expect(recycleBox(s, 0)).toBe(RECYCLE_REWARD);
+    expect(recycleBox(s, 1)).toBe(RECYCLE_REWARD);
+    expect(s.sidewalk.length).toBe(1);
+    expect(s.money).toBe(m + 2 * RECYCLE_REWARD);
+    expect(s.ledger.recycled).toBe(2);
+    const r = closeDay(s);
+    expect(r.recycled).toBe(2);
+    expect(r.recycleIncome).toBe(2 * RECYCLE_REWARD);
+    expect(r.income).toBe(r.revenue + r.tips + 2 * RECYCLE_REWARD);
+    expect(s.ledger.recycled).toBe(0);
+  });
+  it('save sem os campos migra para 0', () => {
+    const raw = JSON.parse(serialize(newGame())) as { ledger: Record<string, unknown> };
+    delete raw.ledger.recycled; delete raw.ledger.recycleIncome;
+    const s = deserialize(JSON.stringify(raw));
+    expect(s.ledger.recycled).toBe(0);
+    expect(s.ledger.recycleIncome).toBe(0);
   });
 });

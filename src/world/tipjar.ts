@@ -10,7 +10,7 @@ export const JAR = { x: 0.2, y: 0.92, z: -0.16 };
 const R = 0.075, H = 0.17, MAX_COINS = 36, POP_N = 4, POP_T = 1.2;
 
 type Jar = { group: THREE.Group; coins: THREE.InstancedMesh; sum: number; shown: number };
-type Pop = { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture; c: HTMLCanvasElement; g: CanvasRenderingContext2D; t: number; jar: THREE.Group | null };
+type Pop = { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; tex: THREE.CanvasTexture; c: HTMLCanvasElement; g: CanvasRenderingContext2D; t: number; jar: THREE.Group | null; y0: number; rise: number };
 
 export class TipJars {
   private jars = new Map<number, Jar>();
@@ -41,7 +41,7 @@ export class TipJars {
       const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
       const sprite = new THREE.Sprite(mat);
       sprite.scale.set(0.3, 0.09, 1); sprite.visible = false; sprite.renderOrder = 5;
-      this.pops.push({ sprite, mat, tex, c: p.c, g: p.g, t: POP_T, jar: null });
+      this.pops.push({ sprite, mat, tex, c: p.c, g: p.g, t: POP_T, jar: null, y0: H + 0.12, rise: 0.22 });
     }
   }
 
@@ -96,14 +96,20 @@ export class TipJars {
     const j = (counterId !== undefined ? this.jars.get(counterId) : undefined) ?? this.jars.values().next().value as Jar | undefined;
     if (!j) return;
     j.sum += cents; this.fill(j);
+    this.pop(j.group, 0, H + 0.12, 0, 0.22, cents);
+  }
+
+  /** "+R$ X" verde que sobe sobre `parent` (posição local x,y,z) e some; reaproveita o pool. */
+  pop(parent: THREE.Object3D, x: number, y: number, z: number, rise: number, cents: number): void {
     const p = this.pops.find((q) => q.t >= POP_T) ?? this.pops.reduce((a, b) => (a.t > b.t ? a : b));
     p.g.clearRect(0, 0, 160, 48);
     p.g.font = 'bold 30px sans-serif'; p.g.textAlign = 'center'; p.g.textBaseline = 'middle';
     p.g.lineWidth = 6; p.g.strokeStyle = 'rgba(0,40,10,0.85)'; p.g.strokeText(money(cents, { sign: true }), 80, 25);
     p.g.fillStyle = '#4cff7a'; p.g.fillText(money(cents, { sign: true }), 80, 25);
     p.tex.needsUpdate = true;
-    j.group.add(p.sprite); p.jar = j.group; p.t = 0; p.sprite.visible = true;
-    p.sprite.position.set(0, H + 0.12, 0); p.mat.opacity = 1;
+    p.sprite.parent?.remove(p.sprite);
+    parent.add(p.sprite); p.jar = parent as THREE.Group; p.t = 0; p.sprite.visible = true; p.y0 = y; p.rise = rise;
+    p.sprite.position.set(x, y, z); p.mat.opacity = 1;
   }
 
   update(dt: number): void {
@@ -112,7 +118,7 @@ export class TipJars {
       p.t += dt;
       if (p.t >= POP_T) { p.sprite.visible = false; p.jar?.remove(p.sprite); p.jar = null; continue; }
       const k = p.t / POP_T;
-      p.sprite.position.y = H + 0.12 + k * 0.22;
+      p.sprite.position.y = p.y0 + k * p.rise;
       p.mat.opacity = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
     }
   }

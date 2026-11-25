@@ -1,7 +1,7 @@
 /** Funcionários: caixa, repositor e faxineiro. */
 import * as api from '../sim/api';
 import type { Box } from '../sim/state';
-import { STORAGE_DEPTH, storeBounds } from '../core/layout';
+import { STORAGE_DEPTH, recycleBinPos, storeBounds } from '../core/layout';
 import type { Lane } from './checkout';
 import { Agent } from './agent';
 import { furnitureFor, furnitureWithRoom, shelfRoom, stockLevelsHere } from './helpers';
@@ -84,6 +84,8 @@ export class Stocker extends Staff {
   private stack: Box[] = [];
   /** Caixas esvaziadas a descartar. */
   private junk: Box[] = [];
+  /** A viagem da lixeira vai para a reciclagem (melhoria 'recycler'). */
+  private recycling = false;
   private timer = 0;
   private cooldown = 0;
   private storeCool = 0;
@@ -216,11 +218,18 @@ export class Stocker extends Staff {
       case 'toss':
         this.timer -= dt;
         if (this.timer <= 0) {
+          let recycled = false;
           for (const b of this.junk) {
             const idx = state.sidewalk.indexOf(b);
-            if (idx >= 0) safe('discardBox', () => api.discardBox(state, idx), undefined);
+            if (idx < 0) continue;
+            const got = this.recycling ? safe('recycleBox', () => api.recycleBox(state, idx), 0) : 0;
+            if (got > 0) {
+              const w = this.env.world(), t = w.recycleBin?.() ?? recycleBinPos(storeBounds(state.expansion));
+              this.env.ctx.bus.emit('recycle:done', { x: t.x, z: t.z, amount: got });
+              recycled = true;
+            } else safe('discardBox', () => api.discardBox(state, idx), undefined);
           }
-          if (this.junk.length > 0) { this.env.sfx('trash', this.x, this.z); this.env.changed('sidewalk'); }
+          if (this.junk.length > 0) { this.env.sfx(recycled ? 'coin' : 'trash', this.x, this.z); this.env.changed('sidewalk'); }
           this.junk.length = 0;
           this.person.setCarryBox(false); this.setPose('normal');
           this.job = 'idle'; this.cooldown = 0.4;
@@ -272,7 +281,9 @@ export class Stocker extends Staff {
   /** Fim da viagem: vazias para a lixeira (uma vez) ou volta ao posto. */
   private finishTrip(): void {
     if (this.junk.length > 0) {
-      const t = this.env.world().trashBin();
+      const w = this.env.world(), st = this.env.ctx.state;
+      this.recycling = st.upgrades.includes('recycler');
+      const t = this.recycling ? (w.recycleBin?.() ?? recycleBinPos(storeBounds(st.expansion))) : w.trashBin();
       this.moveTo(t.x, t.z);
       this.job = 'toTrash';
       return;

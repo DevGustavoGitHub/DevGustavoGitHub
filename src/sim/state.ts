@@ -21,6 +21,10 @@ export interface Ledger {
   happy: number;
   /** Fase 3: vendas com satisfação < 3 + clientes perdidos/desistentes (happy + angry = served + lost). */
   angry: number;
+  /** Caixas vazias recicladas no dia (melhoria 'recycler'). */
+  recycled: number;
+  /** Centavos recebidos com a reciclagem no dia (entram no rendimento). */
+  recycleIncome: Cents;
 }
 
 export interface Box {
@@ -161,7 +165,7 @@ export function initialFurniture(): Furniture[] {
 /** Próximo id livre depois do layout inicial. */
 export const INITIAL_NEXT_FURNITURE_ID = 2 + INITIAL_SHELVES.length;
 
-export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0, happy: 0, angry: 0 });
+export const emptyLedger = (): Ledger => ({ revenue: 0, tips: 0, cogs: 0, purchases: 0, served: 0, lost: 0, happy: 0, angry: 0, recycled: 0, recycleIncome: 0 });
 
 /** Paleta padrão de jogo novo (parecida com o original): paredes azul-claro, piso de madeira quente, letreiro vermelho. */
 export const DEFAULT_DECOR: Readonly<Decor> = { wallColor: '#6cc8f0', floorColor: '#c48a55', signColor: '#d8342c' };

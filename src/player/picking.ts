@@ -4,7 +4,7 @@
  */
 import * as THREE from 'three';
 import type { PickInfo, WorldService } from '../core/services';
-import { doorX, storeBounds, trashBinPos } from '../core/layout';
+import { doorX, recycleBinPos, storeBounds, trashBinPos } from '../core/layout';
 import type { StoreState } from '../sim/state';
 import { furnRect } from './collide';
 
@@ -85,6 +85,7 @@ export class FallbackPicks {
     s.dirt.forEach((d, i) => add({ kind: 'dirt', id: i }, d.x, 0.02, d.z, 0.62, 0.04, 0.62));
     const tb = w ? w.trashBin() : trashBinPos(b);
     add({ kind: 'trash' }, tb.x, 0.55, tb.z, 0.75, 1.1, 0.75);
+    if (s.upgrades.includes('recycler')) { const rb = w?.recycleBin ? w.recycleBin() : recycleBinPos(b); add({ kind: 'recycle' }, rb.x, 0.55, rb.z, 0.75, 1.1, 0.75); }
     add({ kind: 'sign' }, doorX(b) - 0.5, 1.45, b.depth + 0.1, 0.62, 0.36, 0.14);
     if (!s.storageUnlocked) add({ kind: 'storageDoor' }, doorX(b), 1.1, 0.06, 1.6, 2.2, 0.12);
     for (let i = n; i < this.pool.length; i++) this.pool[i]!.removeFromParent();

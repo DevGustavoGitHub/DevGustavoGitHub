@@ -71,6 +71,8 @@ export const ACTION_ICONS: Record<string, string> = {
   close: ICON_BOX_CLOSE,
   /** Jogar fora: lixeira. */
   trash: svg('<path d="M10 16h44M24 16V9h16v7M15 16l3 40h28l3-40M27 26v22M37 26v22" ' + S + '/>'),
+  /** Reciclar: setas circulares. */
+  recycle: svg('<path d="M32 8l9 14H23zM44 40l9-14M53 26l-9 14h-10M20 40l-9-14M11 26l9 14h10" ' + S + '/>'),
   /** Limpar: vassoura. */
   clean: svg('<path d="M52 6L30 34" ' + S + '/><path fill="currentColor" d="M26 30l10 8c2 8-2 16-14 20-8 2-14 0-16-2 8-4 8-12 6-20z"/>'),
   /** Sentar no caixa: cadeira. */

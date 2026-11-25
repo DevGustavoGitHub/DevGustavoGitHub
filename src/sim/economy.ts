@@ -186,6 +186,9 @@ export interface DayReport {
   income?: Cents;
   /** Despesa = custo das mercadorias vendidas (COGS) + despesas fixas. income − expenses = netProfit. */
   expenses?: Cents;
+  /** Caixas recicladas no dia e quanto renderam (já incluído em `income`). Ausente em saves antigos. */
+  recycled?: number;
+  recycleIncome?: Cents;
 }
 
 /**
@@ -260,7 +263,7 @@ export function endDay(state: StoreState): DayReport {
   const wages = dailyWages(state);
   const fixed = rent + wages + interest;
   state.money -= fixed;
-  const income = l.revenue + l.tips;
+  const income = l.revenue + l.tips + l.recycleIncome;
   const expenses = l.cogs + fixed;
   const report: DayReport = {
     day: state.day,
@@ -282,6 +285,8 @@ export function endDay(state: StoreState): DayReport {
     wages,
     income,
     expenses,
+    recycled: l.recycled,
+    recycleIncome: l.recycleIncome,
   };
   state.history.push(report);
   while (state.history.length > HISTORY_DAYS) state.history.shift();

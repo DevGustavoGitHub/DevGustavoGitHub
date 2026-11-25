@@ -109,7 +109,7 @@ const totalUnits = (s: StoreState): Record<string, number> => Object.fromEntries
 const TYPES: FurnitureType[] = ['shelf', 'fridge', 'freezer', 'counter', 'rack', 'decor'];
 const ROTS = [0, 90, 180, 270] as const;
 const ROLES = ['cashier', 'stocker', 'janitor'] as const;
-const UPG = ['dolly', 'tipjar', 'capacity'] as const;
+const UPG = ['dolly', 'tipjar', 'capacity', 'recycler'] as const;
 
 interface FuzzReport { steps: number; errors: Record<string, number>; crashes: string[]; partial: string[]; hard: string[]; reserved: string[]; roundTrip: string[]; sidewalkOver: number; overBy: Record<string, number>; bankruptcies: number; days: number; maxExpansion: number; ops: Record<string, number> }
 

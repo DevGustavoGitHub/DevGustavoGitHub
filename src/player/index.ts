@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { PickInfo, PickService, PlayerService, WorldService } from '../core/services';
-import { storeBounds, trashBinPos } from '../core/layout';
+import { recycleBinPos, storeBounds, trashBinPos } from '../core/layout';
 import type { Box, Furniture, ShelfLevel, StoreState } from '../sim/state';
 import { productById } from '../sim/catalog';
 import * as api from '../sim/api';
@@ -38,7 +38,7 @@ const iconOf = (a: Act | null): string => {
   if (!a || !a.enabled) return 'none';
   const k = a.key;
   if (k.startsWith('open:')) return k === 'open:stock' ? 'stock' : 'pull';
-  const m = /^(pick|stock|pull|store|take|move|clean|trash|sign|pc|sit|price|sdoor)/.exec(k);
+  const m = /^(pick|stock|pull|store|take|move|clean|trash|recycle|sign|pc|sit|price|sdoor)/.exec(k);
   return m ? (m[1] === 'sdoor' ? 'store' : m[1]!) : 'none';
 };
 interface Act { key: string; label: string; enabled: boolean; hold: boolean; run?: () => boolean | void; box?: Box; up?: boolean }
@@ -163,6 +163,8 @@ export default function create(): GameModule {
     if (Array.isArray(f.levels)) return f.levels.length;
     try { catalog ??= api.furnitureCatalog(); return catalog.find((c) => c.type === f.type)?.slots ?? 0; } catch { return 0; }
   };
+  const recyclerOwned = (): boolean => st().upgrades.includes('recycler');
+  const recBinPos = (): { x: number; z: number } => { const w = world(); return w?.recycleBin ? w.recycleBin() : recycleBinPos(storeBounds(st().expansion)); };
   const binPos = (): { x: number; z: number } => { const w = world(); return w ? w.trashBin() : trashBinPos(storeBounds(st().expansion)); };
   const canDrop = (x: number, z: number): boolean => { try { return api.canDropBox(st(), x, z); } catch { return true; } };
   const dropPoint = (x: number, z: number): { x: number; z: number } => collider.findFree(x, z, DROP_R, canDrop);
@@ -535,6 +537,14 @@ export default function create(): GameModule {
         if (carried.length) primary = D('trash-full', 'Só caixa vazia');
         return;
       }
+      case 'recycle': {
+        for (let i = carried.length - 1; i >= 0; i--) {
+          const b = carried[i]!;
+          if (b.units <= 0) { primary = A('recycle', 'Reciclar', () => recycle(b)); return; }
+        }
+        if (carried.length) primary = D('recycle-full', 'Só caixa vazia');
+        return;
+      }
       case 'sign': {
         const ph = ctx.clock.phase;
         if (ph === 'prep' || ph === 'open') primary = U('sign', ph === 'prep' ? 'Abrir loja' : 'Fechar loja', signAct);
@@ -625,6 +635,17 @@ export default function create(): GameModule {
     removeCarried(b);
     sfx('trash'); haptic(12);
     act('discardBox', { productId: b.productId }); changed('sidewalk');
+    return true;
+  };
+  /** Recicla a caixa vazia (melhoria 'recycler'): +R$ 0,25, texto verde sobre a lixeira. */
+  const recycle = (b: Box): boolean => {
+    let amount = 0;
+    try { amount = api.recycleBox(st(), idxOf(b)); } catch (e) { toastErr(e); return false; }
+    removeCarried(b);
+    sfx('coin'); haptic(12);
+    const rb = recBinPos();
+    emit('recycle:done', { x: rb.x, z: rb.z, amount });
+    act('recycleBox', { productId: b.productId }); changed('sidewalk');
     return true;
   };
   const storeTop = (f: Furniture): boolean => {
@@ -806,6 +827,7 @@ export default function create(): GameModule {
     // mira assistida: lixeira mirada, ou o ponto do chão a 1–9 m; senão um arremesso padrão para a frente
     let aim: THREE.Vector3 | null = null;
     if (target?.pick.kind === 'trash') aim = tv2.set(bin.x, 1.05, bin.z);
+    else if (target?.pick.kind === 'recycle') { const rb = recBinPos(); aim = tv2.set(rb.x, 1.05, rb.z); }
     else if (fwd.y < -0.03) {
       const t = -cam.position.y / fwd.y;
       const px = cam.position.x + fwd.x * t, pz = cam.position.z + fwd.z * t;
@@ -829,12 +851,23 @@ export default function create(): GameModule {
     flying.push({ box: b, view, pos: o, vel: v, spin: new THREE.Vector3(r() * 6, r() * 8, r() * 4), t: 0, bounces: 0 });
     sfx('throw'); haptic(18);
   };
-  const land = (f: Flying, how: 'bin' | 'floor'): void => {
+  const land = (f: Flying, how: 'bin' | 'recycle' | 'floor'): void => {
     f.view.dispose();
     const b = f.box;
     const s = st();
     const i = idxOf(b);
     if (i < 0) return;
+    if (how === 'recycle' && b.units <= 0) {
+      let amount = 0;
+      try { amount = api.recycleBox(s, i); } catch (e) { toastErr(e); }
+      if (!s.sidewalk.includes(b)) {
+        const rb = recBinPos();
+        sfx('coin');
+        emit('recycle:done', { x: rb.x, z: rb.z, amount });
+        act('recycleBox', { productId: b.productId }); changed('sidewalk');
+        return;
+      }
+    }
     if (how === 'bin' && b.units <= 0) {
       try { api.discardBox(s, i); } catch (e) { toastErr(e); }
       if (!s.sidewalk.includes(b)) {
@@ -844,11 +877,11 @@ export default function create(): GameModule {
       }
     }
     let x = f.pos.x, z = f.pos.z;
-    if (how === 'bin') { // caixa com produtos: bate na lixeira e cai ao lado
-      const bin = binPos();
+    if (how === 'bin' || how === 'recycle') { // caixa com produtos: bate na lixeira e cai ao lado
+      const bin = how === 'bin' ? binPos() : recBinPos();
       const dx = pos.x - bin.x, dz = pos.z - bin.z, d = Math.hypot(dx, dz) || 1;
       x = bin.x + (dx / d) * 1.0; z = bin.z + (dz / d) * 1.0;
-      if (b.units > 0) toast('A caixa ainda tem produtos: só caixas vazias vão para o lixo', 'info');
+      if (b.units > 0) toast(`A caixa ainda tem produtos: só caixas vazias vão para ${how === 'bin' ? 'o lixo' : 'a reciclagem'}`, 'info');
     }
     const p = dropPoint(x, z);
     if (!putDown(b, p.x, p.z, f.view.root.rotation.y)) {
@@ -862,16 +895,18 @@ export default function create(): GameModule {
   const tickFlying = (dt: number): void => {
     if (!flying.length) return;
     const bin = binPos();
+    const rec = recyclerOwned() ? recBinPos() : null;
     for (let i = flying.length - 1; i >= 0; i--) {
       const f = flying[i]!;
       f.t += dt;
       const n = Math.max(1, Math.ceil(dt / 0.008));
       const h = dt / n;
-      let done: 'bin' | 'floor' | null = null;
+      let done: 'bin' | 'recycle' | 'floor' | null = null;
       for (let k = 0; k < n && !done; k++) {
         f.vel.y -= GRAV * h;
         let nx = f.pos.x + f.vel.x * h, ny = f.pos.y + f.vel.y * h, nz = f.pos.z + f.vel.z * h;
         if (Math.hypot(nx - bin.x, nz - bin.z) < BIN_R && ny < 1.3 && f.vel.y < 0) { f.pos.set(nx, ny, nz); done = 'bin'; break; }
+        if (rec && Math.hypot(nx - rec.x, nz - rec.z) < BIN_R && ny < 1.3 && f.vel.y < 0) { f.pos.set(nx, ny, nz); done = 'recycle'; break; }
         const bottom = ny - BOX_H / 2, prevBottom = f.pos.y - BOX_H / 2;
         const hx = collider.obstacleHeight(nx + Math.sign(f.vel.x) * 0.22, f.pos.z);
         if (hx > bottom && prevBottom < hx - 1e-3) { f.vel.x *= -0.3; nx = f.pos.x; }

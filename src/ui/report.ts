@@ -134,6 +134,7 @@ export class Report {
       h('div', { class: 'rp-sec' }, h('h4', null, 'Resultado'),
         kv('Receita bruta', h('span', null, money(r.revenue), this.delta(r.revenue, prev?.revenue, money))),
         kv('Gorjetas', money(r.tips)),
+        (r.recycled ?? 0) > 0 ? kv('Reciclagem', `${r.recycled} ${r.recycled === 1 ? 'caixa' : 'caixas'}, ${money(r.recycleIncome ?? 0)}`) : null,
         kv('Custo das mercadorias (COGS)', money(-r.cogs)),
         kv('Aluguel', money(-rent)),
         kv('Salários', money(-wages)),

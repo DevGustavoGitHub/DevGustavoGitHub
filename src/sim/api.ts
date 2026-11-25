@@ -26,7 +26,7 @@ import { INITIAL_NEXT_FURNITURE_ID, emptyLedger, initialFurniture, type AutoOrde
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
   BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS, EXTRA_CASHIER,
-  MAX_EMPLOYEE_LEVEL, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES, STORAGE, STORE_NAME_MAX,
+  MAX_EMPLOYEE_LEVEL, RECYCLE_REWARD, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES, STORAGE, STORE_NAME_MAX,
 } from './tuning';
 
 export type { DayReport };
@@ -274,6 +274,18 @@ export function discardBox(state: StoreState, boxIndex: number): void {
   const box = boxAt(state, boxIndex);
   if (box.units > 0) throw new Error('A caixa ainda tem produtos');
   state.sidewalk.splice(boxIndex, 1);
+}
+
+/** Recicla caixa VAZIA (melhoria 'recycler'): remove como discardBox e credita RECYCLE_REWARD (ledger do dia). */
+export function recycleBox(state: StoreState, boxIndex: number): Cents {
+  if (!state.upgrades.includes('recycler')) throw new Error('Compre a lixeira de reciclagem primeiro');
+  const box = boxAt(state, boxIndex);
+  if (box.units > 0) throw new Error('Só caixas vazias vão para a reciclagem');
+  state.sidewalk.splice(boxIndex, 1);
+  state.money += RECYCLE_REWARD;
+  state.ledger.recycled++;
+  state.ledger.recycleIncome += RECYCLE_REWARD;
+  return RECYCLE_REWARD;
 }
 
 /** Move a caixa (inteira) para o depósito: soma state.storage[productId]; exige storageUnlocked. */
@@ -610,7 +622,7 @@ export function buyMissing(state: StoreState, fillRatio = 1): { cost: Cents; box
 
 /* ---------- Melhorias (upgrades) ---------- */
 /** Fase 3: + 'tipjar' (pote de gorjeta, nível 2) e 'capacity' (capacidade de clientes, nível 4). Catálogo em ordem de nível. */
-export type UpgradeId = 'dolly' | 'tipjar' | 'capacity';
+export type UpgradeId = 'dolly' | 'tipjar' | 'capacity' | 'recycler';
 export interface UpgradeSpec { id: UpgradeId; name: string; description: string; cost: Cents; minLevel: number; owned: boolean }
 export function upgradeCatalog(state: StoreState): UpgradeSpec[] {
   return (Object.keys(UPGRADES) as UpgradeId[]).map((id) => ({

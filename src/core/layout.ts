@@ -29,6 +29,9 @@ export const deliveryZone = (b: Bounds): { x: number; z: number; w: number; d: n
 /** Lixeira externa (calçada, lado direito da porta). */
 export const trashBinPos = (b: Bounds): { x: number; z: number } => ({ x: b.width - 1.5, z: b.depth + 1.5 });
 
+/** Lixeira verde de reciclagem (calçada, lado esquerdo da fachada, oposto à lixeira externa). */
+export const recycleBinPos = (b: Bounds): { x: number; z: number } => ({ x: 0.42, z: b.depth + 0.42 });
+
 export type FurnitureType = 'shelf' | 'fridge' | 'freezer' | 'counter' | 'rack' | 'decor';
 export const FURNITURE_FOOTPRINT: Record<FurnitureType, { w: number; d: number }> = {
   shelf: { w: 2, d: 1 }, fridge: { w: 2, d: 1 }, freezer: { w: 2, d: 1 },

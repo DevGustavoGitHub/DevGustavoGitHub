@@ -8,7 +8,7 @@ export interface Vec2 { x: number; z: number }
  * cada um com `userData.pick: PickInfo`. O player faz raycast do centro da tela contra eles.
  */
 export interface PickInfo {
-  kind: 'furniture' | 'box' | 'dirt' | 'trash' | 'sign' | 'computer' | 'seat' | 'storageDoor';
+  kind: 'furniture' | 'box' | 'dirt' | 'trash' | 'sign' | 'computer' | 'seat' | 'storageDoor' | 'recycle';
   /** furnitureId (furniture/seat), índice em state.sidewalk (box), índice em state.dirt (dirt). */
   id?: number;
   /** FASE 4: nível (prateleira) mirado do móvel, calculado pelo player com world.levelAt. */
@@ -28,6 +28,8 @@ export interface WorldService {
   spawnPoint(): Vec2;
   /** Posição da lixeira externa. */
   trashBin(): Vec2;
+  /** Posição da lixeira verde de reciclagem (interativa quando a melhoria 'recycler' está comprada). */
+  recycleBin?(): Vec2;
   /** Porta de entrada. */
   door(): Vec2;
   /** Coloca sujeira visual (a lógica fica em state.dirt). */
@@ -51,7 +53,7 @@ export interface WorldService {
   /** FASE 4: qual nível (prateleira) do móvel contém o ponto de mundo `point` (hit do raycast); null se nenhum. */
   levelAt?(furnitureId: number, point: THREE.Vector3): number | null;
   /** Pontos de interesse para setas do tutorial (mundo). */
-  poi?(kind: 'computer' | 'sign' | 'delivery' | 'trash' | 'storageDoor' | 'counter' | 'furniture', id?: number): THREE.Vector3 | null;
+  poi?(kind: 'computer' | 'sign' | 'delivery' | 'trash' | 'recycle' | 'storageDoor' | 'counter' | 'furniture', id?: number): THREE.Vector3 | null;
 }
 
 /** Publicado pelo módulo `player`. */

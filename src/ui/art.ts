@@ -242,6 +242,10 @@ export function upgradeSvg(id: string, size = 56): string {
         <circle cx="36" cy="20" r="7" fill="#a8714c" ${OL}/><path d="M24 46c1-10 5.500-14 12-14s11 4 12 14z" fill="#f08c2e" ${OL}/>
         <circle cx="50" cy="44" r="10" fill="#2fd14a" ${OL}/><path d="M50 38v12M44 44h12" stroke="#fff" stroke-width="3.500" stroke-linecap="round"/>`;
       break;
+    case 'recycler':
+      b = `<path d="M16 20h32l-3 34H19z" fill="#2fa84f" ${OL}/><rect x="13" y="14" width="38" height="8" rx="2" fill="#38c15e" ${OL}/>
+        <path d="M32 28l5 8h-3l-2-3-2 3h-3zM28 44l-5-2 2-3M36 44l5-2-2-3" fill="none" stroke="#fff" stroke-width="2.500" stroke-linecap="round" stroke-linejoin="round"/>`;
+      break;
     default:
       b = `<path d="M32 6l7 15 16 2-12 11 3 16-14-8-14 8 3-16L9 23l16-2z" fill="#ffd23f" ${OL}/>`;
   }

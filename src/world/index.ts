@@ -6,12 +6,12 @@
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { PickInfo, Vec2, WorldService } from '../core/services';
-import { doorPos, deliveryZone, storeBounds, trashBinPos, doorX, FURNITURE_FOOTPRINT, SIDEWALK_DEPTH, STORAGE_DEPTH, type Bounds } from '../core/layout';
+import { doorPos, deliveryZone, storeBounds, trashBinPos, recycleBinPos, doorX, FURNITURE_FOOTPRINT, SIDEWALK_DEPTH, STORAGE_DEPTH, type Bounds } from '../core/layout';
 import { DEFAULT_DECOR, type Box, type Decor, type Furniture, type StoreState } from '../sim/state';
 import { PRODUCTS, productById } from '../sim/catalog';
 import * as api from '../sim/api';
 import { Shop } from './shop';
-import { Env, TRASH_SILHOUETTE } from './env';
+import { Env, TRASH_SILHOUETTE, RECYCLE_SILHOUETTE } from './env';
 import {
   BELT_SLOTS, BELT_Y, DESK_SIZE, HANDOFF, SCANNER, SEAT, chairGeos, chairSilhouette, deskGeos, deskSilhouette, furnitureGeos,
   furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, silhouetteOf, type SBox,
@@ -497,6 +497,7 @@ export default function create(): GameModule {
     v.dirt.forEach((d, i) => picks.add({ kind: 'dirt', id: i }, DIRT_SIL, T(d.x, 0, d.z)));
     const tb = trashBinPos(bounds);
     picks.add({ kind: 'trash' }, TRASH_SILHOUETTE, T(tb.x, 0, tb.z));
+    if (ctx.state.upgrades.includes('recycler')) { const rb = recycleBinPos(bounds); picks.add({ kind: 'recycle' }, RECYCLE_SILHOUETTE, T(rb.x, 0, rb.z)); }
     const sg = shop.signBox;
     picks.add({ kind: 'sign' }, [[0, 0, 0, sg.w, sg.h, sg.d]], T(sg.x, sg.y, sg.z));
     if (desk) picks.add({ kind: 'computer' }, deskSilhouette(), T(desk.x, 0.01, desk.z, desk.ry));
@@ -528,7 +529,7 @@ export default function create(): GameModule {
   let lastHash = 0, lastPriceHash = 0;
   function syncInner(force: boolean): void {
     const s: StoreState = ctx.state;
-    const extra = (demo ? 1 : 0) + ((hiddenId ?? -1) + 2) * 4 + (s.upgrades.includes('tipjar') ? 1000003 : 0);
+    const extra = (demo ? 1 : 0) + ((hiddenId ?? -1) + 2) * 4 + (s.upgrades.includes('tipjar') ? 1000003 : 0) + (s.upgrades.includes('recycler') ? 2000003 : 0);
     if (!force && !picksDirty && stateHash(s, extra) === lastHash) return; // nada mudou: sem alocações
     const nb = storeBounds(s.expansion);
     const dec = effectiveDecor(s.decor);
@@ -542,6 +543,7 @@ export default function create(): GameModule {
       env.setTime(ctx.clock.minute, true);
       navKey = ''; rackKey = ''; boxKey = ''; furniKey = ''; demoCache = null; picksDirty = true;
     }
+    env.setRecycler(s.upgrades.includes('recycler'));
     if (dk !== decorKey) {
       const nameChanged = !decorKey.endsWith(`|${s.storeName}`);
       decorKey = dk;
@@ -601,6 +603,7 @@ export default function create(): GameModule {
     }),
     spawnPoint: () => ({ x: Math.floor(doorPos(bounds).x - 5) + 0.5, z: bounds.depth + SIDEWALK_DEPTH + 0.5 }),
     trashBin: () => trashBinPos(bounds),
+    recycleBin: () => recycleBinPos(bounds),
     door: () => doorPos(bounds),
     group: root,
     /* ---- Fase 3 ---- */
@@ -625,6 +628,7 @@ export default function create(): GameModule {
         case 'computer': return desk ? v.set(desk.x, 1.25, desk.z) : null;
         case 'sign': return v.set(shop.signBox.x, shop.signBox.y + 0.3, shop.signBox.z);
         case 'delivery': { const dz = deliveryZone(bounds); return v.set(dz.x + dz.w / 2, 0.2, dz.z + dz.d / 2); }
+        case 'recycle': { const rb = recycleBinPos(bounds); return v.set(rb.x, 1.3, rb.z); }
         case 'trash': { const tb = trashBinPos(bounds); return v.set(tb.x, 1.3, tb.z); }
         case 'storageDoor': return v.set(doorX(bounds), 2.4, 0.1);
         case 'counter': {
@@ -779,6 +783,10 @@ export default function create(): GameModule {
         on('checkout:done', (p: { counterId?: number; tip?: number }) => {
           if (!(p?.tip && p.tip > 0) || !ctx.state.upgrades.includes('tipjar')) return;
           tipJars.tip(p.counterId, p.tip); ctx.bus.emit('sfx', { name: 'coin' });
+        }),
+        on('recycle:done', (p: { x: number; z: number; amount: number }) => {
+          if (!(p?.amount > 0)) return;
+          tipJars.pop(root, p.x, 1.35, p.z, 0.5, p.amount);
         }),
         on('build:start', (p: { type: Furniture['type']; productId?: string; variant?: string; stockIndex?: number }) => { sync(false); picks.highlight(null); build.start(p); }),
         on('build:edit', (p: { furnitureId: number }) => { sync(false); picks.highlight(null); build.edit(p.furnitureId); }),

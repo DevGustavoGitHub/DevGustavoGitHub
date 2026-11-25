@@ -86,7 +86,7 @@ export class Missions {
       // "Abra a caixa e reponha": abrir conta 1/2; repor conclui (a caixa pode já estar aberta)
       if (id === 'stock' && k === 'openBox') { if (this.n < 1) this.progress(1); return; }
       if (id === 'stock' && k === 'placeUnits') { this.progress(2); return; }
-      if ((id === 'pick' && (k === 'pickBox' || k === 'takeBox')) || (id === 'trash' && k === 'discardBox')) this.progress(1);
+      if ((id === 'pick' && (k === 'pickBox' || k === 'takeBox')) || (id === 'trash' && (k === 'discardBox' || k === 'recycleBox'))) this.progress(1);
     });
     bus.on('stateChanged', (p?: { what?: string; boxes?: number }) => {
       if (this.step?.id === 'buy' && p?.what === 'cart' && (p.boxes ?? 0) > 0) this.progress(1);
