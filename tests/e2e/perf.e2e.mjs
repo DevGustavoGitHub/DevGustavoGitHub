@@ -32,6 +32,7 @@ try {
   await page.addInitScript(() => { try { localStorage.setItem('mercadinho:settings', JSON.stringify({ quality: 'high', volume: 0, haptics: false })); } catch { /* */ } });
   await page.goto(URL);
   await page.waitForFunction(() => window.__game && window.__world, null, { timeout: 60000 });
+  await page.evaluate(() => { for (const [id, p] of [[2, 'feijao'], [3, 'macarrao']]) { const f = __game.state.furniture.find((x) => x.id === id); if (!f) continue; f.productId = p; f.levels = (f.levels ?? []).map(() => ({ productId: p, units: 0 })); __game.state.slots[p] = f.levels.length; } __game.bus.emit('stateChanged', { what: 'shelf' }); }); // jogo novo começa sem produto: etiqueta as 2 prateleiras iniciais
   // fecha o menu inicial/pausa da UI se estiver aberto (o teste dirige o world por eventos)
   const closeMenus = async () => {
     for (let i = 0; i < 3; i++) {

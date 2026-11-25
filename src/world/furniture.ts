@@ -122,25 +122,31 @@ export function signKeyOf(pids: readonly (string | undefined)[]): string {
 }
 
 interface Slot { x: number; y: number; z: number; ry: number; s: number }
-/** Posições dos itens de UM nível: fileira da frente primeiro (até 2 camadas se couber), depois as de trás.
- *  Produto mais alto que o vão do nível é reduzido (escala uniforme `s`) para não atravessar a tábua de cima. */
+/** Posições dos itens de UM nível: EXATAMENTE `slotCapacity` do produto (1 item por unidade), fileira da FRENTE primeiro
+ *  (esquerda → direita), depois as de trás. Se a capacidade não cabe no nível, reduz a escala (mais colunas/fileiras). */
 function levelSlotsOf(type: FurnitureType, n: number, i: number, pid: string): Slot[] {
   const L = levelGeoms(type, n)[i];
   if (!L) return [];
   const v = productVisual(pid);
-  const sc = Math.min(1, L.clear / Math.max(0.01, v.h));
-  const vw = v.w * sc, vh = v.h * sc, vd = v.d * sc;
-  const cols = Math.max(1, Math.floor(L.w / (vw + 0.015)));
-  const layers = Math.max(1, Math.min(2, Math.floor(L.clear / (vh + 0.01))));
-  // empilhado: só 2 fileiras (a 3ª quase não aparece) para manter o nº de itens/triângulos do layout antigo de 3 tábuas
-  const rows = Math.max(1, Math.min(type === 'freezer' ? 4 : layers > 1 ? 2 : 3, Math.floor(L.d / (vd + 0.015))));
+  let cap = 12;
+  try { cap = Math.max(1, productById(pid).slotCapacity); } catch { /* produto desconhecido */ }
+  let sc = Math.min(1, L.clear / Math.max(0.01, v.h));
+  let cols = 1, rows = 1;
+  for (let it = 0; it < 14; it++) {
+    cols = Math.max(1, Math.floor(L.w / (v.w * sc + 0.01)));
+    rows = Math.ceil(cap / cols);
+    if (rows * (v.d * sc + 0.01) <= L.d || sc < 0.3) break;
+    sc *= 0.92;
+  }
+  const vh = v.h * sc;
+  void vh;
   const px = L.w / cols, pz = L.d / rows;
   const out: Slot[] = [];
-  let k = 0;
-  for (let row = 0; row < rows; row++) for (let ly = 0; ly < layers; ly++) for (let col = 0; col < cols; col++, k++) {
+  for (let k = 0; k < cap; k++) {
+    const row = Math.floor(k / cols), col = k % cols;
     out.push({
-      x: L.x - L.w / 2 + (col + 0.5) * px + (hash01(k, 1, i) - 0.5) * 0.01,
-      y: L.floor + ly * (vh + 0.004),
+      x: L.x - L.w / 2 + (col + 0.5) * px + (hash01(k, 1, i) - 0.5) * 0.008,
+      y: L.floor,
       z: L.z + L.d / 2 - (row + 0.5) * pz,
       ry: (hash01(k, 2, i) - 0.5) * 0.2,
       s: sc,
@@ -155,23 +161,22 @@ function levelSlots(type: FurnitureType, n: number, i: number, pid: string): Slo
   if (!s) { s = levelSlotsOf(type, n, i, pid); slotCache.set(key, s); }
   return s;
 }
-/** Itens visíveis no nível: proporcional a `fill` (= units / capacidade), mínimo 1 com estoque. */
-export function levelVisible(type: FurnitureType, n: number, i: number, pid: string | undefined, fill: number): number {
-  if (!pid || !(fill > 0)) return 0;
-  const s = levelSlots(type, n, i, pid).length;
-  return Math.min(s, Math.max(1, Math.round(s * Math.min(1, fill))));
+/** Itens visíveis no nível: 1 por unidade (limitado à capacidade). */
+export function levelVisible(type: FurnitureType, n: number, i: number, pid: string | undefined, units: number): number {
+  if (!pid || !(units > 0)) return 0;
+  return Math.min(levelSlots(type, n, i, pid).length, Math.floor(units));
 }
 
 const dummy = new THREE.Object3D();
 const W = new THREE.Matrix4(), L = new THREE.Matrix4();
 /** Matrizes de mundo dos itens expostos, POR NÍVEL (cada nível só com o seu produto), agrupadas por produto em `out`. */
-export function furnitureItems(f: Furniture, levels: readonly { pid?: string; fill: number }[], cx: number, cz: number, out: Map<string, number[]>): void {
+export function furnitureItems(f: Furniture, levels: readonly { pid?: string; units: number }[], cx: number, cz: number, out: Map<string, number[]>): void {
   const n = levels.length;
   dummy.position.set(cx, 0.01, cz); dummy.rotation.set(0, (f.rot * Math.PI) / 180, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
   W.copy(dummy.matrix);
   for (let i = 0; i < n; i++) {
-    const { pid, fill } = levels[i]!;
-    const k = levelVisible(f.type, n, i, pid, fill);
+    const { pid, units } = levels[i]!;
+    const k = levelVisible(f.type, n, i, pid, units);
     if (!pid || !k) continue;
     const slots = levelSlots(f.type, n, i, pid);
     let arr = out.get(pid);

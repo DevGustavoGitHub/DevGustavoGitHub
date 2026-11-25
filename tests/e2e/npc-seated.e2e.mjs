@@ -20,6 +20,7 @@ page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404'
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 await page.goto(URL);
 await page.waitForFunction(() => window.__game && window.__npc, null, { timeout: 30000 });
+await page.evaluate(() => { for (const [id, p] of [[2, 'feijao'], [3, 'macarrao']]) { const f = __game.state.furniture.find((x) => x.id === id); if (!f) continue; f.productId = p; f.levels = (f.levels ?? []).map(() => ({ productId: p, units: 0 })); __game.state.slots[p] = f.levels.length; } __game.bus.emit('stateChanged', { what: 'shelf' }); }); // jogo novo começa sem produto: etiqueta as 2 prateleiras iniciais
 await page.waitForTimeout(1000);
 const dismissTitle = async () => {
   for (let i = 0; i < 4; i++) {

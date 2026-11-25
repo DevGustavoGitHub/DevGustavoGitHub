@@ -321,7 +321,7 @@ export default function create(): GameModule {
     const lvls = new Map<number, LevelView[]>();
     for (const f of v.furniture) if (isDisplayType(f.type)) lvls.set(f.id, levelsOf(v, f));
     const lp = (f: Furniture): string => (lvls.get(f.id) ?? []).map((l) => l.pid ?? '').join('/');
-    const fk = `${hiddenId ?? ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${lp(f)}:${f.variant ?? ''}`).join(',');
+    const fk = `${hiddenId ?? ''}|${ctx.state.upgrades.includes('tipjar') ? 'tj' : ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${lp(f)}:${f.variant ?? ''}`).join(',');
     if (fk !== furniKey) {
       furniKey = fk;
       placeDesk(v);
@@ -330,7 +330,7 @@ export default function create(): GameModule {
     }
     // etiquetas por nível (a malha só é refeita quando produto/esgotado de algum nível muda)
     tags.rebuild(v.furniture.filter((f) => f.id !== hiddenId && lvls.has(f.id)).map((f) => ({ f, levels: lvls.get(f.id)!.map((l) => ({ pid: l.pid, empty: !(l.fill > 0) })) })));
-    const ik = fk + '|' + v.furniture.map((f) => (lvls.get(f.id) ?? []).map((l, i, a) => levelVisible(f.type, a.length, i, l.pid, l.fill)).join('/')).join(',');
+    const ik = fk + '|' + v.furniture.map((f) => (lvls.get(f.id) ?? []).map((l, i, a) => levelVisible(f.type, a.length, i, l.pid, l.units)).join('/')).join(',');
     if (ik !== itemsKey) { itemsKey = ik; const t = pnow(); rebuildItems(v, lvls); lap('items', t); }
     const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|${desk ? `${desk.tx},${desk.tz}` : '-'}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
