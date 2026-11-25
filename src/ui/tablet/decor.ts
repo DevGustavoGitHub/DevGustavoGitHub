@@ -1,6 +1,7 @@
 /** Aba Decoração: nome da loja e cores. */
 import * as api from '../../sim/api';
 import type { Decor } from '../../sim/state';
+import { DECOR_CHANGE_COST } from '../../sim/tuning';
 import { h, money } from '../dom';
 import type { UiKit } from '../kit';
 import { sectionTitle } from '../widgets';
@@ -20,16 +21,20 @@ export function decorTab(body: HTMLElement, kit: UiKit, _tab: TabApi): void {
     if (name) kit.act('storeName', () => api.setStoreName(s, name), 'Nome da loja atualizado.', 'pop');
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { input.blur(); save(); } });
-  body.appendChild(h('div', { class: 'card' }, sectionTitle('Nome da loja'),
-    h('div', { class: 'field' }, input, h('button', { class: 'btn primary', on: { click: save } }, 'Salvar'))));
+  body.appendChild(h('div', { class: 'card' }, sectionTitle('Nome da loja'), h('div', { class: 'muted' }, 'Grátis'),
+    h('div', { class: 'field' }, input, h('button', { class: 'btn primary', on: { click: save } }, 'Salvar (Grátis)'))));
   for (const p of PALETTES) {
-    body.appendChild(h('div', { class: 'card' }, sectionTitle(p.title),
+    body.appendChild(h('div', { class: 'card' }, sectionTitle(p.title), h('div', { class: 'muted' }, DECOR_CHANGE_COST > 0 ? `${money(DECOR_CHANGE_COST)} por troca de cor` : 'Grátis'),
       h('div', { class: 'swatches' }, p.colors.map((c) => h('button', {
-        class: `sw ${s.decor[p.key].toLowerCase() === c ? 'on' : ''}`, style: `background:${c}`, 'aria-label': `${p.title} ${c}`,
+        class: `sw ${s.decor[p.key].toLowerCase() === c ? 'on' : ''}`, style: `background:${c}`, 'aria-label': `${p.title} ${c}`, title: DECOR_CHANGE_COST > 0 ? `Aplicar por ${money(DECOR_CHANGE_COST)}` : 'Grátis',
         on: { click: () => {
-          const cost = kit.act('decor', () => api.setDecor(s, { [p.key]: c } as Partial<Decor>), undefined, 'pop');
-          if (cost !== undefined && cost > 0) kit.toast(`${p.title} atualizado (${money(cost)}).`, 'good');
-          else if (cost !== undefined) kit.toast(`${p.title} atualizado.`, 'good');
+          if (s.decor[p.key].toLowerCase() === c) return;
+          void kit.confirm({ title: `${p.title}: aplicar cor?`, text: DECOR_CHANGE_COST > 0 ? `Aplicar por ${money(DECOR_CHANGE_COST)}.` : 'Grátis.', ok: DECOR_CHANGE_COST > 0 ? `Aplicar por ${money(DECOR_CHANGE_COST)}` : 'Aplicar (Grátis)' }).then((yes) => {
+            if (!yes) return;
+            const cost = kit.act('decor', () => api.setDecor(s, { [p.key]: c } as Partial<Decor>), undefined, 'pop');
+            if (cost !== undefined && cost > 0) kit.toast(`${p.title} atualizado (${money(cost)}).`, 'good');
+            else if (cost !== undefined) kit.toast(`${p.title} atualizado.`, 'good');
+          });
         } },
       })))));
   }

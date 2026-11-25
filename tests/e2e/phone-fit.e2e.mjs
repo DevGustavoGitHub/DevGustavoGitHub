@@ -83,9 +83,9 @@ for (const [w, h] of [[844, 390], [800, 360], [740, 360], [720, 330]]) {
   await p.waitForTimeout(250);
   r = await fit(p, '.pay');
   const keys = await p.locator('.pay-pad .pk').count();
-  check(`[${tag}] maquininha: sem rolagem, na tela, 14 teclas ≥ 44 px`, okFit(r) && keys === 14, JSON.stringify({ r, keys }));
+  check(`[${tag}] maquininha: sem rolagem, na tela, 13 teclas ≥ 44 px`, okFit(r) && keys === 13, JSON.stringify({ r, keys }));
   await shot('pay-card');
-  for (const k of ['2', '3', ',', '5']) await p.locator(`.pay-pad [data-key="${k}"]`).click();
+  for (const k of ['2', '3', '5', '0']) await p.locator(`.pay-pad [data-key="${k}"]`).click();
   await p.locator('#pay-ok').click();
   await p.waitForSelector('.pay', { state: 'detached', timeout: 4000 }).catch(() => {});
 

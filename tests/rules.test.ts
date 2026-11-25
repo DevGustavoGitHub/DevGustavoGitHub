@@ -129,7 +129,7 @@ describe('comprar, atribuir e vender móveis', () => {
     expect(() => buyFurniture(s, 'shelf', 1, 2, 0)).toThrow('Posição inválida');
     const before = s.money;
     const f = buyFurniture(s, 'shelf', 1, 4, 0, 'arroz');
-    expect(s.money).toBe(before - 30000);
+    expect(s.money).toBe(before - 20000);
     expect(f.productId).toBe('arroz');
     expect(productCapacity(s, 'arroz')).toBe(32);
     expect(s.slots.arroz).toBe(4);
@@ -158,8 +158,8 @@ describe('comprar, atribuir e vender móveis', () => {
     const sh = s.furniture.find((f) => f.productId === 'feijao')!;
     expose(s, 'feijao', 24);
     const before = s.money;
-    expect(sellFurniture(s, sh.id)).toBe(15000);
-    expect(s.money).toBe(before + 15000);
+    expect(sellFurniture(s, sh.id)).toBe(10000);
+    expect(s.money).toBe(before + 10000);
     expect(s.shelf.feijao).toBe(0);
     expect(s.sidewalk.reduce((a, b) => a + b.units, 0)).toBe(24);
     expect(s.sidewalk.every((b) => b.open === false)).toBe(true); // sobras voltam em caixas fechadas

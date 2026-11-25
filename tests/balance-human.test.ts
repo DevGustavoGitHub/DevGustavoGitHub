@@ -112,7 +112,7 @@ describe('início do jogo (dias 1–10) com o dinheiro inicial atual', () => {
       const d1 = r.ds[0]!;
       expect(d1.happy!).toBeGreaterThan(d1.angry!);
       expect(d1.netProfit).toBeGreaterThan(0);
-      expect(d1.money).toBeGreaterThanOrEqual(14_200); // 2 caixas baratas (feijão + macarrão) na manhã do dia 2
+      expect(d1.money).toBeGreaterThanOrEqual(12_000); // ~2 caixas baratas (feijão + macarrão; markup maior = preço sugerido mais alto, d1 um pouco menor) na manhã do dia 2
       expect(r.neg).toBe(0);
       expect(r.bankruptcies).toBe(0);
       expect(r.first.cashier).toBeGreaterThan(0);

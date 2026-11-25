@@ -150,6 +150,10 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   for (const d of [1000, 200, 10, 5]) await page.locator(`.pay-den[data-den="${d}"]`).click();
   const disp = await last(page, 'checkout:display');
   check(`[${tag}] checkout:display (cash) com recebido/total/troco/dando`, !!disp && disp.mode === 'cash' && disp.received === 5000 && disp.total === 3785 && disp.change === 1215 && disp.giving === 1215, JSON.stringify(disp));
+  check(`[${tag}] 'Dando' verde quando igual ao troco`, await page.locator('#pay-giving.ok').count() === 1);
+  await page.locator('.pay-act .pk.blue').click();
+  check(`[${tag}] 'Dando' vermelho quando diferente do troco`, await page.locator('#pay-giving.bad').count() === 1);
+  await page.locator('.pay-den[data-den="5"]').click();
   await shot(page, `${tag}-pay-cash`);
   await page.locator('#pay-ok').click();
   await page.waitForTimeout(250);
@@ -160,11 +164,11 @@ for (const [w, h] of [[844, 390], [740, 360], [1280, 720]]) {
   /* ---------- 4) Pagamento no cartão ---------- */
   await page.evaluate(() => window.__game.bus.emit('checkoutRequest', { customerId: 902, counterId: 1, items: [{ productId: 'cafe', qty: 1 }], total: 2350, method: 'card', stage: 'pay' }));
   await page.waitForSelector('.pay.card', { timeout: 9000 });
-  check(`[${tag}] maquininha com 1–9, apagar, 0, vírgula, OK, C`, (await page.locator('.pay-pad .pk').count()) === 14);
-  for (const k of ['2', '3', ',', '5']) await page.locator(`.pay-pad [data-key="${k}"]`).click();
+  check(`[${tag}] maquininha com 1–9, apagar, 0, OK, C (sem vírgula)`, (await page.locator('.pay-pad .pk').count()) === 13);
+  for (const k of ['2', '3', '5', '0']) await page.locator(`.pay-pad [data-key="${k}"]`).click();
   const d2 = await last(page, 'checkout:display');
   check(`[${tag}] checkout:display (card) com total e valor digitado`, !!d2 && d2.mode === 'card' && d2.total === 2350 && d2.typed === 2350, JSON.stringify(d2));
-  check(`[${tag}] visor mostra R$ 23,5`, /23,5/.test(await page.locator('#pay-typed').innerText()));
+  check(`[${tag}] visor mostra R$ 23,50 (vírgula fixa)`, /23,50/.test(await page.locator('#pay-typed').innerText()));
   await shot(page, `${tag}-pay-card`);
   await page.locator('#pay-ok').click();
   await page.waitForTimeout(250);

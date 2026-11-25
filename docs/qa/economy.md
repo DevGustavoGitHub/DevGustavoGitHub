@@ -210,3 +210,20 @@ de feijão + 1 de macarrão (sobram R$ 8)" → "2 de feijão + 1 de macarrão (s
   cliente e outro. Repositor e limpador não são modelados (liberam no nível 8 e 6).
 - Reproduzir: `npx vitest run tests/balance-human.test.ts --silent=false` (tabelas de capacidade, arquétipos e preço).
   Para outros cenários, `newHumanRun(seed, HUMAN_PROFILES.x, dinheiro, { daySeconds, patience, sigma })` + `playHumanDays`.
+
+## Ajuste de progressão (pós-teste)
+
+Relato: o jogador chegou ao nível 3 e não conseguiu comprar nada desbloqueado. Diagnóstico com o humanBot (iniciante cuidadoso, 3 sementes): caixa no fim dos dias 1–6 ≈ R$ 130–900, mas a reserva do bot (aluguel + salários + 35% do estoque para encher as prateleiras + R$ 20) chega a R$ 450–650 no nível 3, e licença de bebidas (R$ 400) + geladeira (R$ 500) pedem R$ 900 + reserva: o cuidadoso não comprava a licença até o dia 7+ (o eficiente, só no dia 7).
+
+| Item | Antes | Depois |
+|---|---|---|
+| Licença de bebidas | R$ 400 | R$ 100 |
+| Geladeira | R$ 500 | R$ 150 |
+| Prateleira | R$ 300 | R$ 200 |
+| Pote de gorjeta | R$ 150 | R$ 100 |
+| Markup feijão / macarrão | 1,45 / 1,50 | 1,55 / 1,65 |
+| Dinheiro inicial | R$ 250 | R$ 250 (inalterado: 4ª caixa não cabe) |
+| Cuidadoso: licença + geladeira | dia 7+ | dia 3–4 (nível 3) |
+| Eficiente: licença + geladeira | dia 7 | dia 5–7 (nível 4–5) |
+
+Alavancas usadas na ordem: custos, margem; o dinheiro inicial ficou (R$ 300 deixava comprar a 4ª caixa e quebrava o "início pobre"). `displayTypeFor` passou a usar a ordem do catálogo (prateleira antes da geladeira) em vez do mais barato, e o humanBot cuidadoso agora compra licença nova antes de mais uma prateleira de mercearia. Caixa no fim do dia 1 do cuidadoso caiu um pouco (R$ 127–304), limite do teste ajustado para R$ 120.
