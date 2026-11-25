@@ -15,16 +15,16 @@ export type LabelSpec =
   | { k: 'cyl'; y: number; w: number; h: number; rt: number; rb: number };
 
 const HAND: Record<string, LabelSpec> = {
-  arroz: { k: 'flat', y: -0.01, w: 0.22, h: 0.24, z: 0.0535 },
-  feijao: { k: 'flat', y: 0, w: 0.16, h: 0.19, z: 0.0415 },
-  macarrao: { k: 'flat', y: -0.01, w: 0.15, h: 0.19, z: 0.0315 },
-  cafe: { k: 'flat', y: 0, w: 0.12, h: 0.15, z: 0.046 },
-  refri: { k: 'cyl', y: 0.02, w: 0.1, h: 0.17, rt: 0.06, rb: 0.06 },
-  agua: { k: 'cyl', y: 0.03, w: 0.09, h: 0.14, rt: 0.052, rb: 0.052 },
-  leite: { k: 'flat', y: -0.01, w: 0.08, h: 0.14, z: 0.038 },
+  arroz: { k: 'flat', y: 0.06, w: 0.18, h: 0.2, z: 0.0555 },
+  feijao: { k: 'flat', y: 0.05, w: 0.14, h: 0.16, z: 0.0435 },
+  macarrao: { k: 'flat', y: 0.04, w: 0.13, h: 0.17, z: 0.0335 },
+  cafe: { k: 'flat', y: 0.03, w: 0.11, h: 0.13, z: 0.048 },
+  refri: { k: 'cyl', y: 0.09, w: 0.1, h: 0.15, rt: 0.06, rb: 0.06 },
+  agua: { k: 'cyl', y: 0.075, w: 0.09, h: 0.1, rt: 0.052, rb: 0.052 },
+  leite: { k: 'flat', y: 0.04, w: 0.075, h: 0.12, z: 0.04 },
   queijo: { k: 'cyl', y: 0, w: 0.15, h: 0.055, rt: 0.1045, rb: 0.1045 },
   pao: { k: 'flat', y: 0, w: 0.15, h: 0.1, z: 0.051 },
-  detergente: { k: 'flat', y: -0.005, w: 0.085, h: 0.13, z: 0.034 },
+  detergente: { k: 'flat', y: 0.03, w: 0.08, h: 0.11, z: 0.036 },
   sorvete: { k: 'cyl', y: 0.01, w: 0.15, h: 0.08, rt: 0.0967, rb: 0.0844 },
 };
 
@@ -33,12 +33,12 @@ export function labelSpec(pid: string): LabelSpec | null {
   let p;
   try { p = productById(pid); } catch { return null; }
   switch (productShapeOf(p)) {
-    case 'bottle': return { k: 'cyl', y: 0.02, w: 0.085, h: 0.11, rt: 0.0465, rb: 0.0465 };
-    case 'can': return { k: 'cyl', y: 0.03, w: 0.065, h: 0.08, rt: 0.039, rb: 0.039 };
-    case 'jar': return { k: 'cyl', y: 0.01, w: 0.09, h: 0.07, rt: 0.0535, rb: 0.0535 };
-    case 'bag': return { k: 'flat', y: 0, w: 0.16, h: 0.2, z: 0.0385 };
+    case 'bottle': return { k: 'cyl', y: 0.075, w: 0.085, h: 0.1, rt: 0.0465, rb: 0.0465 };
+    case 'can': return { k: 'cyl', y: 0.05, w: 0.065, h: 0.075, rt: 0.039, rb: 0.039 };
+    case 'jar': return { k: 'cyl', y: 0.02, w: 0.09, h: 0.06, rt: 0.0535, rb: 0.0535 };
+    case 'bag': return { k: 'flat', y: 0.06, w: 0.15, h: 0.18, z: 0.0385 };
     case 'tray': return { k: 'flat', y: 0.075, w: 0.2, h: 0.07, z: -0.088 };
-    default: return { k: 'flat', y: -0.01, w: 0.13, h: 0.15, z: 0.04 };
+    default: return { k: 'flat', y: 0.04, w: 0.12, h: 0.13, z: 0.04 };
   }
 }
 /** Fração da célula (256×384) ocupada pelo rótulo de `pid` (mantém a proporção, sem distorcer). */
@@ -155,14 +155,14 @@ export function drawLabel(g: G, pid: string, W: number, H: number): void {
   g.textAlign = 'center'; g.textBaseline = 'middle';
   const name = shortName(pid), dark = shade(c, 0x000000, 0.55);
   if (w / h < 1.5) {
-    const bh = h * 0.25;
+    const bh = h * 0.4;
     g.fillStyle = dark; g.fillRect(0, 0, w, bh);
-    const s = fitFont(g, name, w * 0.92, bh * 0.62);
-    g.font = `900 ${s}px system-ui, Arial, sans-serif`; outlined(g, name, w / 2, bh * 0.54, s, '#fff', dark);
-    const r = Math.min(w * 0.46, (h - bh) * 0.46), cy = bh + (h - bh) / 2;
+    const s = fitFont(g, name, w * 0.94, bh * 0.8, 10);
+    g.font = `900 ${s}px system-ui, Arial, sans-serif`; outlined(g, name, w / 2, bh * 0.52, s, '#fff', dark);
+    const r = Math.min(w * 0.48, (h - bh) * 0.49), cy = bh + (h - bh) / 2;
     g.fillStyle = 'rgba(255,255,255,0.93)'; g.beginPath(); g.arc(w / 2, cy, r, 0, Math.PI * 2); g.fill();
     g.strokeStyle = dark; g.lineWidth = Math.max(2, r * 0.05); g.stroke();
-    drawIcon(g, pid, w / 2, cy, r * 0.82);
+    drawIcon(g, pid, w / 2, cy, r * 0.9);
   } else {
     const r = h * 0.46;
     g.fillStyle = 'rgba(255,255,255,0.93)'; g.beginPath(); g.arc(h / 2, h / 2, r, 0, Math.PI * 2); g.fill();

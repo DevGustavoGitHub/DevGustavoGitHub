@@ -13,7 +13,7 @@ import { drawIcon, shortName } from './labels';
 import { levelGeoms } from './furniture';
 import { footprintOf } from './nav';
 
-const COLS = 4, CW = 1024, CELL_H = 96, TW = 0.25, TH = 0.094;
+const COLS = 4, CW = 1024, CELL_H = 96, TW = 0.35, TH = 0.131;
 const cellW = Math.floor(CW / COLS);
 const KEYS = ['-', ...PRODUCTS.flatMap((p) => [p.id, `${p.id}|-`])];
 const ROWS = Math.ceil(KEYS.length / COLS);
@@ -62,10 +62,10 @@ export class PriceTags {
       g.fillStyle = css(categoryColor(pid)); g.fillRect(x + 11, ty, t, t);
       g.strokeStyle = '#1d2128'; g.lineWidth = 3; g.strokeRect(x + 11, ty, t, t);
       g.fillStyle = 'rgba(255,255,255,0.93)'; g.beginPath(); g.arc(x + 11 + t / 2, ty + t / 2, t * 0.45, 0, Math.PI * 2); g.fill();
-      drawIcon(g, pid, x + 11 + t / 2, ty + t / 2, t * 0.38);
+      drawIcon(g, pid, x + 11 + t / 2, ty + t / 2, t * 0.43);
       tx = x + t + 22; tw = w - t - 34;
     }
-    g.fillStyle = '#1d2128'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#0b0d10'; g.textAlign = 'center'; g.textBaseline = 'middle';
     const cx = tx + tw / 2;
     if (pid) {
       const nm = shortName(pid);
