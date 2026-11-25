@@ -358,29 +358,44 @@ function chair(): Batch {
   return b;
 }
 
-/** Balcão lateral do computador (local: encostado na parede em −z, frente +z): notebook, caneca, bloco, planta. */
-export const DESK_SIZE = { w: 1.0, d: 0.56 };
+/**
+ * Mesa do computador (móvel `desk`, footprint 1×1; local: frente +z), no MESMO estilo do balcão do caixa: corpo
+ * azul-claro arredondado, faixa vermelha, painéis claros arredondados com moldura azul (frente, trás e laterais) e
+ * tampo cinza-claro; em cima, notebook, caneca, bloco e plantinha. O corpo fica um pouco recuado para o fundo do tile
+ * (DESK_Z) para encostar na parede quando o jogador a põe junto a uma.
+ */
+export const DESK_SIZE = { w: 0.94, d: 0.52 };
+const DESK_Z = -0.12;
 function desk(): Batch {
   const b = new Batch();
-  b.box(0.98, 0.06, 0.54, C_PLINTH, 0, 0, 0);
-  b.box(0.96, 0.72, 0.52, C_BODY, 0, 0.06, 0);
-  for (const x of [-0.24, 0.24]) b.box(0.36, 0.5, 0.012, C_PANEL, x, 0.14, 0.266);
-  b.box(0.98, 0.09, 0.54, C_RED, 0, 0.78, 0);
-  b.box(1.0, 0.03, 0.56, C_TOP, 0, 0.87, 0);
+  const W = DESK_SIZE.w, D = DESK_SIZE.d, Z = DESK_Z;
+  b.box(W - 0.04, 0.07, D - 0.06, C_PLINTH, 0, 0, Z);
+  rbox(b, W, 0.71, D, C_BODY, 0, 0.07, Z, 0.06);
+  rbox(b, W + 0.03, 0.1, D + 0.03, C_RED, 0, 0.78, Z, 0.07);
+  const zF = Z + D / 2, zB = Z - D / 2;
+  for (const x of [-0.225, 0.225]) {
+    rpanel(b, 0.38, 0.5, C_FRAME, x, 0.14, zF - 0.002, 1, 0.06, 0.008); rpanel(b, 0.32, 0.42, C_PANEL, x, 0.18, zF - 0.002, 1, 0.05, 0.014);
+    rpanel(b, 0.38, 0.5, C_FRAME, x, 0.14, zB + 0.002, -1, 0.06, 0.008); rpanel(b, 0.32, 0.42, C_PANEL, x, 0.18, zB + 0.002, -1, 0.05, 0.014);
+  }
+  for (const sx of [-1, 1]) {
+    b.box(0.01, 0.5, D - 0.14, C_FRAME, sx * (W / 2 + 0.003), 0.14, Z);
+    b.box(0.014, 0.42, D - 0.22, C_PANEL, sx * (W / 2 + 0.007), 0.18, Z);
+  }
+  rbox(b, W + 0.04, 0.03, D + 0.04, C_TOP, 0, 0.87, Z, 0.06);
   // notebook
-  b.box(0.36, 0.018, 0.25, matte(0x5b6270), -0.08, 0.9, 0.05);
-  b.box(0.3, 0.004, 0.11, matte(0x2b2f36), -0.08, 0.918, 0.07);
-  const lidA = -0.26, hz = 0.05 - 0.125, cy = 0.918 + 0.12 * Math.cos(lidA), cz = hz + 0.12 * Math.sin(lidA);
+  b.box(0.36, 0.018, 0.25, matte(0x5b6270), -0.08, 0.9, Z + 0.05);
+  b.box(0.3, 0.004, 0.11, matte(0x2b2f36), -0.08, 0.918, Z + 0.07);
+  const lidA = -0.26, hz = Z + 0.05 - 0.125, cy = 0.918 + 0.12 * Math.cos(lidA), cz = hz + 0.12 * Math.sin(lidA);
   b.add(new THREE.BoxGeometry(0.36, 0.24, 0.012), matte(0x4b5260), -0.08, cy, cz, { rx: lidA });
   const nrm = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(1, 0, 0), lidA);
   b.add(uvToCell(planeGeo(0.32, 0.2).clone(), DECAL.laptop()), ['decal', 0xffffff], -0.08 + nrm.x * 0.0075, cy + nrm.y * 0.0075, cz + nrm.z * 0.0075, { rx: lidA });
   // caneca, bloco de notas e plantinha
-  b.add(cylGeo(0.042, 0.038, 0.1, 12), matte(0xd9822b), 0.3, 0.9, 0.08);
-  b.add(cylGeo(0.036, 0.036, 0.004, 12), matte(0x3b2416), 0.3, 0.995, 0.08);
-  b.box(0.02, 0.05, 0.012, matte(0xd9822b), 0.35, 0.93, 0.08);
-  b.box(0.12, 0.006, 0.16, matte(0xfff3b0), 0.18, 0.9, -0.12, { ry: 0.2 });
-  b.add(cylGeo(0.05, 0.04, 0.07, 10), matte(0xc8693a), 0.4, 0.9, -0.16);
-  b.add(sphGeo(0.06, 7, 5), ['flat', 0x4fa85a], 0.4, 1.0, -0.16);
+  b.add(cylGeo(0.042, 0.038, 0.1, 12), matte(0xd9822b), 0.3, 0.9, Z + 0.08);
+  b.add(cylGeo(0.036, 0.036, 0.004, 12), matte(0x3b2416), 0.3, 0.995, Z + 0.08);
+  b.box(0.02, 0.05, 0.012, matte(0xd9822b), 0.35, 0.93, Z + 0.08);
+  b.box(0.12, 0.006, 0.16, matte(0xfff3b0), 0.18, 0.9, Z - 0.12, { ry: 0.2 });
+  b.add(cylGeo(0.05, 0.04, 0.07, 10), matte(0xc8693a), 0.37, 0.9, Z - 0.14);
+  b.add(sphGeo(0.06, 7, 5), ['flat', 0x4fa85a], 0.37, 1.0, Z - 0.14);
   return b;
 }
 
@@ -451,6 +466,7 @@ function structure(f: Furniture, lv: readonly (string | undefined)[]): Batch {
     case 'freezer': return freezer(lv);
     case 'counter': return counter();
     case 'rack': return rack();
+    case 'desk': return desk();
     default: return decor(f);
   }
 }
@@ -488,9 +504,7 @@ export function buildFurniture(f: Furniture, _fraction: number): FurnitureView {
 
 /* ---------------- Fase 3: peças avulsas, silhuetas (pick/contorno) e etiquetas ---------------- */
 let chairCache: Map<Kind, THREE.BufferGeometry> | null = null;
-let deskCache: Map<Kind, THREE.BufferGeometry> | null = null;
 export const chairGeos = (): Map<Kind, THREE.BufferGeometry> => (chairCache ??= chair().build());
-export const deskGeos = (): Map<Kind, THREE.BufferGeometry> => (deskCache ??= desk().build());
 
 /** Caixa local [cx, cy, cz, w, h, d] (centro e tamanho). */
 export type SBox = readonly [number, number, number, number, number, number];
@@ -502,7 +516,7 @@ const SIL: Record<string, SBox[]> = {
   rack: [[0, 0.87, 0, 2.0, 1.75, 0.95]],
   plant: [[0, 0.42, 0, 0.5, 0.85, 0.5]], tree: [[0, 0.95, 0, 0.9, 1.9, 0.9]], banner: [[0, 0.9, 0, 0.52, 1.8, 0.22]], lamp: [[0, 0.88, 0, 0.42, 1.76, 0.42]],
   chair: [[0, 0.27, 0, 0.62, 0.54, 0.62], [0, 0.86, -0.25, 0.48, 0.5, 0.1]],
-  desk: [[0, 0.45, 0, 1.0, 0.9, 0.56], [-0.08, 1.03, -0.1, 0.38, 0.27, 0.08]],
+  desk: [[0, 0.45, DESK_Z, 0.98, 0.9, 0.56], [-0.08, 1.03, DESK_Z - 0.1, 0.38, 0.27, 0.08]],
 };
 /** Silhueta simplificada (caixas locais) do móvel: proxies de pick e contorno de destaque. */
 export function silhouetteOf(f: Pick<Furniture, 'type' | 'variant'>): SBox[] {
@@ -510,7 +524,6 @@ export function silhouetteOf(f: Pick<Furniture, 'type' | 'variant'>): SBox[] {
   return SIL[f.type] ?? [[0, 0.5, 0, 1, 1, 1]];
 }
 export const chairSilhouette = (): SBox[] => SIL.chair!;
-export const deskSilhouette = (): SBox[] => SIL.desk!;
 
 /** Nº de níveis desenhados do móvel (levels.length; reserva: FurnitureSpec.slots do tipo). */
 export const levelCountOf = (f: Pick<Furniture, 'type' | 'productId' | 'levels'>): number => levelPids(f).length;

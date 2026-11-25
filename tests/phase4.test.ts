@@ -195,7 +195,9 @@ describe('Fase 4 — modelo de níveis', () => {
 
   it('migração: save da Fase 3 (um produto por móvel + estoque somado) distribui o estoque pelos níveis', () => {
     const raw = JSON.parse(serialize(starterGame(6))) as Record<string, unknown>;
-    const furniture = raw.furniture as Record<string, unknown>[];
+    // save da Fase 3: sem níveis e sem a mesa do computador (móvel `desk` é posterior; o load a recria)
+    const furniture = (raw.furniture as Record<string, unknown>[]).filter((f) => f.type !== 'desk');
+    raw.furniture = furniture;
     for (const f of furniture) delete f.levels;
     furniture.push({ id: 4, type: 'shelf', x: 7, z: 2, rot: 0, productId: 'feijao' });
     furniture.push({ id: 5, type: 'fridge', x: 1, z: 5, rot: 0, productId: 'refri' });

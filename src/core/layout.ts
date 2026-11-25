@@ -32,8 +32,9 @@ export const trashBinPos = (b: Bounds): { x: number; z: number } => ({ x: b.widt
 /** Lixeira verde de reciclagem (calçada, lado esquerdo da fachada, oposto à lixeira externa). */
 export const recycleBinPos = (b: Bounds): { x: number; z: number } => ({ x: 0.42, z: b.depth + 0.42 });
 
-export type FurnitureType = 'shelf' | 'fridge' | 'freezer' | 'counter' | 'rack' | 'decor';
+/** `desk` = mesa do computador: móvel único, fora do catálogo (não se compra, vende nem guarda), só se MOVE. */
+export type FurnitureType = 'shelf' | 'fridge' | 'freezer' | 'counter' | 'rack' | 'decor' | 'desk';
 export const FURNITURE_FOOTPRINT: Record<FurnitureType, { w: number; d: number }> = {
   shelf: { w: 2, d: 1 }, fridge: { w: 2, d: 1 }, freezer: { w: 2, d: 1 },
-  counter: { w: 2, d: 2 }, rack: { w: 2, d: 1 }, decor: { w: 1, d: 1 },
+  counter: { w: 2, d: 2 }, rack: { w: 2, d: 1 }, decor: { w: 1, d: 1 }, desk: { w: 1, d: 1 },
 };

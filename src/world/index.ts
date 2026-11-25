@@ -13,7 +13,7 @@ import * as api from '../sim/api';
 import { Shop } from './shop';
 import { Env, TRASH_SILHOUETTE, RECYCLE_SILHOUETTE } from './env';
 import {
-  BELT_SLOTS, BELT_Y, DESK_SIZE, HANDOFF, SCANNER, SEAT, chairGeos, chairSilhouette, deskGeos, deskSilhouette, furnitureGeos,
+  BELT_SLOTS, BELT_Y, HANDOFF, SCANNER, SEAT, chairGeos, chairSilhouette, furnitureGeos,
   furnitureItems, makeDrawer, rackSlot, RACK_SLOTS, silhouetteOf, type SBox,
   isDisplayType, levelCountOf, levelGeoms, levelHeights, levelIndexAt, levelPids, levelVisible,
 } from './furniture';
@@ -69,7 +69,7 @@ function demoView(b: Bounds, storage: boolean): View {
     f(5, 'shelf', 1, 4, 180, 'pao'), f(6, 'shelf', 1, 5, 0, 'detergente'), f(7, 'shelf', 4, 4, 180, 'agua'), f(8, 'shelf', 4, 5, 0, 'leite'),
     f(9, 'fridge', W - 1, 1, 270, 'refri'), f(10, 'freezer', W - 1, 4, 270, 'sorvete'), f(11, 'fridge', 9, 0, 0, 'queijo'),
     f(12, 'counter', 7, 3, 0), f(13, 'decor', 0, b.depth - 1, 0, undefined, 'plant'), f(14, 'decor', 3, b.depth - 1, 0, undefined, 'banner'),
-    f(15, 'decor', W - 1, b.depth - 1, 0, undefined, 'tree'),
+    f(15, 'decor', W - 1, b.depth - 1, 0, undefined, 'tree'), f(19, 'desk', 9, 3, 0),
   ];
   if (storage) furniture.push(f(16, 'rack', 1, -5, 0), f(17, 'rack', 4, -5, 0), f(18, 'rack', W - 3, -2, 180));
   return {
@@ -134,7 +134,6 @@ export default function create(): GameModule {
   const itemLayer = new ItemLayer(); itemLayer.group.name = 'items';
   const boxLayer = new BoxLayer(itemLayer); boxLayer.group.name = 'boxes';
   const furniStatic = new THREE.Group(); furniStatic.name = 'furnitureStatic';
-  const deskGroup = new THREE.Group(); deskGroup.name = 'computerDesk';
   const nav = new NavGrid();
   const screens = new CheckoutScreens();
   const tags = new PriceTags();
@@ -164,7 +163,7 @@ export default function create(): GameModule {
   const offs: (() => void)[] = [];
   /** Cadeiras desenhadas (balcões com o tile do operador livre). */
   const chairs = new Set<number>();
-  /** Balcão do computador: tile ocupado e pose. */
+  /** Mesa do computador (móvel `desk` do estado): tile e pose do centro do tile (seta do tutorial, `__world.desk()`). */
   let desk: { tx: number; tz: number; x: number; z: number; ry: number } | null = null;
   /** Caixas no chão desenhadas: índice em state.sidewalk + pose (pick/contorno/empilhamento). */
   let boxLayout: { index: number; box: Box; x: number; y: number; z: number; ry: number; open: boolean }[] = [];
@@ -324,7 +323,7 @@ export default function create(): GameModule {
     const fk = `${hiddenId ?? ''}|${ctx.state.upgrades.includes('tipjar') ? 'tj' : ''}|${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${lp(f)}:${f.variant ?? ''}`).join(',');
     if (fk !== furniKey) {
       furniKey = fk;
-      placeDesk(v);
+      computeDesk(v);
       const t = pnow(); rebuildStatic(v, lvls); lap('static', t);
       picksDirty = true;
     }
@@ -332,7 +331,7 @@ export default function create(): GameModule {
     tags.rebuild(v.furniture.filter((f) => f.id !== hiddenId && lvls.has(f.id)).map((f) => ({ f, levels: lvls.get(f.id)!.map((l) => ({ pid: l.pid, empty: !(l.fill > 0) })) })));
     const ik = fk + '|' + v.furniture.map((f) => (lvls.get(f.id) ?? []).map((l, i, a) => levelVisible(f.type, a.length, i, l.pid, l.units)).join('/')).join(',');
     if (ik !== itemsKey) { itemsKey = ik; const t = pnow(); rebuildItems(v, lvls); lap('items', t); }
-    const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|${desk ? `${desk.tx},${desk.tz}` : '-'}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
+    const nk = `${bounds.width}x${bounds.depth}|${ctx.state.storageUnlocked}|` + v.furniture.map((f) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}`).join(',');
     if (geoChanged || nk !== navKey) { navKey = nk; rebuildNav(v); }
   }
   function rebuildStatic(v: View, lvls: Map<number, LevelView[]>): void {
@@ -370,57 +369,16 @@ export default function create(): GameModule {
     itemLayer.setSource('furniture', by);
   }
   function rebuildNav(v: View): void {
-    nav.build(bounds, ctx.state.storageUnlocked, v.furniture, desk ? [...env.blocked, { x: desk.tx, z: desk.tz }] : env.blocked);
+    nav.build(bounds, ctx.state.storageUnlocked, v.furniture, env.blocked);
     picksDirty = true;
   }
 
-  /** Mesa do computador: SEMPRE colada ao 1º balcão, ao lado da ponta do operador (lado direito, depois o esquerdo); sem balcão/espaço, junto à parede. */
-  function placeDesk(v: View): void {
-    const W = bounds.width, D = bounds.depth, dx = doorX(bounds);
-    const occ = occupied(v);
-    const reserved = new Set<string>();
-    for (const zz of [D - 1, D - 2]) for (const xx of [dx - 1, dx]) reserved.add(`${xx},${zz}`);
-    for (const f of v.furniture) {
-      if (f.type !== 'counter') continue;
-      const { cx, cz } = centerOf(f);
-      const near: [number, number][] = [[SEAT.x, SEAT.z], [-0.5, 0.5], [-0.5, 1.5], [-0.5, 2.5], [0.5, 0.5], [0.5, 1.5]];
-      for (const [lx, lz] of near) { const w = localToWorld(cx, cz, f.rot, lx, lz); reserved.add(`${Math.floor(w.x)},${Math.floor(w.z)}`); }
-    }
-    const free = (x: number, z: number): boolean => x >= 0 && x < W && z >= 0 && z < D && !occ.has(`${x},${z}`) && !reserved.has(`${x},${z}`);
-    const c0 = v.furniture.find((f) => f.type === 'counter');
-    if (c0) {
-      const { cx, cz } = centerOf(c0);
-      for (const [lx, lz] of [[1.5, -0.5], [-1.5, -0.5], [1.5, -1.5], [-1.5, -1.5]] as const) {
-        const t = localToWorld(cx, cz, c0.rot, lx, lz);
-        const tx = Math.floor(t.x), tz = Math.floor(t.z);
-        if (!free(tx, tz)) continue;
-        const p = localToWorld(cx, cz, c0.rot, lx + (lx > 0 ? 0.03 : -0.03), -0.4);
-        desk = { tx, tz, x: p.x, z: p.z, ry: (c0.rot * Math.PI) / 180 };
-        deskGroup.position.set(desk.x, 0.01, desk.z); deskGroup.rotation.y = desk.ry; deskGroup.updateMatrix();
-        if (!deskGroup.children.length) for (const m of meshesOf(deskGeos(), deskGroup, { order: 2 })) freezeSelf(m);
-        deskGroup.visible = true;
-        return;
-      }
-    }
-    // reserva: canto ESQUERDO da frente (junto à vitrine, à esquerda da porta, longe do balcão do caixa)
-    const cands: { tx: number; tz: number; wall: 'front' | 'left' | 'right' }[] = [{ tx: 0, tz: D - 1, wall: 'front' }];
-    for (let k = 0; k < W; k++) {
-      const left = dx - 2 - k, right = dx + 1 + k;
-      if (left >= 0) cands.push({ tx: left, tz: D - 1, wall: 'front' });
-      if (right < W) cands.push({ tx: right, tz: D - 1, wall: 'front' });
-    }
-    for (let z = D - 2; z >= 1; z--) { cands.push({ tx: 0, tz: z, wall: 'left' }); cands.push({ tx: W - 1, tz: z, wall: 'right' }); }
-    const c = cands.find((q) => free(q.tx, q.tz));
-    if (!c) { desk = null; deskGroup.visible = false; return; }
-    const h = DESK_SIZE.d / 2 + 0.01;
-    desk = c.wall === 'front' ? { tx: c.tx, tz: c.tz, x: c.tx + 0.5, z: D - h, ry: Math.PI }
-      : c.wall === 'left' ? { tx: c.tx, tz: c.tz, x: h, z: c.tz + 0.5, ry: Math.PI / 2 }
-      : { tx: c.tx, tz: c.tz, x: W - h, z: c.tz + 0.5, ry: -Math.PI / 2 };
-    if (!deskGroup.children.length) for (const m of meshesOf(deskGeos(), deskGroup, { order: 2 })) freezeSelf(m);
-    deskGroup.position.set(desk.x, 0.01, desk.z);
-    deskGroup.rotation.y = desk.ry;
-    deskGroup.updateMatrix();
-    deskGroup.visible = true;
+  /** Mesa do computador: móvel `desk` do estado (o sim garante uma; o jogador a MOVE como qualquer móvel). */
+  function computeDesk(v: View): void {
+    const f = v.furniture.find((x) => x.type === 'desk');
+    if (!f) { desk = null; return; }
+    const { cx, cz } = centerOf(f);
+    desk = { tx: f.x, tz: f.z, x: cx, z: cz, ry: (f.rot * Math.PI) / 180 };
   }
 
   /* ---------------- caixas no chão e em racks ---------------- */
@@ -505,7 +463,7 @@ export default function create(): GameModule {
     for (const f of v.furniture) {
       if (f.id === hiddenId) continue;
       furnitureMatrix(f, M2);
-      picks.add({ kind: 'furniture', id: f.id }, silhouetteOf(f), M2);
+      picks.add({ kind: f.type === 'desk' ? 'computer' : 'furniture', id: f.id }, silhouetteOf(f), M2);
       if (f.type === 'counter' && ctx.state.upgrades.includes('tipjar')) picks.add({ kind: 'tipjar', id: f.id }, JAR_SIL, M3.copy(M2).multiply(M.makeTranslation(JAR.x, JAR.y, JAR.z)));
       if (f.type === 'counter' && chairs.has(f.id)) picks.add({ kind: 'seat', id: f.id }, chairSilhouette(), M2.multiply(M.makeTranslation(SEAT.x, 0, SEAT.z)));
     }
@@ -516,7 +474,6 @@ export default function create(): GameModule {
     if (ctx.state.upgrades.includes('recycler')) { const rb = recycleBinPos(bounds); picks.add({ kind: 'recycle' }, RECYCLE_SILHOUETTE, T(rb.x, 0, rb.z)); }
     const sg = shop.signBox;
     picks.add({ kind: 'sign' }, [[0, 0, 0, sg.w, sg.h, sg.d]], T(sg.x, sg.y, sg.z));
-    if (desk) picks.add({ kind: 'computer' }, deskSilhouette(), T(desk.x, 0.01, desk.z, desk.ry));
     const sd = shop.storageDoorBox;
     if (sd) picks.add({ kind: 'storageDoor' }, [[0, 0, 0, sd.w, sd.h, sd.d]], T(sd.x, sd.y, sd.z));
     picks.end();
@@ -764,10 +721,10 @@ export default function create(): GameModule {
       picks = new Picks(!!ctx.renderer.getContextAttributes()?.stencil);
       picks.levelBoxes = levelBoxes;
       ctx.scene.fog = new THREE.Fog(0xd5ecff, 95, 230);
-      root.add(env.group, shop.group, furniStatic, furniGroup, deskGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx);
+      root.add(env.group, shop.group, furniStatic, furniGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx);
       itemLayer.group.traverse((o) => { o.renderOrder = 2; });
       initDirt();
-      for (const o of [root, furniStatic, furniGroup, deskGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx, dirtMesh]) if (o) freezeSelf(o);
+      for (const o of [root, furniStatic, furniGroup, itemLayer.group, boxLayer.group, tags.mesh, picks.group, picks.fx, dirtMesh]) if (o) freezeSelf(o);
       build = new BuildMode({
         ctx, root,
         bounds: () => bounds, storageUnlocked: () => ctx.state.storageUnlocked,

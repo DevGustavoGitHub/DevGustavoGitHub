@@ -550,9 +550,13 @@ export default function create(): GameModule {
         if (ph === 'prep' || ph === 'open') primary = U('sign', ph === 'prep' ? 'Abrir loja' : ctx.clock.doorsClosed ? 'Abrir a porta' : 'Fechar a porta (pausar clientes)', signAct);
         return;
       }
-      case 'computer':
+      case 'computer': {
         primary = U('pc', 'Usar computador', () => { emit('ui:openTablet', {}); act('useComputer'); });
+        // a mesa é um móvel (`desk`): MOVER/girar no modo de construção, como os outros móveis (não se vende)
+        const id = t.pick.id;
+        if (id != null && !carried.length) secondary = U('move', 'Mover', () => { emit('build:edit', { furnitureId: id }); act('move', { furnitureId: id }); });
         return;
+      }
       case 'tipjar':
         primary = D('tipjar', 'Pote de gorjeta');
         return;

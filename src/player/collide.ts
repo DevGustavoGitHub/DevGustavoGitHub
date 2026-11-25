@@ -12,7 +12,7 @@ export interface P2 { x: number; z: number }
 
 const WALL_T = 0.2;
 /** Altura aproximada de cada móvel (para o arremesso passar por cima de móveis baixos). */
-const FURN_H: Record<string, number> = { shelf: 1.9, fridge: 2.0, freezer: 0.95, counter: 1.05, rack: 2.1, decor: 1.2 };
+const FURN_H: Record<string, number> = { shelf: 1.9, fridge: 2.0, freezer: 0.95, counter: 1.05, rack: 2.1, decor: 1.2, desk: 1.15 };
 
 export const furnRect = (f: Furniture): { x0: number; z0: number; x1: number; z1: number } => {
   const fp = FURNITURE_FOOTPRINT[f.type];

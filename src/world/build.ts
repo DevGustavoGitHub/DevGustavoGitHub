@@ -40,8 +40,9 @@ const errMsg = (e: unknown): string => {
 };
 const NAMES: Record<FurnitureType, string> = {
   shelf: 'Prateleira', fridge: 'Geladeira', freezer: 'Freezer', counter: 'Caixa registradora', rack: 'Estante do depósito', decor: 'Decoração',
+  desk: 'Mesa do computador',
 };
-const FEM: Record<FurnitureType, boolean> = { shelf: true, fridge: true, freezer: false, counter: true, rack: true, decor: true };
+const FEM: Record<FurnitureType, boolean> = { shelf: true, fridge: true, freezer: false, counter: true, rack: true, decor: true, desk: true };
 /** Para onde foram as unidades expostas ao vender/guardar (diferença do depósito e das caixas novas na calçada). */
 interface Moves { storage: number; sidewalk: number; boxes: number }
 const stockSnap = (s: StoreState): { storage: Record<string, number>; n: number } => ({ storage: { ...s.storage }, n: s.sidewalk.length });
@@ -482,7 +483,7 @@ export class BuildMode {
     mk(r1, '⟳', 'wb-rot', 'Girar para a direita', () => this.rotate(1));
     wrap.appendChild(r1);
     const r2 = document.createElement('div'); r2.className = 'wb-row';
-    if (this.mode === 'edit') {
+    if (this.mode === 'edit' && this.type !== 'desk') { // a mesa do computador só se move (não se vende nem guarda)
       mk(r2, 'VENDER', 'wb-small wb-sell', 'Vender', () => this.sell());
       mk(r2, 'GUARDAR', 'wb-small wb-store', 'Guardar no estoque', () => this.store());
     }

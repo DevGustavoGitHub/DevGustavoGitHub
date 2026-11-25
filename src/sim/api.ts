@@ -11,7 +11,7 @@ import {
   addXp, buyBoxes, cashierCount, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
 } from './economy';
 import {
-  canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay,
+  canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay, ensureDesk as ensureDeskImpl,
   specOf, storageCapacity as storageCapacityImpl, storageUsed as storageUsedImpl, displayTypeFor, storagePassage,
 } from './furniture';
 import {
@@ -88,6 +88,7 @@ export function moveFurniture(state: StoreState, id: number, x: number, z: numbe
  */
 function removeFurniture(state: StoreState, id: number, rackMsg: string): Furniture {
   const f = furnitureById(state, id);
+  if (f.type === 'desk') throw new Error('A mesa do computador não pode ser vendida nem guardada. Use MOVER para mudar de lugar.');
   if (f.type === 'counter' && state.furniture.filter((x) => x.type === 'counter').length <= 1) {
     throw new Error('A loja precisa de pelo menos um caixa registradora');
   }
@@ -158,11 +159,15 @@ function clearReserved(state: StoreState): void {
     const f = state.furniture.find((x) => x.id === id);
     if (!f || (f.type === 'counter' && state.furniture.filter((x) => x.type === 'counter').length <= 1)) continue;
     state.furniture.splice(state.furniture.indexOf(f), 1);
+    if (f.type === 'desk') continue; // a mesa do computador não vai para o estoque: ensureDesk a recoloca abaixo
     for (const l of f.levels ?? []) if (l.productId !== undefined) returnUnits(state, l.productId, l.units);
     state.furnitureStock.push(f.variant !== undefined ? { type: f.type, variant: f.variant } : { type: f.type });
   }
+  ensureDeskImpl(state);
   reconcile(state);
 }
+/** Mesa do computador (móvel `desk`, única): cria se faltar, colada ao 1º balcão (ver furniture.ensureDesk). */
+export function ensureDesk(state: StoreState): Furniture | null { return ensureDeskImpl(state); }
 export function storageCost(): { cost: Cents; minLevel: number } { return { cost: STORAGE.cost, minLevel: STORAGE.minLevel }; }
 export function unlockStorage(state: StoreState): void {
   if (state.storageUnlocked) throw new Error('Depósito já desbloqueado');
@@ -547,6 +552,7 @@ export function restartAfterBankruptcy(state: StoreState): void {
   state.storageUnlocked = false;
   state.furniture = initialFurniture();
   state.nextFurnitureId = INITIAL_NEXT_FURNITURE_ID;
+  ensureDeskImpl(state); // a mesa do computador volta colada ao balcão do layout inicial
   state.furnitureStock = [];
   state.dirt = [];
   state.ledger = emptyLedger();

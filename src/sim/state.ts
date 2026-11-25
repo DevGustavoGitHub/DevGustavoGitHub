@@ -4,6 +4,7 @@ import type { FurnitureType } from '../core/layout';
 import type { DayReport } from './economy';
 import type { StockedFurniture } from './api';
 import { emptyLevels, syncShelf } from './levels';
+import { ensureDesk } from './furniture';
 import { rentFor } from './rent';
 import { INITIAL_SHELVES, START_MONEY } from './tuning';
 
@@ -209,6 +210,7 @@ export function newGame(seed = 1): StoreState {
     clock: { minute: OPEN_MIN, phase: 'prep' },
   };
   s.rent = rentFor(s);
+  ensureDesk(s); // mesa do computador colada à ponta do operador do balcão (id = INITIAL_NEXT_FURNITURE_ID)
   syncShelf(s);
   return s;
 }

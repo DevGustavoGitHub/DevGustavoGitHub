@@ -398,7 +398,7 @@ describe('QA sistemas — save corrompido', () => {
     const raw = mutate((r) => { r.furniture.push({ id: 50, type: 'sofa', x: 7, z: 2, rot: 0 }); r.nextFurnitureId = 51; });
     const st = load(kvOf(raw));
     expect(st).not.toBeNull();
-    expect(st!.furniture.map((f) => f.type).filter((t) => !['shelf', 'fridge', 'freezer', 'counter', 'rack', 'decor'].includes(t))).toEqual([]);
+    expect(st!.furniture.map((f) => f.type).filter((t) => !['shelf', 'fridge', 'freezer', 'counter', 'rack', 'decor', 'desk'].includes(t))).toEqual([]);
   });
   it('produto desconhecido no save (catálogo mudou) é removido de calçada/depósito/custo médio', () => {
     const v = run([

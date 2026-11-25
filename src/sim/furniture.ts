@@ -103,6 +103,42 @@ export function reservedTiles(state: StoreState, exceptId?: number): [number, nu
   return out;
 }
 
+/**
+ * Garante a mesa do computador (móvel `desk`, sempre exatamente uma): sem mesa, cria uma colada à ponta do operador do
+ * 1º balcão (lado direito, depois o esquerdo; mesma rotação do balcão); sem espaço ali, no 1º tile válido junto à
+ * vitrine/paredes. Mesas a mais são removidas. Devolve a mesa (ou null se não couber em lugar nenhum).
+ */
+export function ensureDesk(state: StoreState): Furniture | null {
+  const desks = state.furniture.filter((f) => f.type === 'desk');
+  if (desks.length > 1) state.furniture = state.furniture.filter((f) => f.type !== 'desk' || f === desks[0]);
+  if (desks[0]) return desks[0];
+  const add = (x: number, z: number, rot: Rot): Furniture | null => {
+    if (!canPlace(state, 'desk', x, z, rot)) return null;
+    const f: Furniture = { id: state.nextFurnitureId++, type: 'desk', x, z, rot };
+    state.furniture.push(f);
+    return f;
+  };
+  const c0 = state.furniture.find((f) => f.type === 'counter');
+  if (c0) {
+    const { w, d } = footprintOf('counter', c0.rot);
+    const cx = c0.x + w / 2, cz = c0.z + d / 2;
+    const t = (c0.rot * Math.PI) / 180, c = Math.round(Math.cos(t)), s = Math.round(Math.sin(t));
+    for (const [lx, lz] of [[1.5, -0.5], [-1.5, -0.5], [1.5, -1.5], [-1.5, -1.5], [1.5, 0.5], [-1.5, 0.5]] as const) {
+      const f = add(Math.floor(cx + lx * c + lz * s), Math.floor(cz - lx * s + lz * c), c0.rot);
+      if (f) return f;
+    }
+  }
+  const b = storeBounds(state.expansion);
+  for (let z = b.depth - 1; z >= 0; z--) {
+    for (let x = 0; x < b.width; x++) {
+      const rot: Rot = z === b.depth - 1 ? 180 : x === 0 ? 90 : x === b.width - 1 ? 270 : 0;
+      const f = add(x, z, rot);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+
 export function canPlace(state: StoreState, type: FurnitureType, x: number, z: number, rot: Rot, ignoreId?: number): boolean {
   if (!Number.isInteger(x) || !Number.isInteger(z)) return false;
   if (rot !== 0 && rot !== 90 && rot !== 180 && rot !== 270) return false;

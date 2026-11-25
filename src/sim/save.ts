@@ -2,7 +2,7 @@ import { FURNITURE_FOOTPRINT, MAX_EXPANSION, STORAGE_DEPTH, storeBounds, type Fu
 import type { StockedFurniture } from './api';
 import { LICENSES, PRODUCTS, productById } from './catalog';
 import { unitsOwned, xpForLevel } from './economy';
-import { footprintOf } from './furniture';
+import { ensureDesk, footprintOf } from './furniture';
 import { migrateLevels, returnUnits, stockProduct } from './levels';
 import { MARKET_MAX, MARKET_MIN, wholesale } from './market';
 import { roundPrice } from './money';
@@ -169,7 +169,8 @@ function sanitizeFurniture(s: StoreState, d: Raw, giveBack: [string, number][]):
       for (let i = 0; i < w; i++) for (let j = 0; j < dd; j++) tiles.push(tile(fx + i, fz + j));
       if (tiles.some((t) => occupied.has(t))) ok = false;
     }
-    if (!ok) { // sem lugar válido: volta para "Para montar"
+    if (!ok || (type === 'desk' && out.some((o) => o.type === 'desk'))) { // sem lugar válido: volta para "Para montar"
+      if (type === 'desk') continue; // a mesa do computador não vai para o estoque: deserialize a recoloca (ensureDesk)
       back();
       s.furnitureStock.push(variant !== undefined ? { type, variant } : { type });
       continue;
@@ -218,11 +219,12 @@ export function deserialize(raw: string): StoreState {
   // Fase 3: estoque de montagem (entradas inválidas descartadas)
   const phase3 = Array.isArray(data.furnitureStock);
   s.furnitureStock = (phase3 ? (data.furnitureStock as unknown[]) : []).flatMap((e): StockedFurniture[] => {
-    if (!isObj(e) || !isFurnitureType(e.type)) return [];
+    if (!isObj(e) || !isFurnitureType(e.type) || e.type === 'desk') return [];
     return [typeof e.variant === 'string' ? { type: e.type, variant: e.variant } : { type: e.type }];
   });
   const giveBack: [string, number][] = [];
   const legacyLevels = sanitizeFurniture(s, data, giveBack);
+  ensureDesk(s); // saves anteriores à mesa móvel (ou com a mesa inválida) ganham a mesa colada ao balcão
   const rent = toNum(data.rent);
   s.rent = !phase3 || rent === undefined || rent < 0 ? rentFor(s) : Math.round(rent);
   // Fase 4: níveis (fonte da verdade); shelf/slots são derivados (recalculados por migrateLevels)
