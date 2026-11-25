@@ -122,8 +122,17 @@ export function signKeyOf(pids: readonly (string | undefined)[]): string {
 }
 
 interface Slot { x: number; y: number; z: number; ry: number; s: number }
-/** Posições dos itens de UM nível: EXATAMENTE `slotCapacity` do produto (1 item por unidade), fileira da FRENTE primeiro
- *  (esquerda → direita), depois as de trás. Se a capacidade não cabe no nível, reduz a escala (mais colunas/fileiras). */
+/**
+ * Posições dos itens de UM nível: EXATAMENTE `slotCapacity` do produto (1 item por unidade), numa grade que ocupa a
+ * LARGURA TODA do nível quando ele está cheio (pós-teste: antes, com capacidade menor que o que cabe lado a lado, os
+ * itens ficavam colados à esquerda e sobrava um vão à direita mesmo com o nível cheio).
+ * - fileiras (profundidade) = o mínimo necessário: ceil(capacidade / colunas que cabem); colunas = ceil(cap / fileiras),
+ *   espalhadas por igual na largura;
+ * - preenchimento por COLUNA (esquerda → direita; em cada coluna, da frente para trás): o vão visto de frente é sempre
+ *   espaço livre de verdade;
+ * - prateleira/geladeira: fileiras coladas a partir da frente (um produto atrás do outro); freezer (visto de cima):
+ *   fileiras espalhadas na profundidade. Nunca empilha um produto sobre o outro. Se não cabe, reduz a escala.
+ */
 function levelSlotsOf(type: FurnitureType, n: number, i: number, pid: string): Slot[] {
   const L = levelGeoms(type, n)[i];
   if (!L) return [];
@@ -133,21 +142,22 @@ function levelSlotsOf(type: FurnitureType, n: number, i: number, pid: string): S
   let sc = Math.min(1, L.clear / Math.max(0.01, v.h));
   let cols = 1, rows = 1;
   for (let it = 0; it < 14; it++) {
-    cols = Math.max(1, Math.floor(L.w / (v.w * sc + 0.01)));
-    rows = Math.ceil(cap / cols);
+    const fitCols = Math.max(1, Math.floor(L.w / (v.w * sc + 0.01)));
+    rows = Math.ceil(cap / fitCols);
+    cols = Math.ceil(cap / rows);
     if (rows * (v.d * sc + 0.01) <= L.d || sc < 0.3) break;
     sc *= 0.92;
   }
-  const vh = v.h * sc;
-  void vh;
-  const px = L.w / cols, pz = L.d / rows;
+  const px = L.w / cols;
+  const pz = type === 'freezer' ? L.d / rows : Math.min(L.d / rows, v.d * sc + 0.012);
+  const front = L.z + L.d / 2;
   const out: Slot[] = [];
   for (let k = 0; k < cap; k++) {
-    const row = Math.floor(k / cols), col = k % cols;
+    const col = Math.floor(k / rows), row = k % rows;
     out.push({
       x: L.x - L.w / 2 + (col + 0.5) * px + (hash01(k, 1, i) - 0.5) * 0.008,
       y: L.floor,
-      z: L.z + L.d / 2 - (row + 0.5) * pz,
+      z: front - (row + 0.5) * pz,
       ry: (hash01(k, 2, i) - 0.5) * 0.2,
       s: sc,
     });
