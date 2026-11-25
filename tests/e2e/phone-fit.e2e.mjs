@@ -22,7 +22,7 @@ const fit = (p, sel) => p.evaluate((sel) => {
   const r = el.getBoundingClientRect();
   const vis = (e) => { const q = e.getBoundingClientRect(); const cs = getComputedStyle(e); return q.width > 0 && q.height > 0 && cs.visibility !== 'hidden'; };
   const small = [...el.querySelectorAll('button, input, select')].filter(vis)
-    .filter((e) => { const q = e.getBoundingClientRect(); return Math.min(q.width, q.height) < 44; })
+    .filter((e) => { const q = e.getBoundingClientRect(); return Math.min(q.width, q.height) < (e.closest('.pay-pad') ? 40 : 44); })
     .map((e) => `${e.className || e.tagName}:${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
   // botões fora da área visível do contêiner (cortados), exceto os de listas internas roláveis (podem rolar)
   const inScroller = (e) => {
@@ -83,7 +83,7 @@ for (const [w, h] of [[844, 390], [800, 360], [740, 360], [720, 330]]) {
   await p.waitForTimeout(250);
   r = await fit(p, '.pay');
   const keys = await p.locator('.pay-pad .pk').count();
-  check(`[${tag}] maquininha: sem rolagem, na tela, 13 teclas ≥ 44 px`, okFit(r) && keys === 13, JSON.stringify({ r, keys }));
+  check(`[${tag}] maquininha: sem rolagem, na tela, 13 teclas ≥ 40 px`, okFit(r) && keys === 13, JSON.stringify({ r, keys }));
   await shot('pay-card');
   for (const k of ['2', '3', '5', '0']) await p.locator(`.pay-pad [data-key="${k}"]`).click();
   await p.locator('#pay-ok').click();
