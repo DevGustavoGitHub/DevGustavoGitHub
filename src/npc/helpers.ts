@@ -1,4 +1,5 @@
 import { PRODUCTS } from '../sim/catalog';
+import { syncShelf } from '../sim/levels';
 import { FURNITURE_FOOTPRINT, storeBounds } from '../core/layout';
 import type { Furniture, StoreState } from '../sim/state';
 import * as api from '../sim/api';
@@ -125,6 +126,9 @@ export function stockForTest(state: StoreState, n: number, productId?: string): 
       sums[pid] = (sums[pid] ?? 0) + l.units;
     }
   }
+  // níveis com níveis (Fase 4): recalcula TODO o derivado (shelf + slots + f.productId); slots > 0 é o que põe o produto
+  // na lista de compras (makeShoppingList), então só somar shelf deixava os clientes sem nada para comprar
+  if (state.furniture.some((f) => f.levels && f.levels.length > 0)) safe('syncShelf', () => { syncShelf(state); return true; }, false);
   for (const pid of Object.keys(sums)) state.shelf[pid] = sums[pid]!;
   return total;
 }
