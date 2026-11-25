@@ -112,6 +112,37 @@ export class TipJars {
     p.sprite.position.set(x, y, z); p.mat.opacity = 1;
   }
 
+  private panelSprite: THREE.Sprite | null = null;
+  private panelC: HTMLCanvasElement | null = null;
+  private panelTex: THREE.CanvasTexture | null = null;
+  private panelVal = -1;
+  private panelJar: Jar | null = null;
+  /** Painel "Gorjetas do dia" sobre o pote do balcão `counterId` (null esconde). `cents` = state.ledger.tips. */
+  panel(counterId: number | null, cents: number): void {
+    const j = counterId === null ? null : this.jars.get(counterId) ?? null;
+    if (!j) { if (this.panelSprite) { this.panelSprite.visible = false; this.panelSprite.parent?.remove(this.panelSprite); } this.panelJar = null; return; }
+    if (!this.panelSprite) {
+      const c = document.createElement('canvas'); c.width = 320; c.height = 128;
+      this.panelC = c; this.panelTex = canvasTex(c); this.panelTex.anisotropy = 1;
+      this.panelSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.panelTex, transparent: true, depthTest: false, depthWrite: false }));
+      this.panelSprite.scale.set(0.4, 0.16, 1); this.panelSprite.renderOrder = 6; this.panelSprite.name = 'tipPanel';
+    }
+    if (this.panelJar !== j) { this.panelSprite.parent?.remove(this.panelSprite); j.group.add(this.panelSprite); this.panelJar = j; this.panelVal = -1; }
+    this.panelSprite.position.set(0, H + 0.2, 0); this.panelSprite.visible = true;
+    this.panelRefresh(cents);
+  }
+  panelRefresh(cents: number): void {
+    if (!this.panelSprite?.visible || cents === this.panelVal || !this.panelC) return;
+    this.panelVal = cents;
+    const g = this.panelC.getContext('2d')!, w = 320, h = 128;
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = 'rgba(20,38,52,0.88)'; g.beginPath(); g.roundRect(4, 4, w - 8, h - 8, 22); g.fill();
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '800 34px system-ui, Arial, sans-serif'; g.fillStyle = '#4cff7a'; g.fillText('Gorjetas do dia', w / 2, 40);
+    g.font = '900 52px system-ui, Arial, sans-serif'; g.fillStyle = '#e6edf3'; g.fillText(money(cents), w / 2, 90);
+    this.panelTex!.needsUpdate = true;
+  }
+
   update(dt: number): void {
     for (const p of this.pops) {
       if (!p.sprite.visible) continue;
@@ -125,6 +156,7 @@ export class TipJars {
 
   dispose(): void {
     this.sync(false, new Map());
+    this.panelSprite?.parent?.remove(this.panelSprite); this.panelTex?.dispose(); (this.panelSprite?.material as THREE.Material | undefined)?.dispose();
     for (const p of this.pops) { p.sprite.parent?.remove(p.sprite); p.tex.dispose(); p.mat.dispose(); }
     for (const o of [this.glassGeo, this.baseGeo, this.lidGeo, this.coinGeo, this.labelGeo, this.glassMat, this.lidMat, this.coinMat, this.labelTex, this.labelMat]) o.dispose();
   }

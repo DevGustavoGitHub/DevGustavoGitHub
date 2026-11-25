@@ -27,7 +27,7 @@ import { hash01, localToWorld, makeCanvas, canvasTex, clearGroup, freezeSelf } f
 import { Picks } from './pick';
 import { CheckoutScreens, type Display } from './screens';
 import { PriceTags } from './tags';
-import { TipJars } from './tipjar';
+import { TipJars, JAR } from './tipjar';
 
 /** Autoteste dos visuais genéricos (qualquer shape/cor/categoria, inclusive desconhecidos, gera geometria válida). */
 function genericProductsSelfTest(): { ok: boolean; combos: number; bad: string[]; catalog: number } {
@@ -374,7 +374,7 @@ export default function create(): GameModule {
     picksDirty = true;
   }
 
-  /** Balcão do computador: 1º tile livre junto à parede (frente: ao lado da antessala da porta; depois laterais). */
+  /** Balcão do computador: canto esquerdo da frente; senão o 1º tile livre junto à parede (ao lado da antessala da porta; depois laterais). */
   function placeDesk(v: View): void {
     const W = bounds.width, D = bounds.depth, dx = doorX(bounds);
     const occ = occupied(v);
@@ -390,7 +390,8 @@ export default function create(): GameModule {
       for (const [lx, lz] of near) { const w = localToWorld(cx, cz, f.rot, lx, lz); reserved.add(`${Math.floor(w.x)},${Math.floor(w.z)}`); }
     }
     const free = (x: number, z: number): boolean => x >= 0 && x < W && z >= 0 && z < D && !occ.has(`${x},${z}`) && !reserved.has(`${x},${z}`);
-    const cands: { tx: number; tz: number; wall: 'front' | 'left' | 'right' }[] = [];
+    // 1ª escolha: canto ESQUERDO da frente (junto à vitrine, à esquerda da porta, longe do balcão do caixa)
+    const cands: { tx: number; tz: number; wall: 'front' | 'left' | 'right' }[] = [{ tx: 0, tz: D - 1, wall: 'front' }];
     for (let k = 0; k < W; k++) {
       const left = dx - 2 - k, right = dx + 1 + k;
       if (left >= 0) cands.push({ tx: left, tz: D - 1, wall: 'front' });
@@ -483,6 +484,8 @@ export default function create(): GameModule {
   const T = (x: number, y: number, z: number, ry = 0): THREE.Matrix4 => M.compose(P.set(x, y, z), Q.setFromAxisAngle(UP, ry), ONE);
   const BOX_CLOSED: SBox[] = [[0, BOX_H / 2, 0, BOX_W, BOX_H, BOX_D]];
   const BOX_OPEN: SBox[] = [[0, BOX_H / 2, 0, BOX_W, BOX_H, BOX_D], [0, BOX_H + 0.07, 0, BOX_W + 0.16, 0.14, BOX_D + 0.16]];
+  const M3 = new THREE.Matrix4();
+  const JAR_SIL: SBox[] = [[0, 0.1, 0, 0.19, 0.24, 0.19]];
   const DIRT_SIL: SBox[] = [[0, 0.04, 0, 0.62, 0.08, 0.62]];
   function rebuildPicks(v: View): void {
     picksDirty = false;
@@ -491,6 +494,7 @@ export default function create(): GameModule {
       if (f.id === hiddenId) continue;
       furnitureMatrix(f, M2);
       picks.add({ kind: 'furniture', id: f.id }, silhouetteOf(f), M2);
+      if (f.type === 'counter' && ctx.state.upgrades.includes('tipjar')) picks.add({ kind: 'tipjar', id: f.id }, JAR_SIL, M3.copy(M2).multiply(M.makeTranslation(JAR.x, JAR.y, JAR.z)));
       if (f.type === 'counter' && chairs.has(f.id)) picks.add({ kind: 'seat', id: f.id }, chairSilhouette(), M2.multiply(M.makeTranslation(SEAT.x, 0, SEAT.z)));
     }
     for (const b of boxLayout) picks.add({ kind: 'box', id: b.index }, b.open ? BOX_OPEN : BOX_CLOSED, T(b.x, b.y, b.z, b.ry));
@@ -608,7 +612,7 @@ export default function create(): GameModule {
     group: root,
     /* ---- Fase 3 ---- */
     get pickGroup() { return picks.group; },
-    highlight: (p) => picks.highlight(p),
+    highlight: (p) => { picks.highlight(p); tipJars.panel(p?.kind === 'tipjar' && p.id != null ? p.id : null, ctx.state.ledger.tips); },
     seatPose: (id) => {
       const f = counterById(id);
       if (!f) return null;
@@ -814,7 +818,7 @@ export default function create(): GameModule {
       }
       shop.setOpenSign(ctx.clock.phase === 'open');
       shop.update(dt, near, env.night);
-      tipJars.update(dt);
+      tipJars.update(dt); tipJars.panelRefresh(ctx.state.ledger.tips);
       const TE = pnow();
       env.update(dt);
       if (prof.on) prof.env += performance.now() - TE;

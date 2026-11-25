@@ -20,7 +20,7 @@ import {
   productCapacity, recordLostCustomer, repayLoan, restartAfterBankruptcy, returnToShelf, takeFromShelf, takeLoan,
   upgradeCatalog, type DayReport,
 } from './api';
-import { findSpot, investMorning, reserve, restock as botRestock, setMarketPrices, type BotMemory } from './bot';
+import { findSpot, investMorning, labelStarterShelves, reserve, restock as botRestock, setMarketPrices, type BotMemory } from './bot';
 import { LICENSES, PRODUCTS } from './catalog';
 import { buyLicense } from './economy';
 import { customerCashPayment, optimalChange } from './money';
@@ -460,6 +460,7 @@ export function newHumanRun(seed: number, prof: HumanProfile, startMoney?: numbe
 /** Joga um dia: investe (manhã), precifica, abastece sem relógio, expediente com ritmo humano, fecha o dia. */
 export function playHumanDay(run: HumanRun): HumanDayStats {
   const { state: s, prof } = run;
+  labelStarterShelves(s);
   if (prof.bank) useBank(s);
   if (prof.invest === 'bot') investMorning(s, run.mem);
   else if (prof.invest === 'careful') investCareful(s);

@@ -553,6 +553,9 @@ export default function create(): GameModule {
       case 'computer':
         primary = U('pc', 'Usar computador', () => { emit('ui:openTablet', {}); act('useComputer'); });
         return;
+      case 'tipjar':
+        primary = D('tipjar', 'Pote de gorjeta');
+        return;
       case 'seat':
         if (t.pick.id != null) primary = seatAct(t.pick.id);
         return;

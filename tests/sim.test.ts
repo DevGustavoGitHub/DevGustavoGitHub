@@ -1,3 +1,4 @@
+import { starterGame } from './helpers';
 import { describe, expect, it } from 'vitest';
 import { DENOMS, DRAWER_DENOMS, MAX_PAY_STEP, customerCashPayment, isChangeCorrect, optimalChange, roundPrice } from '../src/sim/money';
 import { makeRng } from '../src/sim/rng';
@@ -5,7 +6,7 @@ import { buyProbability } from '../src/sim/demand';
 import { advanceMarket, MARKET_MAX, MARKET_MIN } from '../src/sim/market';
 import { autoRestock, buyBoxes, endDay, putOnShelf, setPrice, simulateOpenDay, xpForLevel } from '../src/sim/economy';
 import { load, save, type KV } from '../src/sim/save';
-import { newGame } from '../src/sim/state';
+
 import { PRODUCTS } from '../src/sim/catalog';
 
 describe('troco', () => {
@@ -59,7 +60,7 @@ describe('troco', () => {
 
 describe('mercado', () => {
   it('multiplicadores ficam dentro dos limites por 2000 dias', () => {
-    const s = newGame(5);
+    const s = starterGame(5);
     const r = makeRng(9);
     for (let d = 0; d < 2000; d++) {
       advanceMarket(s, r);
@@ -81,7 +82,7 @@ describe('mercado', () => {
 
 describe('economia', () => {
   it('compra exige licença e dinheiro; custo médio é ponderado', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(() => buyBoxes(s, 'leite', 1)).toThrow();
     expect(() => buyBoxes(s, 'arroz', 2)).toThrow('Dinheiro insuficiente'); // R$ 150 no início
     s.money = 100_000;
@@ -91,7 +92,7 @@ describe('economia', () => {
     expect(s.costBasis.arroz!.units).toBe(12);
   });
   it('prateleira respeita capacidade e caixas esvaziadas somem', () => {
-    const s = newGame();
+    const s = starterGame();
     s.money = 100_000;
     buyBoxes(s, 'feijao', 5); // 60 un, capacidade 4 níveis * 12 = 48
     expect(putOnShelf(s, 'feijao')).toBe(48);
@@ -101,7 +102,7 @@ describe('economia', () => {
   });
   it('balanceamento: preço justo dá lucro; preço abusivo (+60%) rende bem menos', () => {
     const run = (mult: number) => {
-      const s = newGame(11);
+      const s = starterGame(11);
       let profit = 0;
       for (let d = 0; d < 30; d++) {
         for (const p of PRODUCTS) if (s.licenses.includes(p.category)) setPrice(s, p.id, 1);
@@ -131,7 +132,7 @@ describe('save', () => {
   it('round-trip preserva o estado', () => {
     const mem = new Map<string, string>();
     const kv: KV = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) };
-    const s = newGame(42);
+    const s = starterGame(42);
     buyBoxes(s, 'feijao', 2);
     putOnShelf(s, 'feijao');
     save(kv, s);

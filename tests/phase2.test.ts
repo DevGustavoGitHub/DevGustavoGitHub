@@ -10,13 +10,13 @@ import { XP_BASE, XP_EXP, addXp, xpForLevel } from '../src/sim/economy';
 import { keepTiles } from '../src/sim/furniture';
 import { newBot, playDay } from '../src/sim/bot';
 import { deserialize, serialize } from '../src/sim/save';
-import { newGame, type StoreState } from '../src/sim/state';
+import { type StoreState } from '../src/sim/state';
 import { BANKRUPTCY, EMPLOYEE_TABLE, UPGRADES } from '../src/sim/tuning';
 import { storeBounds } from '../src/core/layout';
-import { expose } from './helpers';
+import { expose, starterGame } from './helpers';
 
 const at = (level: number, money = 100_000_000): StoreState => {
-  const s = newGame(7);
+  const s = starterGame(7);
   s.level = level;
   s.xp = xpForLevel(level);
   s.levelAck = level;
@@ -74,7 +74,7 @@ describe('empréstimo', () => {
 
 describe('falência', () => {
   it('loja saudável ou com crédito disponível não está falida', () => {
-    expect(isBankrupt(newGame())).toBe(false);
+    expect(isBankrupt(starterGame())).toBe(false);
     const s = at(10, -100000); // negativo, mas dá para cobrir com crédito
     expect(isBankrupt(s)).toBe(false);
   });
@@ -96,7 +96,7 @@ describe('falência', () => {
     expect(isBankrupt(s)).toBe(true);
   });
   it('é alcançável (preço abusivo, sem investir) e recuperável (recomeço guiado volta a lucrar)', { timeout: 60000 }, () => {
-    const s = newGame(5);
+    const s = starterGame(5);
     const bot = newBot({ priceMult: 3, invest: false, restocks: 1 });
     let days = 0;
     while (!isBankrupt(s) && days < 400) { playDay(s, bot); days++; }
@@ -113,7 +113,7 @@ describe('falência', () => {
     restartAfterBankruptcy(s);
     expect(isBankrupt(s)).toBe(false);
     expect(s.money).toBe(BANKRUPTCY.restartMoney);
-    expect(s.money).toBeLessThanOrEqual(3 * newGame().money); // capital pequeno, como no começo
+    expect(s.money).toBeLessThanOrEqual(3 * starterGame().money); // capital pequeno, como no começo
     expect(s.furnitureStock).toEqual([]);
     expect(s.loan).toBe(0);
     expect(s.level).toBe(level);
@@ -241,7 +241,7 @@ describe('histórico e produtos mais vendidos', () => {
     completeSale(s, [{ productId: id, qty }], 0.5, 4);
   };
   it('closeDay guarda até 30 relatórios (os mais recentes)', () => {
-    const s = newGame(2);
+    const s = starterGame(2);
     for (let i = 0; i < 40; i++) closeDay(s);
     const h = dayHistory(s);
     expect(h).toHaveLength(30);
@@ -269,7 +269,7 @@ describe('histórico e produtos mais vendidos', () => {
     expect(topProducts(s, 30).length).toBe(3);
   });
   it('stats ficam limitados a 30 dias e o save continua pequeno', { timeout: 60000 }, () => {
-    const s = newGame(3);
+    const s = starterGame(3);
     const bot = newBot();
     for (let i = 0; i < 45; i++) playDay(s, bot);
     expect(s.stats.length).toBeLessThanOrEqual(30);
@@ -280,7 +280,7 @@ describe('histórico e produtos mais vendidos', () => {
 
 describe('save: migração e persistência', () => {
   it('save antigo (sem campos da fase 2) carrega com defaults e novos produtos', () => {
-    const old = JSON.parse(serialize(newGame(9))) as Record<string, unknown>;
+    const old = JSON.parse(serialize(starterGame(9))) as Record<string, unknown>;
     for (const k of ['loan', 'autoOrders', 'upgrades', 'history', 'stats', 'bankruptcies']) delete old[k];
     const market = old.market as Record<string, number>;
     for (const p of PRODUCTS.filter((x) => x.category === 'hortifruti')) delete market[p.id];
@@ -308,7 +308,7 @@ describe('save: migração e persistência', () => {
     expect(deserialize(serialize(s))).toEqual(s);
   });
   it('save corrompido nos campos novos é saneado', () => {
-    const raw = JSON.parse(serialize(newGame())) as Record<string, unknown>;
+    const raw = JSON.parse(serialize(starterGame())) as Record<string, unknown>;
     Object.assign(raw, { loan: 'x', autoOrders: [], upgrades: 5, history: null, stats: {} });
     const s = deserialize(JSON.stringify(raw));
     expect(s.loan).toBe(0);
@@ -372,8 +372,8 @@ describe('conteúdo de fim de jogo', () => {
     for (const d of decorCatalog()) levels.add(d.minLevel);
     for (const role of Object.keys(EMPLOYEE_TABLE) as (keyof typeof EMPLOYEE_TABLE)[]) for (const l of EMPLOYEE_TABLE[role].minLevel) levels.add(l);
     levels.add(storageCost().minLevel);
-    for (const u of upgradeCatalog(newGame())) levels.add(u.minLevel);
-    const s = newGame();
+    for (const u of upgradeCatalog(starterGame())) levels.add(u.minLevel);
+    const s = starterGame();
     const exp: number[] = [];
     for (let i = 0; i < 6; i++) { exp.push(expansionMinLevel(s)!); s.expansion++; }
     exp.forEach((l) => levels.add(l));
@@ -393,7 +393,7 @@ describe('conteúdo de fim de jogo', () => {
     expect(xpForLevel(15)).toBe(Math.round(XP_BASE * Math.pow(14, XP_EXP)));
     expect(xpForLevel(30)).toBeGreaterThan(Math.round(XP_BASE * Math.pow(29, XP_EXP)) * 1.5);
     for (let n = 2; n < 60; n++) expect(xpForLevel(n + 1)).toBeGreaterThan(xpForLevel(n));
-    const s = newGame();
+    const s = starterGame();
     addXp(s, xpForLevel(30));
     expect(s.level).toBe(30);
   });
@@ -441,6 +441,6 @@ describe('decoração e expansões novas', () => {
     expect(storeBounds(s.expansion)).toEqual({ width: 36, depth: 22 });
   });
   it('contratar nível alto de repositor continua exigindo nível', () => {
-    expect(employeeCost(newGame(), 'stocker')!.minLevel).toBe(8);
+    expect(employeeCost(starterGame(), 'stocker')!.minLevel).toBe(8);
   });
 });

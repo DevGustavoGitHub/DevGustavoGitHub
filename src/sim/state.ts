@@ -150,15 +150,14 @@ export type SavedDayPhase = 'prep' | 'open' | 'closing' | 'report';
 export interface SavedClock { minute: number; phase: SavedDayPhase }
 
 /**
- * Layout inicial (Fase 3, como no original): o balcão e 2 prateleiras de mercearia barata já atribuídas (feijão e
- * macarrão) no fundo do salão 12x10. Sobra lugar para mais 2 prateleiras na mesma fileira (x = 7 e 10, z = 2).
- * Fase 4: os 4 níveis de cada prateleira começam com a etiqueta do produto e 0 unidades.
+ * Layout inicial (Fase 3, como no original): o balcão e 2 prateleiras vazias, SEM produto no fundo do salão 12x10. Sobra lugar para mais 2 prateleiras na mesma fileira (x = 7 e 10, z = 2).
+ * Os 4 níveis de cada prateleira começam sem etiqueta e 0 unidades.
  */
 export function initialFurniture(): Furniture[] {
   return [
     { id: 1, type: 'counter', x: 8, z: 6, rot: 0 },
-    ...INITIAL_SHELVES.map((productId, i): Furniture => ({
-      id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, productId, levels: emptyLevels('shelf', productId),
+    ...INITIAL_SHELVES.map((_, i): Furniture => ({
+      id: 2 + i, type: 'shelf', x: 1 + 3 * i, z: 2, rot: 0, levels: emptyLevels('shelf'),
     })),
   ];
 }

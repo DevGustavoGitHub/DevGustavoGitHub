@@ -9,13 +9,13 @@ import { LICENSES, PRODUCTS } from '../src/sim/catalog';
 import { xpForLevel } from '../src/sim/economy';
 import { rentFor } from '../src/sim/rent';
 import { deserialize, serialize } from '../src/sim/save';
-import { DEFAULT_DECOR, newGame, type StoreState } from '../src/sim/state';
+import { DEFAULT_DECOR, type StoreState } from '../src/sim/state';
 import { RECYCLE_REWARD, RENT, START_MONEY, UPGRADES } from '../src/sim/tuning';
 import { SIDEWALK_DEPTH, storeBounds } from '../src/core/layout';
-import { expose } from './helpers';
+import { expose, starterGame } from './helpers';
 
 const at = (level: number, money = 100_000_000): StoreState => {
-  const s = newGame(7);
+  const s = starterGame(7);
   s.level = level;
   s.xp = xpForLevel(level);
   s.levelAck = level;
@@ -218,7 +218,7 @@ describe('capacidade, melhorias e móvel exigido', () => {
     expect(customerCapacity(s)).toBe(6 + 2 * 6 + UPGRADES.capacity.extra);
   });
   it('catálogo de melhorias em ordem de nível: pote de gorjeta (2), capacidade (4), carrinho (6)', () => {
-    const cat = upgradeCatalog(newGame());
+    const cat = upgradeCatalog(starterGame());
     expect(cat.map((u) => [u.id, u.minLevel])).toEqual([['tipjar', 2], ['capacity', 4], ['recycler', 5], ['dolly', 6]]);
     for (const u of cat) expect(u.cost).toBeGreaterThan(0);
     expect(() => buyUpgrade(at(1), 'tipjar')).toThrow('Requer nível 2');
@@ -272,7 +272,7 @@ describe('clientes felizes e irritados no relatório', () => {
 
 describe('economia de início e liberações por nível (Fase 3)', () => {
   it('dinheiro inicial (QA economia: R$ 250): dá para 3 caixas dos produtos mais baratos, não 4', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(s.money).toBe(START_MONEY);
     expect(START_MONEY).toBe(25000);
     const cheapest = PRODUCTS.filter((p) => s.licenses.includes(p.category)).map((p) => boxCost(s, p.id)).sort((a, b) => a - b);
@@ -294,7 +294,7 @@ describe('economia de início e liberações por nível (Fase 3)', () => {
     expect(rentFor({ expansion: 0, level: 6, day: 1 })).toBe(full);
     expect(rentFor({ expansion: 0, level: 1, day: 8 })).toBe(full);
     expect(rentFor({ expansion: 2, level: 9, day: 30 })).toBe(full + 2 * RENT.perExpansion);
-    const s = newGame();
+    const s = starterGame();
     const rents: number[] = [];
     for (let d = 0; d < 9; d++) rents.push(closeDay(s).rent!);
     expect(rents).toEqual([0, 0, 0, 0, 0, third, twoThirds, full, full]);
@@ -309,7 +309,7 @@ describe('economia de início e liberações por nível (Fase 3)', () => {
     expect(lic.mercearia).toBe(1);
     expect(lic.bebidas).toBe(2); // 2ª licença no nível 2
     expect(furnitureCatalog().find((f) => f.type === 'fridge')!.minLevel).toBeLessThanOrEqual(2); // e o móvel dela
-    const s = newGame();
+    const s = starterGame();
     expect(employeeCost(s, 'cashier')!.minLevel).toBe(4);
     expect(employeeCost(s, 'janitor')!.minLevel).toBe(6);
     expect(employeeCost(s, 'stocker')!.minLevel).toBe(8);
@@ -319,7 +319,7 @@ describe('economia de início e liberações por nível (Fase 3)', () => {
     expect(exp.slice(0, 4)).toEqual([3, 5, 6, 7]);
   });
   it('paleta padrão (paredes azul-claro, piso de madeira quente, letreiro vermelho); saves mantêm a escolha', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(s.decor).toEqual(DEFAULT_DECOR);
     const rgb = (h: string): number[] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const [wr, wg, wb] = rgb(s.decor.wallColor);
@@ -353,7 +353,7 @@ describe('save: migração para a Fase 3', () => {
     expect(m.decor.wallColor).toBe('#f2e8d5'); // escolha do jogador mantida
   });
   it('estoque de montagem corrompido é saneado; round-trip preserva estoque, aluguel e contadores', () => {
-    const raw = JSON.parse(serialize(newGame())) as Record<string, unknown>;
+    const raw = JSON.parse(serialize(starterGame())) as Record<string, unknown>;
     raw.furnitureStock = [{ type: 'shelf' }, { type: 'sofa' }, null, 5, { type: 'decor', variant: 'tree' }, { type: 'fridge', variant: 7 }];
     const s = deserialize(JSON.stringify(raw));
     expect(s.furnitureStock).toEqual([{ type: 'shelf' }, { type: 'decor', variant: 'tree' }, { type: 'fridge' }]);
@@ -392,7 +392,7 @@ describe('lixeira de reciclagem', () => {
     expect(s.ledger.recycled).toBe(0);
   });
   it('save sem os campos migra para 0', () => {
-    const raw = JSON.parse(serialize(newGame())) as { ledger: Record<string, unknown> };
+    const raw = JSON.parse(serialize(starterGame())) as { ledger: Record<string, unknown> };
     delete raw.ledger.recycled; delete raw.ledger.recycleIncome;
     const s = deserialize(JSON.stringify(raw));
     expect(s.ledger.recycled).toBe(0);

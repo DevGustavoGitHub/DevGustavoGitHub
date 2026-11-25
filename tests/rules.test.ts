@@ -1,3 +1,4 @@
+import { newGame } from '../src/sim/state';
 import { describe, expect, it } from 'vitest';
 import {
   acceptsPrice, addDirt, arrivalSchedule, assignProduct, basketTotal, buyExpansion, buyFurniture, canPlace, cleanDirt, closeDay,
@@ -10,12 +11,12 @@ import { PRODUCTS } from '../src/sim/catalog';
 import { addXp, checkoutCapacity, xpForLevel } from '../src/sim/economy';
 import { storeBounds } from '../src/core/layout';
 import { deserialize, serialize } from '../src/sim/save';
-import { newGame, type StoreState } from '../src/sim/state';
+import { type StoreState } from '../src/sim/state';
 import { recomputeSlots } from '../src/sim/levels';
-import { expose } from './helpers';
+import { expose, starterGame } from './helpers';
 
 const rich = (level = 12): StoreState => {
-  const s = newGame(5);
+  const s = starterGame(5);
   s.money = 100_000_000;
   s.level = level;
   s.xp = xpForLevel(level);
@@ -24,8 +25,15 @@ const rich = (level = 12): StoreState => {
 };
 
 describe('layout inicial e capacidade', () => {
-  it('1 caixa + 2 prateleiras de mercearia barata atribuídas, todas em posições válidas, com espaço livre', () => {
+  it('jogo novo: prateleiras iniciais sem nenhum produto (níveis livres, 0 unidades)', () => {
     const s = newGame();
+    const shelves = s.furniture.filter((f) => f.type === 'shelf');
+    expect(shelves).toHaveLength(2);
+    for (const f of shelves) { expect(f.productId).toBeUndefined(); expect((f.levels ?? []).every((l) => l.productId === undefined && l.units === 0)).toBe(true); }
+    expect(Object.values(s.slots).every((n) => n === 0)).toBe(true);
+  });
+  it('1 caixa + 2 prateleiras de mercearia barata atribuídas, todas em posições válidas, com espaço livre', () => {
+    const s = starterGame();
     expect(s.furniture.filter((f) => f.type === 'counter')).toHaveLength(1);
     const shelves = s.furniture.filter((f) => f.type === 'shelf');
     expect(shelves.map((f) => f.productId).sort()).toEqual(['feijao', 'macarrao']);
@@ -35,7 +43,7 @@ describe('layout inicial e capacidade', () => {
     expect(s.nextFurnitureId).toBeGreaterThan(Math.max(...s.furniture.map((f) => f.id)));
   });
   it('state.slots == recomputo a partir dos móveis; capacidade = níveis etiquetados × slotCapacity', () => {
-    const s = newGame();
+    const s = starterGame();
     const copy = { ...s.slots };
     recomputeSlots(s);
     expect(s.slots).toEqual(copy);
@@ -56,7 +64,7 @@ describe('layout inicial e capacidade', () => {
 });
 
 describe('canPlace', () => {
-  const s = newGame();
+  const s = starterGame();
   it('limites do salão e rotação', () => {
     expect(canPlace(s, 'shelf', -1, 5, 0)).toBe(false);
     expect(canPlace(s, 'shelf', 11, 5, 0)).toBe(false); // 2 de largura estoura
@@ -92,7 +100,7 @@ describe('canPlace', () => {
     expect(canPlace(r, 'decor', 1, -3, 0)).toBe(true);
   });
   it('não pode isolar móvel (todos precisam de acesso alcançável)', () => {
-    const t = newGame();
+    const t = starterGame();
     // cerca o canto: shelf (1,2) 2x1 -> vizinhos (0,2),(3,2),(1,1),(2,1),(1,3),(2,3)
     const ring: [number, number][] = [[0, 2], [3, 2], [1, 1], [2, 1], [1, 3]];
     for (const [x, z] of ring) t.furniture.push({ id: t.nextFurnitureId++, type: 'decor', x, z, rot: 0 });
@@ -120,7 +128,7 @@ describe('canPlace', () => {
 
 describe('comprar, atribuir e vender móveis', () => {
   it('exige nível, dinheiro e posição válida', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(() => buyFurniture(s, 'fridge', 8, 4, 0)).toThrow('Requer nível 2');
     s.level = 3;
     s.money = 100;
@@ -202,11 +210,11 @@ describe('expansão, depósito, funcionários, personalização', () => {
     expect(expansionCost(s)).toBeNull();
     expect(expansionMinLevel(s)).toBeNull();
     expect(() => buyExpansion(s)).toThrow();
-    const low = newGame();
+    const low = starterGame();
     expect(() => buyExpansion(low)).toThrow('Requer nível');
   });
   it('depósito: nível, capacidade, estantes, caixas', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(() => unlockStorage(s)).toThrow('Requer nível');
     expect(() => storeBox(s, 0)).toThrow();
     const r = rich();
@@ -263,14 +271,14 @@ describe('expansão, depósito, funcionários, personalização', () => {
     expect(rep0.wages).toBe(28000);
   });
   it('contratar exige nível e dinheiro', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(() => hireOrUpgrade(s, 'stocker')).toThrow('Requer nível');
     s.level = 20;
     s.money = 10;
     expect(() => hireOrUpgrade(s, 'stocker')).toThrow('Dinheiro insuficiente');
   });
   it('personalização', () => {
-    const s = newGame();
+    const s = starterGame();
     const m = s.money;
     setStoreName(s, '  Mercado   do Zé ');
     expect(s.storeName).toBe('Mercado do Zé');
@@ -287,7 +295,7 @@ describe('expansão, depósito, funcionários, personalização', () => {
 
 describe('caixas e estoque físico', () => {
   it('pedir, repor, descartar', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(() => orderBoxes(s, 'feijao', 4)).toThrow('Dinheiro insuficiente'); // início pobre: R$ 250 (QA economia) não paga 4 caixas
     s.money = 1_000_000;
     const cost = orderBoxes(s, 'feijao', 3);
@@ -325,7 +333,7 @@ describe('caixas e estoque físico', () => {
 describe('clientes e vendas', () => {
   const rng = (seed: number) => { let a = seed; return () => (a = (a * 1664525 + 1013904223) % 4294967296) / 4294967296; };
   it('lista de compras: só licenciados e expostos, produtos distintos, quantidades pequenas', () => {
-    const s = newGame();
+    const s = starterGame();
     const r = rng(1);
     const seen = new Set<string>();
     for (let i = 0; i < 300; i++) {
@@ -354,7 +362,7 @@ describe('clientes e vendas', () => {
     expect(count.arroz!).toBeGreaterThan(count.sorvete!);
   });
   it('acceptsPrice reflete a curva', () => {
-    const s = newGame();
+    const s = starterGame();
     const r = rng(3);
     const base = priceInfo(s, 'arroz').market;
     s.prices.arroz = base;
@@ -368,7 +376,7 @@ describe('clientes e vendas', () => {
     expect(ratio).toBeCloseTo(1.6, 1);
   });
   it('takeFromShelf / returnToShelf / basketTotal', () => {
-    const s = newGame();
+    const s = starterGame();
     expose(s, 'feijao', 3);
     expect(takeFromShelf(s, 'feijao', 5)).toBe(3);
     expect(s.shelf.feijao).toBe(0);
@@ -382,7 +390,7 @@ describe('clientes e vendas', () => {
     expect(basketTotal(s, [{ productId: 'arroz', qty: 2 }, { productId: 'feijao', qty: 1 }])).toBe(2 * p + priceInfo(s, 'feijao').sell);
   });
   it('completeSale: receita, COGS pelo custo médio, XP, gorjeta limitada, reputação', () => {
-    const s = newGame();
+    const s = starterGame();
     orderBoxes(s, 'feijao', 1);
     placeUnits(s, 0, 12);
     const avg = s.costBasis.feijao!.avg;
@@ -408,7 +416,7 @@ describe('clientes e vendas', () => {
     expect(() => completeSale(s, [{ productId: 'feijao', qty: 0 }], 1, 5)).toThrow();
   });
   it('recordLostCustomer e reputação ficam em 1..5', () => {
-    const s = newGame();
+    const s = starterGame();
     for (let i = 0; i < 500; i++) recordLostCustomer(s, 1);
     expect(s.ledger.lost).toBe(500);
     expect(s.ledger.angry).toBe(500);
@@ -418,13 +426,13 @@ describe('clientes e vendas', () => {
     expect(s.reputation).toBeLessThanOrEqual(5);
   });
   it('sujeira: cap de 12 e efeito pequeno na reputação', () => {
-    const s = newGame();
+    const s = starterGame();
     for (let i = 0; i < 20; i++) addDirt(s, i, 1);
     expect(s.dirt).toHaveLength(12);
     cleanDirt(s, 99);
     cleanDirt(s, -1);
     expect(s.dirt).toHaveLength(12);
-    const clean = newGame();
+    const clean = starterGame();
     for (let i = 0; i < 40; i++) { recordLostCustomer(s, 4); recordLostCustomer(clean, 4); }
     expect(s.reputation).toBeLessThan(clean.reputation);
     expect(clean.reputation - s.reputation).toBeLessThan(0.5);
@@ -432,7 +440,7 @@ describe('clientes e vendas', () => {
     expect(s.dirt).toHaveLength(0);
   });
   it('consumeLevelUps devolve cada nível uma única vez', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(consumeLevelUps(s)).toEqual([]);
     addXp(s, xpForLevel(4));
     expect(consumeLevelUps(s)).toEqual([2, 3, 4]);
@@ -442,26 +450,26 @@ describe('clientes e vendas', () => {
 
 describe('dia', () => {
   it('plannedArrivals é determinístico e cresce com nível, reputação, preço baixo e tamanho', () => {
-    const s = newGame(9);
+    const s = starterGame(9);
     expect(plannedArrivals(s)).toBe(plannedArrivals(s));
     const base = plannedArrivals(s);
-    const hi = newGame(9);
+    const hi = starterGame(9);
     hi.level = 10;
     expect(plannedArrivals(hi)).toBeGreaterThan(base);
-    const rep = newGame(9);
+    const rep = starterGame(9);
     rep.reputation = 5;
     expect(plannedArrivals(rep)).toBeGreaterThan(base);
-    const big = newGame(9);
+    const big = starterGame(9);
     big.expansion = 2;
     expect(plannedArrivals(big)).toBeGreaterThan(base);
-    const cheap = newGame(9);
+    const cheap = starterGame(9);
     for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) cheap.prices[id] = Math.round((priceInfo(cheap, id).market * 0.7) / 5) * 5;
-    const dear = newGame(9);
+    const dear = starterGame(9);
     for (const id of ['arroz', 'feijao', 'macarrao', 'cafe']) dear.prices[id] = Math.round((priceInfo(dear, id).market * 1.5) / 5) * 5;
     expect(plannedArrivals(cheap)).toBeGreaterThan(plannedArrivals(dear));
   });
   it('arrivalSchedule: mesmo tamanho, ordenado, dentro do expediente', () => {
-    const s = newGame(4);
+    const s = starterGame(4);
     const t = arrivalSchedule(s);
     expect(t).toHaveLength(plannedArrivals(s));
     expect([...t].sort((a, b) => a - b)).toEqual(t);
@@ -469,7 +477,7 @@ describe('dia', () => {
     expect(t.at(-1)!).toBeLessThanOrEqual(21 * 60 - 30);
   });
   it('closeDay: cobra o aluguel do dia (grátis no começo) + salários, avança dia, zera ledger', () => {
-    const s = newGame();
+    const s = starterGame();
     expect(s.rent).toBe(0);
     const m = s.money;
     const day = s.day;
@@ -489,7 +497,7 @@ describe('dia', () => {
     expect(s.money).toBe(m2 - rent);
   });
   it('priceInfo: custo = custo médio do estoque quando existe', () => {
-    const s = newGame();
+    const s = starterGame();
     const w = priceInfo(s, 'arroz');
     expect(w.cost).toBe(w.wholesale);
     expect(w.market).toBeGreaterThan(w.wholesale);
@@ -511,7 +519,7 @@ describe('save', () => {
     expect(deserialize(serialize(s))).toEqual(s);
   });
   it('migra save antigo (sem móveis, sem levelAck) e recalcula slots', () => {
-    const old = JSON.parse(serialize(newGame(7))) as Record<string, unknown>;
+    const old = JSON.parse(serialize(starterGame(7))) as Record<string, unknown>;
     delete old.levelAck;
     delete old.furniture;
     delete old.nextFurnitureId;
@@ -524,12 +532,11 @@ describe('save', () => {
     expect(s.furniture.some((f) => f.type === 'counter')).toBe(true);
     expect(s.levelAck).toBe(5);
     expect(consumeLevelUps(s)).toEqual([]);
-    expect(productCapacity(s, 'feijao')).toBe(48);
-    expect(s.slots.feijao).toBe(4);
-    expect(s.slots.arroz).toBe(0);
-    expect(s.shelf.feijao).toBe(10);
-    expect(s.shelf.arroz).toBe(0);
-    expect(s.sidewalk).toEqual([{ productId: 'arroz', units: 3, open: false }]);
+    // o layout inicial agora não tem produto: todo o estoque exposto do save antigo volta em caixas
+    expect(productCapacity(s, 'feijao')).toBe(0);
+    expect(s.shelf.feijao ?? 0).toBe(0);
+    expect(s.shelf.arroz ?? 0).toBe(0);
+    expect(s.sidewalk).toEqual(expect.arrayContaining([{ productId: 'arroz', units: 3, open: false }, { productId: 'feijao', units: 10, open: false }]));
     expect(s.decor.wallColor).toBeTruthy();
     expect(s.nextFurnitureId).toBeGreaterThan(3);
   });

@@ -2,7 +2,8 @@
 import { expect } from 'vitest';
 import { furnitureForProduct, productCapacity } from '../src/sim/api';
 import { emptyLevels, stockProduct } from '../src/sim/levels';
-import type { StoreState } from '../src/sim/state';
+import { newGame, type StoreState } from '../src/sim/state';
+import { labelStarterShelves } from '../src/sim/bot';
 
 /**
  * Expõe `n` unidades do produto sem caixas (substitui o antigo `s.shelf[id] += n`, que na Fase 4 é derivado dos
@@ -19,4 +20,11 @@ export function expose(s: StoreState, id: string, n: number): void {
 /** Soma das unidades nos níveis de todos os móveis (fonte da verdade do estoque exposto). */
 export function levelUnits(s: StoreState, id: string): number {
   return s.furniture.reduce((a, f) => a + (f.levels ?? []).reduce((b, l) => b + (l.productId === id ? l.units : 0), 0), 0);
+}
+
+/** Jogo novo com as 2 prateleiras iniciais etiquetadas (feijão e macarrão): o jogo novo agora começa sem produto. */
+export function starterGame(seed?: number): StoreState {
+  const s = newGame(seed);
+  labelStarterShelves(s);
+  return s;
 }

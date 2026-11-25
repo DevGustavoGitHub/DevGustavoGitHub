@@ -14,7 +14,8 @@ import type { Cents } from './money';
 /** Dinheiro inicial: dá para 3 caixas dos produtos mais baratos (4 não cabem), ~70% da procura do dia 1. */
 export const START_MONEY: Cents = 25000;
 /** Produtos das 2 prateleiras iniciais (os 2 mais baratos por caixa da mercearia). */
-export const INITIAL_SHELVES: readonly string[] = ['feijao', 'macarrao'];
+/** Prateleiras iniciais (sem produto: os níveis começam sem etiqueta). */
+export const INITIAL_SHELVES: readonly string[] = ['', ''];
 
 /**
  * Aluguel diário = base + porExpansão × expansão, cobrado em closeDay. Começa no nível `startLevel` OU no dia `startDay`

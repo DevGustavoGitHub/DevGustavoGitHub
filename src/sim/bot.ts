@@ -6,7 +6,7 @@
  * Usado por tests/balance.test.ts e para calibrar docs/GDD.md §4.
  */
 import {
-  acceptsPrice, addDirt, arrivalSchedule, buyExpansion, buyUpgrade, canPlace, checkoutCart, cleanDirt, closeDay,
+  acceptsPrice, addDirt, assignProduct, arrivalSchedule, buyExpansion, buyUpgrade, canPlace, checkoutCart, cleanDirt, closeDay,
   completeSale, discardBox, employeeCost, expansionCost, expansionMinLevel, furnitureCatalog, furnitureForProduct, furnitureStock,
   hireOrUpgrade, loanInfo, makeShoppingList, orderBoxes, placeFromStock, placeUnits, priceInfo, productCapacity, recordLostCustomer,
   storageCapacity, storageCost, storageUsed, storeBox, takeFromShelf, takeFromStorage, unlockStorage, upgradeCatalog, wagesPerDay,
@@ -18,7 +18,7 @@ import { STORAGE_DEPTH, storeBounds } from '../core/layout';
 import { marketAverage } from './market';
 import { roundPrice } from './money';
 import { makeRng } from './rng';
-import type { StoreState } from './state';
+import { INITIAL_NEXT_FURNITURE_ID, type StoreState } from './state';
 import type { FurnitureType } from '../core/layout';
 
 export interface BotOptions {
@@ -63,6 +63,20 @@ export function setMarketPrices(state: StoreState, mult: number): void {
   for (const p of PRODUCTS) if (state.licenses.includes(p.category)) state.prices[p.id] = roundPrice(marketAverage(state, p.id) * mult);
 }
 
+/**
+ * O jogo novo começa SEM produto nas prateleiras iniciais; o bot (que simula um jogador) etiqueta as sem produto com os
+ * dois itens mais baratos da mercearia (feijão, macarrão), como o layout antigo fazia.
+ */
+export function labelStarterShelves(state: StoreState): void {
+  for (const f of state.furniture) {
+    if (f.type !== 'shelf' || f.id >= INITIAL_NEXT_FURNITURE_ID) continue;
+    if ((f.levels ?? []).some((l) => l.productId !== undefined || l.units > 0)) continue;
+    const used = (id: string): boolean => state.furniture.some((g) => (g.levels ?? []).some((l) => l.productId === id));
+    const pid = ['feijao', 'macarrao'].find((id) => !used(id));
+    if (pid) assignProduct(state, f.id, pid);
+  }
+}
+
 const unitsOnFloor = (state: StoreState, productId: string): number =>
   state.sidewalk.reduce((a, b) => (b.productId === productId && !b.carried ? a + b.units : a), 0);
 
@@ -72,6 +86,7 @@ const unitsOnFloor = (state: StoreState, productId: string): number =>
  * Caixas vazias vão para a lixeira; sobras vão ao depósito (se houver espaço) ou ficam na calçada.
  */
 export function restock(state: StoreState): void {
+  labelStarterShelves(state);
   const items = BY_POPULARITY.filter((p) => state.licenses.includes(p.category) && productCapacity(state, p.id) > 0);
   const need = (id: string): number => productCapacity(state, id) - (state.shelf[id] ?? 0) - unitsOnFloor(state, id);
   for (const p of items) while (need(p.id) > 0 && (state.storage[p.id] ?? 0) > 0) takeFromStorage(state, p.id, false);
@@ -212,6 +227,7 @@ export const newBot = (opts: Partial<BotOptions> = {}): Bot => ({
 /** Joga um dia completo (investe, precifica, repõe, atende todos os clientes previstos, fecha o dia). */
 export function playDay(state: StoreState, bot: Bot): DayStats {
   const { opts } = bot;
+  labelStarterShelves(state);
   if (opts.invest) investMorning(state, bot.mem);
   setMarketPrices(state, opts.priceMult);
   restock(state);

@@ -9,14 +9,14 @@ import { buyProbability } from '../src/sim/demand';
 import { unitsOwned, xpForLevel } from '../src/sim/economy';
 import { makeRng } from '../src/sim/rng';
 import { deserialize, serialize } from '../src/sim/save';
-import { newGame, type Furniture, type StoreState } from '../src/sim/state';
-import { levelUnits } from './helpers';
+import { type Furniture, type StoreState } from '../src/sim/state';
+import { levelUnits, starterGame } from './helpers';
 import { canPlace, moveFurniture, runAutoOrders, setAutoOrder } from '../src/sim/api';
 import { load, save, SAVE_KEY, SAVE_RECOVERED_KEY, type KV } from '../src/sim/save';
 import { CLOSE_MIN, OPEN_MIN } from '../src/sim/state';
 
 const rich = (level = 12): StoreState => {
-  const s = newGame(4);
+  const s = starterGame(4);
   s.money = 100_000_000;
   s.level = level;
   s.xp = xpForLevel(level);
@@ -63,7 +63,7 @@ describe('Fase 4 — modelo de níveis', () => {
   });
 
   it('BUG do teste no celular: feijão na prateleira do macarrão não duplica, não trava e dá para reorganizar', () => {
-    const s = newGame(1);
+    const s = starterGame(1);
     s.money = 100_000;
     const fe = shelfOf(s, 'feijao');
     const mac = shelfOf(s, 'macarrao');
@@ -194,7 +194,7 @@ describe('Fase 4 — modelo de níveis', () => {
   });
 
   it('migração: save da Fase 3 (um produto por móvel + estoque somado) distribui o estoque pelos níveis', () => {
-    const raw = JSON.parse(serialize(newGame(6))) as Record<string, unknown>;
+    const raw = JSON.parse(serialize(starterGame(6))) as Record<string, unknown>;
     const furniture = raw.furniture as Record<string, unknown>[];
     for (const f of furniture) delete f.levels;
     furniture.push({ id: 4, type: 'shelf', x: 7, z: 2, rot: 0, productId: 'feijao' });
@@ -220,7 +220,7 @@ describe('Fase 4 — modelo de níveis', () => {
   });
 
   it('save com níveis inválidos é saneado (etiqueta recusada/desconhecida, excesso, tamanho errado)', () => {
-    const raw = JSON.parse(serialize(newGame(6))) as Record<string, unknown>;
+    const raw = JSON.parse(serialize(starterGame(6))) as Record<string, unknown>;
     const fe = (raw.furniture as Record<string, unknown>[]).find((f) => f.productId === 'feijao')!;
     fe.levels = [{ productId: 'refri', units: 5 }, { productId: 'feijao', units: 30 }, null, { productId: 'xyz', units: 2 }, { units: 4 }];
     const s = deserialize(JSON.stringify(raw));
@@ -232,7 +232,7 @@ describe('Fase 4 — modelo de níveis', () => {
 
 describe('Fase 4 — preço sugerido e curva de aceitação', () => {
   it('preço sugerido = média de mercado (×1,00)', () => {
-    const s = newGame(3);
+    const s = starterGame(3);
     s.market.arroz = 1.3;
     s.market.cafe = 0.8;
     for (const p of PRODUCTS) expect(suggestedPrice(s, p.id)).toBe(priceInfo(s, p.id).market);
@@ -246,7 +246,7 @@ describe('Fase 4 — preço sugerido e curva de aceitação', () => {
     expect(buyProbability(1.6)).toBeLessThan(0.03);
     expect(buyProbability(2)).toBeLessThan(0.001);
     expect(buyProbability(0.8)).toBeGreaterThan(0.98);
-    const s = newGame(3);
+    const s = starterGame(3);
     const r = makeRng(5);
     s.prices.arroz = suggestedPrice(s, 'arroz');
     let ok = 0;
@@ -261,7 +261,7 @@ describe('Fase 4 — correções do QA (save, relógio, cestas, operador do caix
     return { data, getItem: (k) => data[k] ?? null, setItem: (k, v) => { data[k] = v; } };
   };
   it('hora/fase do dia persistem; ausente ou inválida = preparação às 08:00', () => {
-    const s = newGame(2);
+    const s = starterGame(2);
     expect(s.clock).toEqual({ minute: OPEN_MIN, phase: 'prep' });
     s.clock = { minute: 700.5, phase: 'open' };
     expect(deserialize(serialize(s)).clock).toEqual({ minute: 700.5, phase: 'open' });
@@ -286,7 +286,7 @@ describe('Fase 4 — correções do QA (save, relógio, cestas, operador do caix
     expect(t.shelf.feijao).toBe(12);
     expect(t.costBasis.feijao).toEqual(s.costBasis.feijao);
     checkDerived(t);
-    const u = deserialize(serialize(newGame(2)));
+    const u = deserialize(serialize(starterGame(2)));
     expect(u.npcHeld).toBeUndefined();
   });
   it('o tile do operador de cada balcão (cadeira do caixa) fica livre e alcançável: comprar, montar, mover', () => {
@@ -319,7 +319,7 @@ describe('Fase 4 — correções do QA (save, relógio, cestas, operador do caix
     expect(kv.data[rec.key]).toBe('{"version":1,"money":');
     expect(load(kv)).toBeNull();
     expect(Object.keys(kv.data).filter((k) => k.includes(':corrupt-'))).toHaveLength(1); // não duplica
-    save(kv, newGame(1));
+    save(kv, starterGame(1));
     expect(kv.data[rec.key]).toBe('{"version":1,"money":');
     expect(load(kvOf())).toBeNull(); // sem save: nada de backup
   });

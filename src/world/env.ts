@@ -57,7 +57,7 @@ function decal(b: Batch, cell: Cell, w: number, h: number, x: number, y: number,
 export const TRASH_SILHOUETTE: [number, number, number, number, number, number][] = [[0, 0.55, 0, 0.82, 0.95, 0.84], [0, 1.12, -0.12, 0.86, 0.22, 0.66]];
 
 /** Silhueta (caixas locais) da lixeira de reciclagem. */
-export const RECYCLE_SILHOUETTE: [number, number, number, number, number, number][] = [[0, 0.5, 0, 0.74, 1.05, 0.68]];
+export const RECYCLE_SILHOUETTE: [number, number, number, number, number, number][] = [[0, 0.58, 0, 0.78, 1.16, 0.66]];
 
 export class Env {
   readonly group = new THREE.Group();
@@ -200,19 +200,22 @@ export class Env {
     for (const x of [-4.5, W / 2 + 4, W + 4.5]) post(x, D + 2.7, 1, true);
     for (const x of [-9, W / 2 - 2.5, W + 9]) post(x, farZ0 + 0.5, -1, false);
     const lampMesh = new THREE.Mesh(tr.geo(lamps.build().get('matte')!), this.lampMat); g.add(lampMesh);
-    // lixeira verde de reciclagem (encostada na fachada, fora da área de entregas)
+    // lixeira verde de reciclagem (só existe depois da melhoria 'recycler'; grupo próprio, escondido por padrão)
     const rx = 0.42, rz = D + 0.42;
-    sb.box(0.66, 0.95, 0.6, ['matte', 0x2f8f4e], rx, 0.02, rz);
-    sb.box(0.72, 0.1, 0.66, ['matte', 0x1f6b39], rx, 0.97, rz);
-    sb.box(0.4, 0.06, 0.02, ['matte', 0x123d22], rx, 0.78, rz + 0.305);
-    decal(sb, DECAL.recycle(), 0.3, 0.3, rx, 0.5, rz + 0.306);
+    const rb = new Batch(), RG: Spec = ['matte', 0x2f9a52], RD: Spec = ['matte', 0x1f7a3b], DK: Spec = ['matte', 0x17301f];
+    const BH = 1.0, FEET = 0.07;
+    rb.box(0.46, BH, 0.6, RG, rx, FEET, rz); rb.box(0.74, BH, 0.32, RG, rx, FEET, rz);
+    for (const dx of [-0.23, 0.23]) for (const dz of [-0.16, 0.16]) rb.add(new THREE.CylinderGeometry(0.14, 0.14, BH, 12).translate(0, BH / 2, 0), RG, rx + dx, FEET, rz + dz);
+    rb.add(new THREE.CylinderGeometry(0.15, 0.15, 0.08, 12).translate(0, 0.04, 0), RD, rx - 0.23, FEET + BH, rz - 0.16);
+    rb.box(0.74, 0.07, 0.62, RD, rx, FEET + BH, rz);                    // tampa
+    rb.box(0.5, 0.02, 0.26, DK, rx, FEET + BH + 0.07, rz + 0.04);        // painel/abertura escura em cima
+    rb.box(0.4, 0.14, 0.03, DK, rx, 0.78, rz + 0.325);                   // abertura frontal escura
+    for (const dx of [-0.26, 0.26]) for (const dz of [-0.2, 0.2]) rb.box(0.1, FEET, 0.1, DK, rx + dx - 0.05, 0, rz + dz - 0.05); // pezinhos
+    decal(rb, DECAL.recycle(), 0.36, 0.36, rx, 0.45, rz + 0.33);
+    this.recyclerGlow = new THREE.Group(); this.recyclerGlow.name = 'recycleBin';
+    for (const m of meshesOf(rb.build(), this.recyclerGlow, { cast: false })) tr.geo(m.geometry);
+    this.recyclerGlow.visible = this.recyclerOn; g.add(this.recyclerGlow);
     block(rx, rz);
-    // "ativada" (melhoria comprada): tampa verde brilhante + faixa luminosa na frente
-    const glowMat = stdMat(0x57ff8a, { emissive: 0x2dff6a, ei: 1.1 });
-    this.recyclerGlow = new THREE.Group();
-    const lidG = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(0.74, 0.04, 0.68)), glowMat); lidG.position.set(rx, 1.07, rz);
-    const stripG = new THREE.Mesh(tr.geo(new THREE.BoxGeometry(0.5, 0.05, 0.02)), glowMat); stripG.position.set(rx, 0.9, rz + 0.31);
-    this.recyclerGlow.add(lidG, stripG); this.recyclerGlow.visible = this.recyclerOn; g.add(this.recyclerGlow);
     // caçamba cinza (lixeira do jogo): corpo, tampa entreaberta, papelão saindo, rodas, pictograma
     const tb = trashBinPos(b);
     const gray: Spec = ['matte', 0x6b7380];
