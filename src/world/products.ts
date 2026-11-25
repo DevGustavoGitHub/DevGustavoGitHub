@@ -5,9 +5,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { productById, type Product } from '../sim/catalog';
-import { boxGeo, cylGeo, sphGeo, stdMat, planeGeo } from './kit';
+import { boxGeo, cylGeo, sphGeo, planeGeo } from './kit';
 import { Batch, type Spec } from './batch';
-import { labelCell, labelMaterial, uvToCell, uvToWhite, whiteCell } from './atlas';
+import { labelCell, labelMaterial, productLabelCell, productMaterial, productWhite, uvToCell, uvToWhite, whiteCell } from './atlas';
+import { labelSpec } from './labels';
 import { productColorOf, productShapeOf, type Shape } from './look';
 
 export { CATEGORY_COLOR, categoryColor } from './look';
@@ -28,6 +29,7 @@ function part(geo: THREE.BufferGeometry, color: number, x: number, y: number, z:
   const arr = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
   g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  uvToWhite(g, productWhite()); // corpo = só cor de vértice (célula branca do atlas)
   return g;
 }
 const merge = (parts: THREE.BufferGeometry[]): THREE.BufferGeometry => {
@@ -161,22 +163,40 @@ export function genericVisual(p: Pick<Product, 'color' | 'shape' | 'category'>):
   }
 }
 
+/** Rótulo (nome + pictograma) na frente do produto: plano ou faixa cilíndrica com UVs do atlas único. */
+function withLabel(pid: string, v: ProductVisual): ProductVisual {
+  const s = labelSpec(pid);
+  if (!s) return v;
+  let g: THREE.BufferGeometry;
+  if (s.k === 'flat') g = planeGeo(s.w, s.h).clone().translate(0, s.y, s.z);
+  else {
+    const th = s.w / ((s.rt + s.rb) / 2);
+    g = new THREE.CylinderGeometry(s.rt, s.rb, s.h, 16, 1, true, -th / 2, th).translate(0, s.y, 0);
+  }
+  const n = g.getAttribute('position').count, col = new Float32Array(n * 3).fill(1);
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  uvToCell(g, productLabelCell(pid));
+  const geo = mergeGeometries([v.geo, g], false)!;
+  v.geo.dispose(); g.dispose();
+  return { ...v, geo };
+}
+
 const cache = new Map<string, ProductVisual>();
 export function productVisual(id: string): ProductVisual {
   let v = cache.get(id);
   if (!v) {
     const hand = builders[id];
-    if (hand) v = hand();
+    if (hand) v = withLabel(id, hand());
     else {
       let p: Product | null = null;
       try { p = productById(id); } catch { /* id desconhecido */ }
-      v = p ? genericVisual(p) : genericVisual({ category: '?' as Product['category'], shape: 'box', color: '#aaaaaa' });
+      v = p ? withLabel(id, genericVisual(p)) : genericVisual({ category: '?' as Product['category'], shape: 'box', color: '#aaaaaa' });
     }
     cache.set(id, v);
   }
   return v;
 }
-export const productMat = (): THREE.MeshStandardMaterial => stdMat(0xffffff, { vertexColors: true, rough: 0.55 });
+export const productMat = (): THREE.MeshStandardMaterial => productMaterial();
 
 /* ---------- camada global de itens expostos (prateleiras, geladeiras e caixas abertas): 1 InstancedMesh por produto ---------- */
 export function pushMatrix(arr: number[], m: THREE.Matrix4): void { const e = m.elements; for (let i = 0; i < 16; i++) arr.push(e[i]!); }

@@ -9,10 +9,11 @@ import type { Furniture } from '../sim/state';
 import { PRODUCTS } from '../sim/catalog';
 import { canvasTex } from './kit';
 import { categoryColor, css } from './look';
+import { drawIcon, shortName } from './labels';
 import { levelGeoms } from './furniture';
 import { footprintOf } from './nav';
 
-const COLS = 6, CW = 1024, CELL_H = 64, TW = 0.2, TH = 0.075;
+const COLS = 4, CW = 1024, CELL_H = 96, TW = 0.25, TH = 0.094;
 const cellW = Math.floor(CW / COLS);
 const KEYS = ['-', ...PRODUCTS.flatMap((p) => [p.id, `${p.id}|-`])];
 const ROWS = Math.ceil(KEYS.length / COLS);
@@ -52,16 +53,37 @@ export class PriceTags {
     const pid = key === '-' ? undefined : key.split('|')[0];
     const g = this.g, x = (i % COLS) * cellW, y = Math.floor(i / COLS) * CELL_H, w = cellW, h = CELL_H;
     g.clearRect(x, y, w, h);
-    g.fillStyle = '#ffd84d'; g.fillRect(x + 2, y + 2, w - 4, h - 4);
-    g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x + 2, y + h - 8, w - 4, 6);
-    g.fillStyle = pid ? css(categoryColor(pid)) : '#9aa3ad';
-    g.beginPath(); g.arc(x + 26, y + h / 2 - 1, 14, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 2; g.stroke();
+    g.fillStyle = '#ffe600'; g.fillRect(x + 2, y + 2, w - 4, h - 4);
+    g.fillStyle = '#e0b800'; g.fillRect(x + 2, y + h - 10, w - 4, 8);
+    g.strokeStyle = '#1d2128'; g.lineWidth = 4; g.strokeRect(x + 4, y + 4, w - 8, h - 8);
+    let tx = x + 12, tw = w - 24;
+    if (pid) {
+      const t = h - 22, ty = y + 11;
+      g.fillStyle = css(categoryColor(pid)); g.fillRect(x + 11, ty, t, t);
+      g.strokeStyle = '#1d2128'; g.lineWidth = 3; g.strokeRect(x + 11, ty, t, t);
+      g.fillStyle = 'rgba(255,255,255,0.93)'; g.beginPath(); g.arc(x + 11 + t / 2, ty + t / 2, t * 0.45, 0, Math.PI * 2); g.fill();
+      drawIcon(g, pid, x + 11 + t / 2, ty + t / 2, t * 0.38);
+      tx = x + t + 22; tw = w - t - 34;
+    }
     g.fillStyle = '#1d2128'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    const text = price === null ? '--' : brl(price);
-    let s = 34;
-    do { g.font = `900 ${s}px system-ui, Arial, sans-serif`; s -= 2; } while (g.measureText(text).width > w - 58 && s > 10);
-    g.fillText(text, x + 26 + (w - 26) / 2 + 6, y + h / 2);
+    const cx = tx + tw / 2;
+    if (pid) {
+      const nm = shortName(pid);
+      let s = 22; do { g.font = `800 ${s}px system-ui, Arial, sans-serif`; s -= 2; } while (g.measureText(nm).width > tw && s > 10);
+      g.fillText(nm, cx, y + 21);
+    }
+    const py = y + (pid ? h * 0.66 : h / 2);
+    if (price === null) {
+      g.font = '900 54px system-ui, Arial, sans-serif'; g.fillText('--', cx, py);
+    } else {
+      const num = (price / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      let s = 56;
+      do { g.font = `900 ${s}px system-ui, Arial, sans-serif`; const n = g.measureText(num).width; g.font = `900 ${Math.round(s * 0.45)}px system-ui, Arial, sans-serif`; if (n + g.measureText('R$ ').width <= tw) break; s -= 2; } while (s > 14);
+      g.font = `900 ${Math.round(s * 0.45)}px system-ui, Arial, sans-serif`; const rw = g.measureText('R$ ').width;
+      g.font = `900 ${s}px system-ui, Arial, sans-serif`; const nw = g.measureText(num).width, x0 = cx - (rw + nw) / 2;
+      g.textAlign = 'left'; g.fillText(num, x0 + rw, py);
+      g.font = `900 ${Math.round(s * 0.45)}px system-ui, Arial, sans-serif`; g.fillText('R$', x0, py - s * 0.14);
+    }
     this.tex.needsUpdate = true;
   }
   /** Redesenha as células de preço que mudaram. `price(pid)` em centavos. */

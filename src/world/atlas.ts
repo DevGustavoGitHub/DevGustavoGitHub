@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { LICENSES, PRODUCTS, productById } from '../sim/catalog';
 import { makeCanvas, canvasTex } from './kit';
 import { categoryColor, categoryColorOf, css } from './look';
+import { LABEL_CELL_H, LABEL_CELL_W, drawLabel, labelFrac } from './labels';
 
 export interface Cell { u0: number; v0: number; du: number; dv: number }
 
@@ -101,4 +102,19 @@ export const labelCell = (pid: string): Cell => labelAtlas().cell(pid);
 export const whiteCell = (): Cell => labelAtlas().white;
 export function labelMaterial(): THREE.MeshStandardMaterial {
   return labelMat ??= new THREE.MeshStandardMaterial({ map: labelAtlas().tex, vertexColors: true, roughness: 0.85 });
+}
+
+/* ---- rótulos dos produtos (nome + pictograma): UM atlas 2048 px para todos os produtos ---- */
+let prod: Atlas | null = null;
+let prodMat: THREE.MeshStandardMaterial | null = null;
+const prodAtlas = (): Atlas => prod ??= new Atlas(PRODUCTS.map((p) => p.id), 8, LABEL_CELL_W, LABEL_CELL_H, (g, pid, w, h) => drawLabel(g, pid, w, h));
+/** Sub-retângulo UV do rótulo de `pid` (proporção própria dentro da célula; canto superior esquerdo). */
+export function productLabelCell(pid: string): Cell {
+  const c = prodAtlas().cell(pid), { fw, fh } = labelFrac(pid);
+  return { u0: c.u0, v0: c.v0 + c.dv * (1 - fh), du: c.du * fw, dv: c.dv * fh };
+}
+export const productWhite = (): Cell => prodAtlas().white;
+/** Material único (atlas + cor de vértice) de todos os produtos expostos/instanciados. */
+export function productMaterial(): THREE.MeshStandardMaterial {
+  return prodMat ??= new THREE.MeshStandardMaterial({ map: prodAtlas().tex, vertexColors: true, roughness: 0.55 });
 }
