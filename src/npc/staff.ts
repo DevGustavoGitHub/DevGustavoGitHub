@@ -5,6 +5,7 @@ import { STORAGE_DEPTH, recycleBinPos, storeBounds } from '../core/layout';
 import type { Lane } from './checkout';
 import { Agent } from './agent';
 import { furnitureFor, furnitureWithRoom, shelfRoom, stockLevelsHere } from './helpers';
+import { productById } from '../sim/catalog';
 import { Person, staffSpec } from './model';
 import { type Env, dist2, safe } from './shared';
 
@@ -69,7 +70,7 @@ export class Cashier extends Staff {
   }
 }
 
-type SJob = 'idle' | 'toBox' | 'lift' | 'toShelf' | 'open' | 'place' | 'toTrash' | 'toss' | 'toStorage' | 'takeStorage';
+type SJob = 'idle' | 'toBox' | 'lift' | 'toShelf' | 'open' | 'place' | 'toTrash' | 'toss' | 'toStorage' | 'takeStorage' | 'toStoreRoom' | 'storeDrop';
 
 /**
  * Repositor: numa viagem recolhe até `cap` caixas (nível 1: 1, nível 2-3: 2, nível 4+: 3) de produtos diferentes
@@ -91,7 +92,37 @@ export class Stocker extends Staff {
   private storeCool = 0;
   private furnId = -1;
   private storePids: string[] = [];
+  /** Pós-teste 3: caixas nas mãos a GUARDAR no depósito (sobra da reposição ou caixas da calçada). */
+  private toStore: Box[] = [];
+  /** A viagem atual é só para levar caixas da calçada ao depósito. */
+  private storeTrip = false;
   constructor(env: Env) { super(env, 'stocker'); }
+
+  /** Cabe no depósito (liberado, com espaço contando as caixas que já estão nas mãos para guardar)? */
+  private canStore(b: Box): boolean {
+    const { state } = this.env.ctx;
+    if (!state.storageUnlocked || b.units <= 0) return false;
+    const bs = safe('productById', () => productById(b.productId).boxSize, 0);
+    if (!bs) return false;
+    const stored = state.storage[b.productId] ?? 0;
+    const extra = Math.ceil((stored + b.units) / bs) - Math.ceil(stored / bs);
+    const free = safe('storageCapacity', () => api.storageCapacity(state), 0) - safe('storageUsed', () => api.storageUsed(state), 0);
+    return extra <= free - this.toStore.length;
+  }
+
+  /** Leva as caixas de `toStore` até o depósito (sem caminho: larga onde está). */
+  private goStoreRoom(): void {
+    const sp = this.storagePoint();
+    if (!this.env.world().findPath({ x: this.x, z: this.z }, sp)) {
+      for (const b of this.toStore) this.release(b);
+      this.toStore.length = 0; this.storeTrip = false; this.storeCool = 15;
+      this.finishTrip();
+      return;
+    }
+    this.person.setCarryBox(true); this.boxVisual(this.toStore[0], false); this.setPose('carry');
+    this.moveTo(sp.x, sp.z);
+    this.job = 'toStoreRoom';
+  }
 
   private get cap(): number { return this.level >= 4 ? 3 : this.level >= 2 ? 2 : 1; }
 
@@ -139,6 +170,20 @@ export class Stocker extends Staff {
         if (!p) { this.storeCool = 15; return; }
         this.storePids = pids.slice(0, this.cap);
         this.job = 'toStorage'; this.moveTo(sp.x, sp.z);
+        return;
+      }
+    }
+    // pós-teste 3: nada para repor → guarda no depósito as caixas que estão na CALÇADA (fora da loja)
+    if (state.storageUnlocked && this.storeCool <= 0) {
+      const D = storeBounds(state.expansion).depth;
+      const out = state.sidewalk.filter((b) => !b.carried && b.units > 0 && b !== player?.carrying && (b.z === undefined || b.z > D - 0.1) && this.canStore(b));
+      if (out.length > 0) {
+        const near = (b: Box): number => dist2(this.x, this.z, b.x ?? door.x, b.z ?? door.z + 1);
+        out.sort((a, b) => near(a) - near(b));
+        this.plan.length = 0;
+        for (const b of out) { if (this.plan.length >= this.cap) break; this.plan.push(b); }
+        this.storeTrip = true;
+        this.job = 'toBox'; this.walkToBox(this.plan[0]!);
       }
     }
   }
@@ -167,11 +212,12 @@ export class Stocker extends Staff {
     this.cooldown -= dt; this.storeCool -= dt;
     const { state } = this.env.ctx;
     if (this.job !== 'idle') {
-      this.prune(this.plan, true); this.prune(this.stack, false); this.prune(this.junk, false);
+      this.prune(this.plan, true); this.prune(this.stack, false); this.prune(this.junk, false); this.prune(this.toStore, false);
       if ((this.job === 'toBox' || this.job === 'lift') && this.plan.length === 0) {
         // alvo sumiu (jogador pegou): segue com o que já está nas mãos ou volta ao posto
         this.stop();
-        if (this.stack.length > 0) this.nextShelf(); else if (this.junk.length > 0) this.finishTrip(); else { this.job = 'idle'; this.cooldown = 1; this.person.setCarryBox(false); this.setPose('normal'); }
+        if (this.storeTrip && this.stack.length > 0) { this.toStore.push(...this.stack); this.stack.length = 0; this.goStoreRoom(); }
+        else if (this.stack.length > 0) this.nextShelf(); else if (this.junk.length > 0) this.finishTrip(); else { this.storeTrip = false; this.job = 'idle'; this.cooldown = 1; this.person.setCarryBox(false); this.setPose('normal'); }
       }
     }
     switch (this.job) {
@@ -191,7 +237,9 @@ export class Stocker extends Staff {
           this.stack.push(b);
           this.person.setCarryBox(true); this.boxVisual(b, !!b.open && b.units > 0); this.setPose('carry');
           this.env.sfx('box', this.x, this.z); this.env.changed('sidewalk');
-          if (this.plan.length > 0) { this.job = 'toBox'; this.walkToBox(this.plan[0]!); } else this.nextShelf();
+          if (this.plan.length > 0) { this.job = 'toBox'; this.walkToBox(this.plan[0]!); }
+          else if (this.storeTrip) { this.toStore.push(...this.stack); this.stack.length = 0; this.goStoreRoom(); }
+          else this.nextShelf();
         }
         break;
       case 'toShelf':
@@ -238,6 +286,24 @@ export class Stocker extends Staff {
       case 'toStorage':
         if (this.arrived) { this.job = 'takeStorage'; this.timer = 0.6; this.setPose('grab'); }
         break;
+      case 'toStoreRoom':
+        if (this.arrived) { this.job = 'storeDrop'; this.timer = 0.6; this.setPose('grab'); }
+        break;
+      case 'storeDrop':
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          for (const b of this.toStore) {
+            const idx = state.sidewalk.indexOf(b);
+            if (idx < 0) continue;
+            const ok = safe('storeBox', () => { api.storeBox(state, idx); return true; }, false);
+            if (!ok) this.release(b); // depósito encheu no caminho: larga a caixa ali
+          }
+          this.toStore.length = 0; this.storeTrip = false;
+          this.env.sfx('box', this.x, this.z); this.env.changed('storage'); this.env.changed('sidewalk');
+          this.person.setCarryBox(false); this.setPose('normal');
+          this.finishTrip();
+        }
+        break;
       case 'takeStorage':
         this.timer -= dt;
         if (this.timer <= 0) {
@@ -278,8 +344,9 @@ export class Stocker extends Staff {
     this.finishTrip();
   }
 
-  /** Fim da viagem: vazias para a lixeira (uma vez) ou volta ao posto. */
+  /** Fim da viagem: sobras para o depósito, vazias para a lixeira (uma vez) ou volta ao posto. */
   private finishTrip(): void {
+    if (this.toStore.length > 0) { this.goStoreRoom(); return; }
     if (this.junk.length > 0) {
       const w = this.env.world(), st = this.env.ctx.state;
       this.recycling = st.upgrades.includes('recycler');
@@ -310,7 +377,7 @@ export class Stocker extends Staff {
     if (moved > 0 && b.units > 0 && furnitureWithRoom(this.env, b.productId, this.x, this.z)) { this.nextShelf(); return; }
     this.stack.shift();
     if (b.units <= 0) this.junk.push(b);
-    else { this.setOpen(b, false); this.release(b); }
+    else { this.setOpen(b, false); if (this.canStore(b)) this.toStore.push(b); else this.release(b); } // pós-teste 3: sobra vai para o depósito
     // visual: próxima caixa fechada; só vazias = caixa aberta e vazia
     if (this.stack.length > 0) this.boxVisual(this.stack[0], !!this.stack[0]!.open);
     else this.boxVisual(b, true);
