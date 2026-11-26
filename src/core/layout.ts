@@ -37,7 +37,13 @@ export const deliveryZone = (b: Bounds): { x: number; z: number; w: number; d: n
 export const trashBinPos = (b: Bounds): { x: number; z: number } => ({ x: b.width - 1.5, z: b.depth + 1.5 });
 
 /** Lixeira verde de reciclagem (calçada, lado esquerdo da fachada, oposto à lixeira externa). */
-export const recycleBinPos = (b: Bounds): { x: number; z: number } => ({ x: 0.42, z: b.depth + 0.42 });
+/**
+ * Lixeira verde de reciclagem: na calçada, AFASTADA da parede, ao lado da lixeira comum (pós-teste 3 — colada na fachada,
+ * o ponto livre mais perto dela ficava DENTRO da loja e os funcionários "jogavam através da parede").
+ */
+export const recycleBinPos = (b: Bounds): { x: number; z: number } => ({ x: b.width - 2.7, z: b.depth + 1.5 });
+/** Onde um funcionário para para usar uma lixeira (sempre do lado da calçada, entre a loja e a lixeira). */
+export const binApproach = (bin: { x: number; z: number }): { x: number; z: number } => ({ x: bin.x, z: bin.z - 0.85 });
 
 /** `desk` = mesa do computador: móvel único, fora do catálogo (não se compra, vende nem guarda), só se MOVE. */
 export type FurnitureType = 'shelf' | 'fridge' | 'freezer' | 'counter' | 'rack' | 'decor' | 'desk';

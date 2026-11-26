@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CLOSE_MIN, OPEN_MIN } from '../sim/state';
-import { SIDEWALK_DEPTH, STORAGE_DEPTH, deliveryZone, trashBinPos, type Bounds } from '../core/layout';
+import { SIDEWALK_DEPTH, STORAGE_DEPTH, deliveryZone, recycleBinPos, trashBinPos, type Bounds } from '../core/layout';
 import { Tracker, icoGeo, stdMat, scaleUV, hash01, planeGeo, freezeStatic } from './kit';
 import { Batch, kindMaterial, meshesOf, type Spec } from './batch';
 import { uvToCell, type Cell } from './atlas';
@@ -231,7 +231,7 @@ export class Env {
     for (const x of [-9, W / 2 - 2.5, W + 9]) post(x, farZ0 + 0.5, -1, false);
     const lampMesh = new THREE.Mesh(tr.geo(lamps.build().get('matte')!), this.lampMat); g.add(lampMesh);
     // lixeira verde de reciclagem (só existe depois da melhoria 'recycler'; grupo próprio, escondido por padrão)
-    const rx = 0.42, rz = D + 0.42;
+    const { x: rx, z: rz } = recycleBinPos(b);
     const rb = new Batch(), RG: Spec = ['matte', 0x2f9a52], RD: Spec = ['matte', 0x1f7a3b], DK: Spec = ['matte', 0x17301f];
     const BH = 1.0, FEET = 0.07;
     rb.box(0.46, BH, 0.6, RG, rx, FEET, rz); rb.box(0.74, BH, 0.32, RG, rx, FEET, rz);
