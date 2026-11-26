@@ -102,7 +102,7 @@ export class PriceTags {
   }
   /** Reconstrói os quads: uma etiqueta por nível com produto (célula de preço, ou "--" se esgotado). */
   rebuild(list: readonly { f: Furniture; levels: readonly TagLevel[] }[]): void {
-    const key = list.map(({ f, levels }) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${levels.map((l) => (l.pid && !l.empty ? l.pid : '-')).join('/')}`).join(',');
+    const key = list.map(({ f, levels }) => `${f.id}:${f.type}:${f.x}:${f.z}:${f.rot}:${levels.map((l) => (l.pid ? (l.empty ? `${l.pid}|-` : l.pid) : '-')).join('/')}`).join(',');
     if (key === this.geoKey) return;
     this.geoKey = key;
     this.placed = []; this.stocked.clear();
@@ -117,7 +117,9 @@ export class PriceTags {
         const pid = l.pid ?? '', empty = l.empty || !pid;
         this.placed.push({ id: f.id, level: li, pid, empty });
         if (pid) this.stocked.set(pid, (this.stocked.get(pid) ?? false) || !empty);
-        const [u0, v0, du, dv] = this.uv(!empty && this.cells.has(pid) ? pid : '-');
+        // pós-teste 3: nível com etiqueta e 0 un. mostra o produto com "--" (o nível continua registrado para ele;
+        // o repositor repõe esse produto ali); só o nível SEM produto mostra o "--" genérico
+        const [u0, v0, du, dv] = this.uv(!pid ? '-' : !empty && this.cells.has(pid) ? pid : this.cells.has(`${pid}|-`) ? `${pid}|-` : '-');
         const base = pos.length / 3;
         for (const [lx, ly, uu, vv] of [[-TW / 2, -TH / 2, 0, 0], [TW / 2, -TH / 2, 1, 0], [TW / 2, TH / 2, 1, 1], [-TW / 2, TH / 2, 0, 1]] as const) {
           const px = a.tag[0] + lx, pz = a.tag[2];

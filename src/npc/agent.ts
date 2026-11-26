@@ -69,7 +69,15 @@ export class Agent implements AgentLike {
     this.path = null; this.pi = 0;
     let ok = true;
     if (!direct && !this.direct) {
-      const p = this.env.world().findPath({ x: this.x, z: this.z }, { x, z });
+      const w = this.env.world();
+      let p = w.findPath({ x: this.x, z: this.z }, { x, z });
+      if (!p || p.length === 0) {
+        // pós-teste 3: destino bloqueado (lixeiras, móvel) — vai ao ponto andável mais perto dele pelo caminho (porta),
+        // em vez de andar em linha reta atravessando paredes
+        const alt = this.env.nearestWalkable(x, z, { x, z });
+        const p2 = w.findPath({ x: this.x, z: this.z }, alt);
+        if (p2 && p2.length > 0) { p = p2; this.tx = alt.x; this.tz = alt.z; }
+      }
       if (p && p.length > 0) this.path = p; else ok = false;
     }
     // descarta waypoints já alcançados no início

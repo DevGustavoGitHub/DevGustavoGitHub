@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import type { GameContext, GameModule } from '../core/module';
 import type { Vec2, WorldService } from '../core/services';
-import { DOOR_WIDTH, storeBounds } from '../core/layout';
+import { DOOR_WIDTH, deliveryZone, storeBounds } from '../core/layout';
 import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
 import * as api from '../sim/api';
 import { cashierCount } from '../sim/economy';
@@ -262,9 +262,12 @@ export default function create(): GameModule {
     const w = env.world();
     const d = w.door();
     const mk = (x: number, z: number): Vec2 => env.nearestWalkable(x, z, { x, z });
+    // pós-teste 3: repositor espera DENTRO do depósito, ao lado da passagem (sem depósito: na calçada, junto às entregas)
+    const s = ctx.state, b = storeBounds(s.expansion), dz = deliveryZone(b);
+    const stocker = s.storageUnlocked ? mk(b.width / 2 + DOOR_WIDTH / 2 + 0.8, -0.9) : mk(dz.x + dz.w / 2, dz.z + 0.4);
     // faxineiro: encostado na vitrine, ao lado da porta (lado oposto à placa ABERTO/FECHADO, que fica em +x), fora do
     // corredor da porta e longe da frente do balcão; volta para lá depois de cada limpeza
-    return { cashier: mk(d.x - 2.5, d.z - 1.8), stocker: mk(d.x - 4, d.z - 2.2), janitor: mk(d.x - DOOR_WIDTH / 2 - 0.6, d.z - 0.55) };
+    return { cashier: mk(d.x - 2.5, d.z - 1.8), stocker, janitor: mk(d.x - DOOR_WIDTH / 2 - 0.6, d.z - 0.55) };
   }
 
   function syncStaff(initial: boolean): void {
@@ -294,8 +297,20 @@ export default function create(): GameModule {
     mgr.refresh();
   }
 
+  let homesKey = '';
+  /** Postos de espera dos funcionários mudam com expansão, depósito e móveis (pós-teste 3). */
+  function refreshHomes(): void {
+    const s = ctx.state;
+    const k = `${s.expansion}|${s.storageUnlocked}|${s.furniture.length}|${s.nextFurnitureId}`;
+    if (k === homesKey) return;
+    homesKey = k;
+    const h = homes();
+    for (const role of ['cashier', 'stocker', 'janitor'] as StaffRole[]) staff.filter((x) => x.role === role).forEach((x, i) => x.setHome(h[role].x - i * 0.8, h[role].z));
+  }
+
   function tick(h: number): void {
     const phase = ctx.clock.phase;
+    refreshHomes();
     if (phase === 'open' && schedDay !== ctx.state.day) buildSchedule();
     if (phase === 'open') autoTick();
     if (phase === 'open' && !ctx.clock.doorsClosed) {
@@ -305,7 +320,7 @@ export default function create(): GameModule {
       }
     }
     mgr.update(h);
-    const working = phase === 'open' || phase === 'closing';
+    const working = phase !== 'report'; // pós-teste 3: funcionários também trabalham na preparação (manhã, antes de abrir)
     for (const s of staff) s.update(h, working);
     for (let i = customers.length - 1; i >= 0; i--) {
       const c = customers[i]!;

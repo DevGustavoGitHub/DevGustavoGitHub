@@ -130,9 +130,25 @@ export class Stocker extends Staff {
     return base + (this.env.ctx.state.upgrades.includes('dolly') ? 1 : 0);
   }
 
-  /** Fração de ocupação da prateleira do produto (0 = vazia). */
+  /**
+   * Prioridade de reposição (0 = urgente): o nível MAIS VAZIO do produto (pós-teste 3 — uma prateleira cheia e outra com
+   * 1 un. é urgente; antes valia o total, ~54%, e ia para o fim da fila). Sem níveis: ocupação total.
+   */
   private fill(pid: string): number {
-    const have = this.env.ctx.state.shelf[pid] ?? 0;
+    const { state } = this.env.ctx;
+    let min = Infinity;
+    for (const f of state.furniture) {
+      const lv = f.levels;
+      if (!lv) continue;
+      for (let i = 0; i < lv.length; i++) {
+        const l = lv[i]!;
+        if (l.productId !== pid) continue;
+        const cap = safe('levelCapacity', () => api.levelCapacity(state, f.id, i), 0);
+        if (cap > 0) min = Math.min(min, l.units / cap);
+      }
+    }
+    if (min !== Infinity) return min;
+    const have = state.shelf[pid] ?? 0;
     const room = shelfRoom(this.env, pid);
     return have / Math.max(1, have + room);
   }
@@ -409,26 +425,48 @@ export class Stocker extends Staff {
   }
 }
 
+/**
+ * Faxineiro (pós-teste 3): limpa a sujeira (prioridade) e, sem sujeira, recolhe as caixas VAZIAS largadas no chão (salão
+ * ou calçada) e leva para a lixeira de reciclagem (com a melhoria) ou para a lixeira comum. O repositor cuida só de repor.
+ */
 export class Janitor extends Staff {
-  private job: 'idle' | 'toDirt' | 'mop' = 'idle';
+  private job: 'idle' | 'toDirt' | 'mop' | 'toJunk' | 'liftJunk' | 'toBin' | 'tossJunk' = 'idle';
   private facedIn = false;
   private tx2 = 0;
   private tz2 = 0;
   private timer = 0;
   private cooldown = 0;
   private tmp = { x: 0, z: 0 };
+  /** Caixas vazias a buscar / nas mãos. */
+  private junkPlan: Box[] = [];
+  private junk: Box[] = [];
+  private recycling = false;
   constructor(env: Env) { super(env, 'janitor'); }
+
+  private get junkCap(): number { return this.level >= 3 ? 3 : 2; }
 
   update(dt: number, working: boolean): void {
     this.cooldown -= dt;
     const { state } = this.env.ctx;
-    this.person.setMop(true);
+    const carrying = this.junk.length > 0;
+    this.person.setMop(!carrying);
+    if (this.job === 'toJunk' || this.job === 'liftJunk') {
+      const player = this.env.ctx.services.player;
+      for (let i = this.junkPlan.length - 1; i >= 0; i--) {
+        const b = this.junkPlan[i]!;
+        if (!state.sidewalk.includes(b) || b.carried || b.units > 0 || b === player?.carrying) this.junkPlan.splice(i, 1);
+      }
+      if (this.junkPlan.length === 0) { this.stop(); if (this.junk.length > 0) this.goBin(); else { this.job = 'idle'; this.cooldown = 0.5; } }
+    }
+    for (let i = this.junk.length - 1; i >= 0; i--) if (!state.sidewalk.includes(this.junk[i]!)) this.junk.splice(i, 1);
     switch (this.job) {
       case 'idle':
         this.setPose('mop');
         if (working && this.cooldown <= 0 && !this.moving && state.dirt.length > 0) this.pickDirt();
+        else if (working && this.cooldown <= 0 && !this.moving && this.pickJunk()) { /* indo buscar caixa vazia */ }
         else if (!this.moving && this.distTo(this.homeX, this.homeZ) > 0.7) this.moveTo(this.homeX, this.homeZ);
         else if (!this.moving && !this.facedIn) { this.facedIn = true; this.faceTowards(this.homeX, this.homeZ - 3); } // esperando: olha para dentro da loja
+        if (this.job === 'idle' && this.cooldown <= 0) this.cooldown = 0.8;
         if (this.moving) this.facedIn = false;
         break;
       case 'toDirt':
@@ -452,10 +490,77 @@ export class Janitor extends Staff {
           this.job = 'idle'; this.cooldown = 0.3;
         }
         break;
+      case 'toJunk':
+        this.setPose(carrying ? 'carry' : 'normal');
+        if (this.arrived) { this.job = 'liftJunk'; this.timer = 0.45; this.setPose('grab'); }
+        break;
+      case 'liftJunk':
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          const b = this.junkPlan.shift();
+          if (b) {
+            b.carried = true; this.junk.push(b);
+            this.person.setCarryBox(true); this.person.setCarryOpen(true, undefined); this.setPose('carry');
+            this.env.sfx('box', this.x, this.z); this.env.changed('sidewalk');
+          }
+          if (this.junkPlan.length > 0) { const n = this.junkPlan[0]!; this.job = 'toJunk'; this.moveTo(n.x ?? this.x, n.z ?? this.z); }
+          else this.goBin();
+        }
+        break;
+      case 'toBin':
+        this.setPose('carry');
+        if (this.arrived) { this.job = 'tossJunk'; this.timer = 0.5; }
+        break;
+      case 'tossJunk':
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          let recycled = false;
+          for (const b of this.junk) {
+            const idx = state.sidewalk.indexOf(b);
+            if (idx < 0) continue;
+            const got = this.recycling ? safe('recycleBox', () => api.recycleBox(state, idx), 0) : 0;
+            if (got > 0) {
+              const w = this.env.world(), t = w.recycleBin?.() ?? recycleBinPos(storeBounds(state.expansion));
+              this.env.ctx.bus.emit('recycle:done', { x: t.x, z: t.z, amount: got });
+              recycled = true;
+            } else safe('discardBox', () => api.discardBox(state, idx), undefined);
+          }
+          if (this.junk.length > 0) { this.env.sfx(recycled ? 'coin' : 'trash', this.x, this.z); this.env.changed('sidewalk'); }
+          this.junk.length = 0;
+          this.person.setCarryBox(false); this.setPose('mop');
+          this.job = 'idle'; this.cooldown = 0.4;
+        }
+        break;
     }
     this.step(dt);
   }
 
+  /** Caixas vazias no chão (não carregadas): a mais perto e as próximas dela, até `junkCap`. */
+  private pickJunk(): boolean {
+    const { state } = this.env.ctx;
+    const player = this.env.ctx.services.player;
+    const list = state.sidewalk.filter((b) => !b.carried && b.units <= 0 && b !== player?.carrying && b.x !== undefined && b.z !== undefined);
+    if (list.length === 0) return false;
+    list.sort((a, b) => dist2(this.x, this.z, a.x!, a.z!) - dist2(this.x, this.z, b.x!, b.z!));
+    const first = list[0]!;
+    this.junkPlan = [first];
+    for (let i = 1; i < list.length && this.junkPlan.length < this.junkCap; i++) {
+      const b = list[i]!;
+      if (dist2(b.x!, b.z!, first.x!, first.z!) <= 25) this.junkPlan.push(b);
+    }
+    this.job = 'toJunk';
+    this.moveTo(first.x!, first.z!);
+    return true;
+  }
+
+  /** Leva as vazias à reciclagem (melhoria 'recycler') ou à lixeira comum — pela porta (Agent.moveTo). */
+  private goBin(): void {
+    const w = this.env.world(), st = this.env.ctx.state;
+    this.recycling = st.upgrades.includes('recycler');
+    const t = this.recycling ? (w.recycleBin?.() ?? recycleBinPos(storeBounds(st.expansion))) : w.trashBin();
+    this.moveTo(t.x, t.z);
+    this.job = 'toBin';
+  }
   private pickDirt(): void {
     const { state } = this.env.ctx;
     let bi = -1, bd = Infinity;
