@@ -40,11 +40,10 @@ export function servicesTab(body: HTMLElement, kit: UiKit, tab: TabApi): void {
       onClick: () => kit.act('storage', () => api.unlockStorage(s), 'Depósito liberado! A porta dos fundos está aberta.') })), null, s.storageUnlocked ? 'owned' : ''));
   // 3) capacidade de clientes
   const ccap = safe(() => api.customerCapacity(s), 0);
-  const up = safe(() => api.upgradeCatalog(s), [] as api.UpgradeSpec[]).v.find((u) => u.id === ('capacity' as api.UpgradeId));
+  // pós-teste 3: não se compra mais — informativo (cresce sozinha com o nível e as expansões)
   grid.appendChild(bigCard('Capacidade de clientes', upgradeSvg('capacity', 76),
-    `${ccap.pending ? 'Em desenvolvimento.' : `Até ${ccap.v} clientes na loja ao mesmo tempo.`} ${up ? up.description : 'Cresce com as expansões.'}`,
-    up ? actionBtn(buyState(s, { owned: up.owned, minLevel: up.minLevel, cost: up.cost, label: `Comprar ${money(up.cost)}`,
-      onClick: () => kit.act('upgrade', () => api.buyUpgrade(s, up.id), `${up.name} comprada!`) })) : actionBtn({ kind: 'off', label: 'Amplie a loja' })));
+    `${ccap.pending ? 'Em desenvolvimento.' : `Até ${ccap.v} clientes na loja ao mesmo tempo.`} Cresce sozinha com o nível e as expansões; o movimento do dia cresce com o nível e a reputação.`,
+    actionBtn({ kind: 'owned', label: 'Automática' })));
   // 4) personalização
   grid.appendChild(bigCard('Personalização', furnitureSvg('decor', 76, 'banner'), 'Nome da loja, cores da parede, do piso e do letreiro.',
     h('button', { class: 'abtn buy', on: { click: () => tab.goto('decor') } }, h('span', { html: icon('brush', 18) }), 'Personalizar')));

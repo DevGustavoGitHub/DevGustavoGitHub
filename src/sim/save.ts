@@ -11,7 +11,7 @@ import {
   CLOSE_MIN, INITIAL_NEXT_FURNITURE_ID, OPEN_MIN, initialFurniture, newGame, type Box, type Furniture, type SavedDayPhase,
   type StoreState,
 } from './state';
-import { DIRT, HISTORY_DAYS, MAX_EMPLOYEE_LEVEL, STORE_NAME_MAX, UPGRADES } from './tuning';
+import { CAPACITY_REFUND, DIRT, HISTORY_DAYS, MAX_EMPLOYEE_LEVEL, STORE_NAME_MAX, UPGRADES } from './tuning';
 
 export const SAVE_KEY = 'mercadinho-sim:save:v1';
 /**
@@ -66,6 +66,8 @@ function sanitizeFields(s: StoreState, d: Raw, base: StoreState): void {
   if (d.sizeVersion !== 2) s.expansion = Math.min(MAX_EXPANSION, s.expansion + 1);
   s.sizeVersion = 2;
   s.storageUnlocked = d.storageUnlocked === true;
+  // pós-teste 3: a melhoria 'capacity' virou automática (por nível): quem comprou recebe o dinheiro de volta
+  if (Array.isArray(d.upgrades) && d.upgrades.includes('capacity')) s.money = (Number.isFinite(s.money) ? s.money : 0) + CAPACITY_REFUND;
   s.storeName = typeof d.storeName === 'string' && d.storeName.trim() ? d.storeName.trim().slice(0, STORE_NAME_MAX) : base.storeName;
   const lic = (Array.isArray(d.licenses) ? d.licenses : []).filter((x): x is string => typeof x === 'string' && LICENSES.some((l) => l.id === x));
   if (!lic.includes('mercearia')) lic.unshift('mercearia');

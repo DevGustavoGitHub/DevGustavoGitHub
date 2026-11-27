@@ -206,25 +206,25 @@ describe('caixas no chão (dropBox / canDropBox / setBoxOpen)', () => {
 });
 
 describe('capacidade, melhorias e móvel exigido', () => {
-  it('customerCapacity cresce com expansão e com a melhoria capacity', () => {
-    const s = at(30);
+  it('customerCapacity cresce com expansão e com o NÍVEL (pós-teste 3: não se compra mais)', () => {
+    const s = at(1);
     expect(customerCapacity(s)).toBe(6);
-    buyExpansion(s); // pós-teste 3: a 1ª (10×8 → 12×10) só dá espaço
-    expect(customerCapacity(s)).toBe(6);
+    s.level = 8;
+    expect(customerCapacity(s)).toBe(6 + 4);
+    s.level = 30;
+    expect(customerCapacity(s)).toBe(6 + 10); // teto do bônus por nível
+    buyExpansion(s); // a 1ª (10×8 → 12×10) só dá espaço
+    expect(customerCapacity(s)).toBe(16);
     buyExpansion(s);
-    buyExpansion(s);
-    expect(customerCapacity(s)).toBe(10);
-    buyUpgrade(s, 'capacity');
-    expect(customerCapacity(s)).toBe(10 + UPGRADES.capacity.extra);
+    expect(customerCapacity(s)).toBe(18);
     s.expansion = 99;
-    expect(customerCapacity(s)).toBe(6 + 2 * 6 + UPGRADES.capacity.extra);
+    expect(customerCapacity(s)).toBe(6 + 2 * 6 + 10);
   });
-  it('catálogo de melhorias em ordem de nível: pote de gorjeta (2), capacidade (4), carrinho (6)', () => {
+  it('catálogo de melhorias em ordem de nível: pote de gorjeta (2), reciclagem (5), carrinho (6)', () => {
     const cat = upgradeCatalog(starterGame());
-    expect(cat.map((u) => [u.id, u.minLevel])).toEqual([['tipjar', 2], ['capacity', 4], ['recycler', 5], ['dolly', 6]]);
+    expect(cat.map((u) => [u.id, u.minLevel])).toEqual([['tipjar', 2], ['recycler', 5], ['dolly', 6]]);
     for (const u of cat) expect(u.cost).toBeGreaterThan(0);
     expect(() => buyUpgrade(at(1), 'tipjar')).toThrow('Requer nível 2');
-    expect(() => buyUpgrade(at(3), 'capacity')).toThrow('Requer nível 4');
   });
   it('pote de gorjeta: mesma venda rende gorjeta 50% maior (teto 12%)', () => {
     const tipFor = (jar: boolean): { total: number; tip: number } => {

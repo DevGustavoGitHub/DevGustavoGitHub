@@ -207,7 +207,7 @@ function investInfra(state: StoreState, can: (cost: number) => boolean): void {
     const rack = furnitureCatalog().find((c) => c.type === 'rack')!;
     if (state.level >= rack.minLevel && can(rack.cost)) buyAndPlace(state, 'rack');
   }
-  for (const id of ['capacity', 'dolly'] as const) {
+  for (const id of ['dolly'] as const) {
     const u = upgradeCatalog(state).find((x) => x.id === id)!;
     if (!u.owned && state.level >= u.minLevel && can(u.cost)) buyUpgrade(state, id);
   }

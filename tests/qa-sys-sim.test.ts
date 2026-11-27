@@ -109,7 +109,7 @@ const totalUnits = (s: StoreState): Record<string, number> => Object.fromEntries
 const TYPES: FurnitureType[] = ['shelf', 'fridge', 'freezer', 'counter', 'rack', 'decor'];
 const ROTS = [0, 90, 180, 270] as const;
 const ROLES = ['cashier', 'stocker', 'janitor'] as const;
-const UPG = ['dolly', 'tipjar', 'capacity', 'recycler'] as const;
+const UPG = ['dolly', 'tipjar', 'recycler'] as const;
 
 interface FuzzReport { steps: number; errors: Record<string, number>; crashes: string[]; partial: string[]; hard: string[]; reserved: string[]; roundTrip: string[]; sidewalkOver: number; overBy: Record<string, number>; bankruptcies: number; days: number; maxExpansion: number; ops: Record<string, number> }
 
@@ -474,7 +474,6 @@ describe('QA sistemas — fixture', () => {
     }
     for (const p of PRODUCTS) if (s.licenses.includes(p.category) && (s.slots[p.id] ?? 0) > 0) api.setAutoOrder(s, p.id, { minUnits: Math.max(20, (s.slots[p.id] ?? 0) * p.slotCapacity), boxes: 2 });
     for (const r of ROLES) api.hireOrUpgrade(s, r);
-    api.buyUpgrade(s, 'capacity');
     s.money = 50_000_000;
     expect(hardViolations(s)).toEqual([]);
     writeFileSync(QA_FIXTURE!, serialize(s));

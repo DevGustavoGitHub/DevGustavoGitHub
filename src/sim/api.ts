@@ -667,7 +667,7 @@ export function buyMissing(state: StoreState, fillRatio = 1): { cost: Cents; box
 
 /* ---------- Melhorias (upgrades) ---------- */
 /** Fase 3: + 'tipjar' (pote de gorjeta, nível 2) e 'capacity' (capacidade de clientes, nível 4). Catálogo em ordem de nível. */
-export type UpgradeId = 'dolly' | 'tipjar' | 'capacity' | 'recycler';
+export type UpgradeId = 'dolly' | 'tipjar' | 'recycler';
 export interface UpgradeSpec { id: UpgradeId; name: string; description: string; cost: Cents; minLevel: number; owned: boolean }
 export function upgradeCatalog(state: StoreState): UpgradeSpec[] {
   return (Object.keys(UPGRADES) as UpgradeId[]).map((id) => ({
@@ -861,7 +861,8 @@ export function setBoxOpen(state: StoreState, boxIndex: number, open: boolean): 
 /** Máximo de clientes simultâneos (cresce com expansão e com a melhoria 'capacity'). O npc usa como limite. */
 export function customerCapacity(state: StoreState): number {
   const e = sizeTier(clamp(Math.floor(Number.isFinite(state.expansion) ? state.expansion : 0), 0, MAX_EXPANSION));
-  return CUSTOMER_CAPACITY.base + CUSTOMER_CAPACITY.perExpansion * e + (state.upgrades.includes('capacity') ? UPGRADES.capacity.extra : 0);
+  const lv = Math.min(CUSTOMER_CAPACITY.levelMax, Math.floor(Math.max(1, state.level) / 2) * CUSTOMER_CAPACITY.perTwoLevels);
+  return CUSTOMER_CAPACITY.base + CUSTOMER_CAPACITY.perExpansion * e + lv; // pós-teste 3: cresce com o nível (não se compra)
 }
 /** Tipo de móvel que expõe o produto (para o ícone "móvel exigido" no Mercado). */
 export function furnitureForProduct(productId: string): FurnitureType { return displayTypeFor(productById(productId).category); }

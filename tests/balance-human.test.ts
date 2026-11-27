@@ -120,7 +120,7 @@ describe('início do jogo (dias 1–10) com o dinheiro inicial atual', () => {
     }
     const pct = avg(careful.map((r) => servedPct(r.ds.slice(0, 10))));
     expect(pct).toBeGreaterThan(60);
-    expect(pct).toBeLessThan(80);
+    expect(pct).toBeLessThan(85); // pós-teste 3: capacidade de clientes cresce com o nível → menos perdidos
   });
   it('preguiçoso (só abastece sem relógio) sobrevive, mas rende bem menos que o eficiente', () => {
     for (const r of lazy) {
@@ -129,10 +129,11 @@ describe('início do jogo (dias 1–10) com o dinheiro inicial atual', () => {
     }
     expect(avg(fast.map((r) => netAvg(r.ds.slice(0, 10))))).toBeGreaterThan(1.8 * avg(lazy.map((r) => netAvg(r.ds.slice(0, 10)))));
   });
-  it('eficiente não fica fácil demais: caixa contratado só a partir do dia 6, expansão 1 a partir do dia 8, nível ≤ 8 no dia 10', () => {
+  // pós-teste 3: a 1ª expansão agora é a pequena (10×8 → 12×10, R$ 500, nível 2) e entra cedo de propósito
+  it('eficiente não fica fácil demais: caixa contratado só a partir do dia 6, expansão 1 a partir do dia 3, nível ≤ 8 no dia 10', () => {
     for (const r of fast) {
       expect(r.first.cashier).toBeGreaterThanOrEqual(6);
-      expect(r.first.exp1 === 0 || r.first.exp1 >= 8).toBe(true);
+      expect(r.first.exp1 === 0 || r.first.exp1 >= 3).toBe(true);
       expect(r.ds[9]!.level).toBeLessThanOrEqual(8);
       expect(r.bankruptcies).toBe(0);
     }

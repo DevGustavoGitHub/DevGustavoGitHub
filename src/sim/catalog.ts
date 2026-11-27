@@ -38,12 +38,13 @@ export const LICENSES: License[] = [
   // fim do jogo corta menos (~20–30%), para o jogador eficiente não disparar depois do nível 10
   { id: 'laticinios', name: 'Laticínios', minLevel: 4, cost: 60000 },
   { id: 'padaria', name: 'Padaria', minLevel: 6, cost: 150000 },
-  { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 300000 },
-  { id: 'congelados', name: 'Congelados', minLevel: 10, cost: 900000 },
-  { id: 'hortifruti', name: 'Hortifrúti', minLevel: 13, cost: 1600000 },
-  { id: 'higiene', name: 'Higiene e Beleza', minLevel: 16, cost: 2600000 },
-  { id: 'frios', name: 'Açougue e Frios', minLevel: 20, cost: 4200000 },
-  { id: 'eletronicos', name: 'Eletrônicos e Utilidades', minLevel: 25, cost: 7000000 },
+  // pós-teste 3 (2): limpeza em diante mais baratas, e limpeza/congelados/padaria ganharam produtos (eram só 1)
+  { id: 'limpeza', name: 'Limpeza', minLevel: 8, cost: 200000 },
+  { id: 'congelados', name: 'Congelados', minLevel: 10, cost: 400000 },
+  { id: 'hortifruti', name: 'Hortifrúti', minLevel: 13, cost: 800000 },
+  { id: 'higiene', name: 'Higiene e Beleza', minLevel: 16, cost: 1400000 },
+  { id: 'frios', name: 'Açougue e Frios', minLevel: 20, cost: 2400000 },
+  { id: 'eletronicos', name: 'Eletrônicos e Utilidades', minLevel: 25, cost: 4000000 },
 ];
 
 export const PRODUCTS: Product[] = [
@@ -57,7 +58,13 @@ export const PRODUCTS: Product[] = [
   { id: 'queijo', name: 'Queijo 300g', category: 'laticinios', baseWholesale: 1100, markup: 1.45, boxSize: 8, slotCapacity: 8, popularity: 3, color: '#f2c14e', shape: 'tray' },
   { id: 'pao', name: 'Pão francês (6un)', category: 'padaria', baseWholesale: 300, markup: 1.8, boxSize: 10, slotCapacity: 10, popularity: 4, color: '#d9a066', shape: 'bag' },
   { id: 'detergente', name: 'Detergente', category: 'limpeza', baseWholesale: 180, markup: 1.7, boxSize: 24, slotCapacity: 16, popularity: 3, color: '#3fbf6f', shape: 'bottle' },
+  { id: 'sabaopo', name: 'Sabão em pó 1kg', category: 'limpeza', baseWholesale: 900, markup: 1.5, boxSize: 10, slotCapacity: 10, popularity: 3, color: '#2f6fd6', shape: 'box' },
+  { id: 'agsanitaria', name: 'Água sanitária 1L', category: 'limpeza', baseWholesale: 250, markup: 1.7, boxSize: 12, slotCapacity: 12, popularity: 3, color: '#f2f2ea', shape: 'bottle' },
+  { id: 'bolo', name: 'Bolo pronto', category: 'padaria', baseWholesale: 800, markup: 1.6, boxSize: 8, slotCapacity: 8, popularity: 3, color: '#b86a3c', shape: 'box' },
+  { id: 'biscoito', name: 'Biscoito 400g', category: 'padaria', baseWholesale: 350, markup: 1.7, boxSize: 20, slotCapacity: 16, popularity: 4, color: '#e8b04a', shape: 'bag' },
   { id: 'sorvete', name: 'Sorvete 2L', category: 'congelados', baseWholesale: 1400, markup: 1.5, boxSize: 6, slotCapacity: 6, popularity: 3, color: '#f5b7c8', shape: 'jar' },
+  { id: 'pizza', name: 'Pizza congelada', category: 'congelados', baseWholesale: 1100, markup: 1.5, boxSize: 6, slotCapacity: 6, popularity: 3, color: '#d9532c', shape: 'box' },
+  { id: 'lasanha', name: 'Lasanha 600g', category: 'congelados', baseWholesale: 1000, markup: 1.5, boxSize: 6, slotCapacity: 6, popularity: 3, color: '#e0a23a', shape: 'box' },
   // Hortifrúti
   { id: 'banana', name: 'Banana (dúzia)', category: 'hortifruti', baseWholesale: 450, markup: 1.7, boxSize: 10, slotCapacity: 12, popularity: 5, color: '#f2d03b', shape: 'tray' },
   { id: 'tomate', name: 'Tomate 1kg', category: 'hortifruti', baseWholesale: 500, markup: 1.7, boxSize: 10, slotCapacity: 10, popularity: 4, color: '#d9382b', shape: 'tray' },

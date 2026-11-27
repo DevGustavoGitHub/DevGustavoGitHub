@@ -90,7 +90,8 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
       expect(d1.happy!).toBeGreaterThan(d1.angry!);
     }
   });
-  it('progressão: nível 2 no dia 1, 2ª licença ~dia 5-12, expansão 1 ~dia 8-16, caixa contratado até o dia 20', () => {
+  // pós-teste 3: mais produtos/licenças baratas disputam o caixa do bot — caixa contratado até o dia 25
+  it('progressão: nível 2 no dia 1, 2ª licença ~dia 5-12, expansão 1 ~dia 8-16, caixa contratado até o dia 25', () => {
     for (const seed of SEEDS) {
       const s = newGame(seed);
       const bot = newBot();
@@ -99,7 +100,7 @@ describe('balanceamento (bot joga N dias pela API pública)', () => {
       let exp1 = 0;
       let cashier = 0;
       let minMoney = Infinity;
-      for (let d = 1; d <= 20; d++) {
+      for (let d = 1; d <= 25; d++) {
         playDay(s, bot);
         minMoney = Math.min(minMoney, s.money);
         if (!lvl2 && s.level >= 2) lvl2 = d;
@@ -211,7 +212,6 @@ describe('ritmo de fim de jogo (dias 1–120)', () => {
       expect(s.employees.stocker).toBeGreaterThan(0);
       expect(s.upgrades).toContain('dolly');
       expect(s.upgrades).toContain('tipjar');
-      expect(s.upgrades).toContain('capacity');
       // produtos de fim de jogo realmente vendem: há exposição de categorias novas
       expect(PRODUCTS.some((p) => ['hortifruti', 'higiene'].includes(p.category) && productCapacity(s, p.id) > 0)).toBe(true);
       const avg = (a: number, b: number): number => profits.slice(a, b).reduce((x, y) => x + y, 0) / (b - a);
