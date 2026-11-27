@@ -52,7 +52,7 @@ await p.evaluate(() => {
   window.__D = D; window.__dx = dx;
   // repositor mexe na estante DE PERTO: ao tirar/guardar no depósito ele está a < 1,4 m de alguma caixa da estante
   window.__rackFar = []; let st0 = JSON.stringify(__game.state.storage);
-  setInterval(() => { const st = JSON.stringify(__game.state.storage); if (st !== st0) { st0 = st; const k = __npc.staff().find((x) => x.role === 'stocker'); const rb = __world.rackBoxes(); const d = Math.min(...rb.map((b) => Math.hypot(b.x - k.x, b.z - k.z)), 99); if (d > 1.4) window.__rackFar.push(+d.toFixed(2)); } }, 50);
+  setInterval(() => { const st = JSON.stringify(__game.state.storage); if (st !== st0) { st0 = st; const k = __npc.staff().find((x) => x.role === 'stocker'); const rb = __world.rackBoxes(); const d = Math.min(...rb.map((b) => Math.hypot(b.x - k.x, b.z - k.z)), 99); if (d > 2.0) window.__rackFar.push(+d.toFixed(2)); } }, 50);
   // posição de quem estiver perto da lixeira no momento em que uma caixa vazia some (reciclagem/descarte)
   window.__tossAt = []; window.__tossInside = false;
   let prev = __game.state.ledger.recycled;

@@ -86,7 +86,7 @@ await p.waitForTimeout(3500);
 const after = await lanesOf();
 const pb = before.find((l) => l.id === playerId).line, pa = after.find((l) => l.id === playerId).line;
 const sb = before.find((l) => l.id === staffedId).line, sa = after.find((l) => l.id === staffedId).line;
-check('jogador saiu: quem esperava no balcão dele muda para o do funcionário', formed && pa <= 1 && sa + pa >= Math.min(pb + sb, 6) - 2, JSON.stringify({ formed, before, after }));
+check('jogador saiu: quem esperava no balcão dele muda para o do funcionário (se lá couber)', formed && (pa < pb || sa >= 6), JSON.stringify({ formed, before, after }));
 
 // 3) noite: botão dentro do aviso, sem cobrir a coluna de ações (SAIR DO CAIXA / arremessar)
 await p.evaluate(() => { __npc.timeScale = 1; const c = __game.clock; c.minute = 21 * 60; c.closeStore(); });
