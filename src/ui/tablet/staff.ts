@@ -42,6 +42,14 @@ export function staffTab(body: HTMLElement, kit: UiKit, _tab: TabApi): void {
           : actionBtn(buyState(s, { owned: false, minLevel: 1, cost: x.cost, label: `Contratar outro caixa ${money(x.cost)}`, id: 'hire-cashier-extra',
             onClick: () => kit.act('employee', () => api.hireExtraCashier(s), 'Novo caixa contratado!') })));
     }
+    if ((r.role === 'stocker' || r.role === 'janitor') && lvl > 0) {
+      const role = r.role, x = api.extraStaffInfo(s, role), nome = role === 'stocker' ? 'repositor' : 'faxineiro';
+      extra.appendChild(h('div', { class: 'meta' }, h('span', null, role === 'stocker' ? 'Repositores' : 'Faxineiros'), h('b', { id: `${role}-count` }, `${x.count} de ${x.max}`)));
+      extra.appendChild(x.cost === null ? actionBtn({ kind: 'owned', label: x.blockedReason ?? 'Máximo: 2' })
+        : x.blockedReason ? actionBtn({ kind: 'off', label: x.blockedReason })
+          : actionBtn(buyState(s, { owned: false, minLevel: 1, cost: x.cost, label: `Contratar outro ${nome} ${money(x.cost)}`, id: `hire-${role}-extra`,
+            onClick: () => kit.act('employee', () => api.hireExtraStaff(s, role), `Novo ${nome} contratado!`) })));
+    }
     grid.appendChild(bigCard(r.name, personSvg(r.role, 76), r.desc, btn, extra, lvl > 0 ? 'owned' : ''));
   }
   body.appendChild(grid);

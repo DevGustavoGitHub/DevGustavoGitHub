@@ -34,6 +34,11 @@ export interface WorldService {
   trashBin(): Vec2;
   /** Posição da lixeira verde de reciclagem (interativa quando a melhoria 'recycler' está comprada). */
   recycleBin?(): Vec2;
+  /**
+   * Pós-teste 3: onde ficar para mexer nas caixas do produto `pid` no depósito — na frente da coluna dele na estante
+   * (sem caixa dele: na frente da próxima posição livre). `box` = ponto para onde olhar. null sem estantes.
+   */
+  storageSpot?(pid?: string): { x: number; z: number; box: Vec2 } | null;
   /** Porta de entrada. */
   door(): Vec2;
   /** Coloca sujeira visual (a lógica fica em state.dirt). */

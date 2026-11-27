@@ -48,6 +48,9 @@ export interface Employees {
   janitor: number;
   /** Caixas contratados (ausente = 1 se cashier > 0, senão 0). O nível do caixa vale para todos. */
   cashierCount?: number;
+  /** Pós-teste 3: repositores/faxineiros contratados (ausente = 1 se contratado; máx. 2). */
+  stockerCount?: number;
+  janitorCount?: number;
 }
 
 /** FASE 4 — um nível (prateleira) de uma estante/geladeira/freezer: produto próprio e quantidade própria. */

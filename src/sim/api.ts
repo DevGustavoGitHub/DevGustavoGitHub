@@ -8,7 +8,7 @@ import { DOOR_WIDTH, MAX_EXPANSION, SIDEWALK_DEPTH, STORAGE_DEPTH, doorX, sizeTi
 import { PRODUCTS, productById } from './catalog';
 import { buyProbability, customersForDay } from './demand';
 import {
-  addXp, buyBoxes, cashierCount, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
+  addXp, buyBoxes, cashierCount, staffCount, checkoutCapacity, dailyWages, endDay, loanInterest, recordProductStat, unitsOwned, type DayReport,
 } from './economy';
 import {
   canPlace as canPlaceImpl, relocateBlocking, footprintOf, furnitureById, furnitureCost, furnitureCatalog as catalogImpl, isDisplay, ensureDesk as ensureDeskImpl,
@@ -25,7 +25,7 @@ import { makeRng } from './rng';
 import { INITIAL_NEXT_FURNITURE_ID, emptyLedger, initialFurniture, type AutoOrderRule, type Decor, type Furniture, type ShelfLevel, type StoreState } from './state';
 import { CLOSE_MIN, OPEN_MIN } from './state';
 import {
-  BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS, EXTRA_CASHIER,
+  BANKRUPTCY, BASE_CARRY, CUSTOMER_CAPACITY, EXTRA_STAFF, DECOR_CHANGE_COST, DECOR_ITEMS, DIRT, DROP, LOAN, UPGRADES, EMPLOYEE_TABLE, EXPANSIONS, EXTRA_CASHIER,
   MAX_EMPLOYEE_LEVEL, RECYCLE_REWARD, SALE, SELL_REFUND, SIDEWALK_MAX_BOXES, STORAGE, STORE_NAME_MAX,
 } from './tuning';
 
@@ -217,6 +217,24 @@ export function hireExtraCashier(state: StoreState): void {
   if (state.money < i.cost) throw new Error('Dinheiro insuficiente');
   state.money -= i.cost;
   state.employees.cashierCount = i.count + 1;
+}
+/** Pós-teste 3: 2º repositor / 2º faxineiro. */
+export function extraStaffInfo(state: StoreState, role: 'stocker' | 'janitor'): { count: number; max: number; minLevel: number; cost: Cents | null; dailyWage: Cents; blockedReason?: string } {
+  const lvl = state.employees[role];
+  const count = staffCount(state, role), max = 2, minLevel = EXTRA_STAFF[role].minLevel;
+  const dailyWage = lvl > 0 ? EMPLOYEE_TABLE[role].wage[lvl - 1] ?? 0 : 0;
+  if (count <= 0) return { count, max, minLevel, cost: null, dailyWage, blockedReason: 'Contrate o primeiro' };
+  if (count >= max) return { count, max, minLevel, cost: null, dailyWage, blockedReason: 'Máximo: 2' };
+  const cost = (EMPLOYEE_TABLE[role].cost[0] ?? 0) * EXTRA_STAFF[role].costMult;
+  return state.level < minLevel ? { count, max, minLevel, cost, dailyWage, blockedReason: `Nível ${minLevel}` } : { count, max, minLevel, cost, dailyWage };
+}
+export function hireExtraStaff(state: StoreState, role: 'stocker' | 'janitor'): void {
+  const i = extraStaffInfo(state, role);
+  if (i.cost === null) throw new Error(i.blockedReason ?? 'Não é possível contratar');
+  if (i.blockedReason) throw new Error(`Requer nível ${i.minLevel}`);
+  if (state.money < i.cost) throw new Error('Dinheiro insuficiente');
+  state.money -= i.cost;
+  if (role === 'stocker') state.employees.stockerCount = i.count + 1; else state.employees.janitorCount = i.count + 1;
 }
 /** Segundos reais que o funcionário leva por ação, por nível (usado pelo módulo npc). Nível é limitado a 1..5. */
 export function employeeSpeed(role: Role, level: number): number {

@@ -661,6 +661,16 @@ export default function create(): GameModule {
     spawnPoint: () => ({ x: Math.floor(doorPos(bounds).x - 5) + 0.5, z: bounds.depth + SIDEWALK_DEPTH + 0.5 }),
     trashBin: () => trashBinPos(bounds),
     recycleBin: () => recycleBinPos(bounds),
+    storageSpot: (pid) => {
+      const v = view();
+      const racks = v.furniture.filter((f) => f.type === 'rack');
+      if (!racks.length) return null;
+      const b = (pid ? rackBoxes.find((x) => x.pid === pid) : undefined) ?? rackBoxes[rackBoxes.length - 1];
+      const front = (x: number, z: number, ry: number, d: number): { x: number; z: number } => ({ x: x + Math.sin(ry) * d, z: z + Math.cos(ry) * d });
+      if (b) { const p = front(b.x, b.z, b.ry, 0.85); return { ...p, box: { x: b.x, z: b.z } }; }
+      const r = racks[0]!, { cx, cz } = centerOf(r), ry = (r.rot * Math.PI) / 180, p = front(cx, cz, ry, 1.0);
+      return { ...p, box: { x: cx, z: cz } };
+    },
     door: () => doorPos(bounds),
     group: root,
     /* ---- Fase 3 ---- */

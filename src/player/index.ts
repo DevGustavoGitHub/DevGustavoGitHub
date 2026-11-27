@@ -547,7 +547,15 @@ export default function create(): GameModule {
       }
       case 'rackBox': {
         const f = s.furniture.find((x) => x.id === t.pick.id);
-        if (f && t.pick.pid) primary = rackBoxAct(f, t.pick.pid);
+        const pid = t.pick.pid;
+        if (!f || !pid) return;
+        // pós-teste 3: com o carrinho (mãos com espaço) dá para RETIRAR várias caixas; guardar vira a ação secundária
+        const t0 = top();
+        const store = t0 && t0.units > 0 ? A('store', t0.productId === pid ? 'Completar' : 'Guardar', () => storeTop(f)) : null;
+        const canTake = carried.length < capNow && (s.storage[pid] ?? 0) > 0;
+        if (canTake) { primary = A(`take:${pid}`, `Retirar ${shortPid(pid)}`, () => takeFrom(f, pid)); secondary = store; }
+        else primary = store ?? (t0 ? (t0.units > 0 ? null : D('store-empty', 'Caixa vazia')) : rackBoxAct(f, pid));
+        if (!primary && carried.length >= capNow) primary = D('full', 'Mãos cheias');
         return;
       }
       case 'dirt': {

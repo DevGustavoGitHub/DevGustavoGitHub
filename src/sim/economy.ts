@@ -133,11 +133,19 @@ export function cashierCount(state: StoreState): number {
   return Math.max(1, Math.min(4, Math.floor(state.employees.cashierCount ?? 1)));
 }
 
+/** Quantos funcionários do papel (caixa: até 4; repositor/faxineiro: até 2). */
+export function staffCount(state: StoreState, role: EmployeeRole): number {
+  if (role === 'cashier') return cashierCount(state);
+  if (state.employees[role] <= 0) return 0;
+  const n = role === 'stocker' ? state.employees.stockerCount : state.employees.janitorCount;
+  return Math.max(1, Math.min(2, Math.floor(n ?? 1)));
+}
+
 export function dailyWages(state: StoreState): Cents {
   let sum = 0;
   for (const role of Object.keys(EMPLOYEE_TABLE) as EmployeeRole[]) {
     const lvl = Math.min(MAX_EMPLOYEE_LEVEL, state.employees[role]);
-    if (lvl > 0) sum += (EMPLOYEE_TABLE[role].wage[lvl - 1] ?? 0) * (role === 'cashier' ? cashierCount(state) : 1);
+    if (lvl > 0) sum += (EMPLOYEE_TABLE[role].wage[lvl - 1] ?? 0) * staffCount(state, role);
   }
   return sum;
 }

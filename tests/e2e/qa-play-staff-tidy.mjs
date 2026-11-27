@@ -50,6 +50,9 @@ await p.evaluate(() => {
     if (!seen('arroz') && (l[2].units > 6 || l[3].units > 6)) window.__order.push('arroz');
   }, 100);
   window.__D = D; window.__dx = dx;
+  // repositor mexe na estante DE PERTO: ao tirar/guardar no depósito ele está a < 1,4 m de alguma caixa da estante
+  window.__rackFar = []; let st0 = JSON.stringify(__game.state.storage);
+  setInterval(() => { const st = JSON.stringify(__game.state.storage); if (st !== st0) { st0 = st; const k = __npc.staff().find((x) => x.role === 'stocker'); const rb = __world.rackBoxes(); const d = Math.min(...rb.map((b) => Math.hypot(b.x - k.x, b.z - k.z)), 99); if (d > 1.4) window.__rackFar.push(+d.toFixed(2)); } }, 50);
   // posição de quem estiver perto da lixeira no momento em que uma caixa vazia some (reciclagem/descarte)
   window.__tossAt = []; window.__tossInside = false;
   let prev = __game.state.ledger.recycled;
@@ -91,6 +94,7 @@ check('descartam/reciclam do lado da calçada (não jogam através da parede)', 
 // 2) repositor ocioso espera no depósito, ao lado da passagem
 const home = await until(() => { const s = __npc.staff().find((x) => x.role === 'stocker'); return s && s.job === 'idle' && s.z < 0 && Math.abs(s.x - window.__dx) < 3.5; }, null, 60000);
 check('repositor ocioso espera no depósito ao lado da passagem', home, JSON.stringify(await p.evaluate(() => __npc.staff())));
+check('repositor tira/guarda no depósito junto da estante (não de longe)', (await p.evaluate(() => window.__rackFar.length)) === 0, JSON.stringify(await p.evaluate(() => window.__rackFar)));
 check('sem erros de console', errors.length === 0, errors.slice(0, 3).join(' | '));
 await b.close();
 console.log(fails.length ? `FALHAS: ${fails.join(', ')}` : 'OK');

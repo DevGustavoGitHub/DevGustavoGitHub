@@ -11,7 +11,7 @@ import type { Vec2, WorldService } from '../core/services';
 import { DOOR_WIDTH, deliveryZone, storeBounds } from '../core/layout';
 import { CLOSE_MIN, OPEN_MIN, type StoreState } from '../sim/state';
 import * as api from '../sim/api';
-import { cashierCount } from '../sim/economy';
+import { cashierCount, staffCount } from '../sim/economy';
 import { Agent } from './agent';
 import { disposeBubbles } from './bubbles';
 import { CheckoutManager } from './checkout';
@@ -275,7 +275,7 @@ export default function create(): GameModule {
     const h = homes();
     for (const role of roles) {
       const have = staff.filter((s) => s.role === role);
-      const want = role === 'cashier' ? cashierCount(ctx.state) : ctx.state.employees[role] > 0 ? 1 : 0;
+      const want = staffCount(ctx.state, role);
       while (have.length > want) { const x = have.pop()!; x.remove(); staff.splice(staff.indexOf(x), 1); }
       while (have.length < want) {
         const s = role === 'cashier' ? new Cashier(env) : role === 'stocker' ? new Stocker(env) : new Janitor(env);

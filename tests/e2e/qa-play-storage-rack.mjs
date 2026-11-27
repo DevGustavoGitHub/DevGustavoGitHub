@@ -68,6 +68,20 @@ check('completar: 7 un. fecham a incompleta (24) e a caixa da mão fica vazia na
 const rb4 = await p.evaluate(() => __world.rackBoxes());
 a = await aim(rb4.find((x) => x.pid === 'cafe'));
 check('com caixa vazia na mão, mirar caixa do depósito: "Caixa vazia"', a.a.primary?.label === 'Caixa vazia' && a.a.primary?.enabled === false, JSON.stringify(a));
+// carrinho de carga: mãos com espaço → "Retirar" continua sendo a ação principal (pega várias caixas); guardar é a secundária
+await p.evaluate(() => { const s = __game.state; s.upgrades.push('dolly'); for (const b of [...__player.svc.carryingAll]) { const i = s.sidewalk.indexOf(b); if (i >= 0) s.sidewalk.splice(i, 1); } __player.svc.carryingAll.length = 0; __game.bus.emit('stateChanged', { what: 'sidewalk' }); __game.bus.emit('stateChanged', { what: 'upgrades' }); });
+await p.waitForTimeout(400);
+let rb5 = await p.evaluate(() => __world.rackBoxes());
+a = await aim(rb5.find((x) => x.pid === 'cafe'));
+await p.evaluate(() => __player.press());
+await p.waitForTimeout(300);
+rb5 = await p.evaluate(() => __world.rackBoxes());
+a = await aim(rb5.find((x) => x.pid === 'arroz'));
+check('com carrinho e 1 caixa na mão: mirar outra caixa ainda é "Retirar" (Guardar fica de secundária)', a.a.primary?.label === 'Retirar Arroz' && a.a.secondary === 'Guardar', JSON.stringify(a));
+await p.evaluate(() => __player.press());
+await p.waitForTimeout(300);
+const hand = await p.evaluate(() => __player.svc.carryingAll.map((x) => x.productId));
+check('retirou 2 caixas de produtos diferentes com o carrinho', hand.length === 2 && hand.includes('cafe') && hand.includes('arroz'), JSON.stringify(hand));
 // visão geral
 await p.evaluate(() => { __player.teleport(2.2, -2.6); __player.lookAt(2, 0.7, -4.6); });
 await p.waitForTimeout(700);

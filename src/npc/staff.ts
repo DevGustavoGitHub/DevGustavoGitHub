@@ -77,6 +77,15 @@ type SJob = 'idle' | 'toBox' | 'lift' | 'toShelf' | 'open' | 'place' | 'toTrash'
  * e próximas entre si, priorizando os produtos com menor % de estoque na prateleira; depois repõe cada uma
  * e leva as vazias à lixeira de uma vez. Sem caixas na calçada, busca no depósito (também por menor %).
  */
+/**
+ * Pós-teste 3: com 2 repositores / 2 faxineiros, cada alvo (caixa, produto do depósito, sujeira) fica RESERVADO por quem
+ * o escolheu, para os dois não irem buscar a mesma coisa.
+ */
+const claims = new Map<unknown, Staff>();
+const claimedByOther = (k: unknown, me: Staff): boolean => { const o = claims.get(k); return !!o && o !== me; };
+const claim = (k: unknown, me: Staff): void => { claims.set(k, me); };
+const unclaimAll = (me: Staff): void => { for (const [k, v] of claims) if (v === me) claims.delete(k); };
+
 export class Stocker extends Staff {
   job: SJob = 'idle';
   /** Caixas a buscar nesta viagem (ordem de prioridade). */
@@ -115,7 +124,7 @@ export class Stocker extends Staff {
 
   /** Leva as caixas de `toStore` até o depósito (sem caminho: larga onde está). */
   private goStoreRoom(): void {
-    const sp = this.storagePoint();
+    const sp = this.storagePoint(this.toStore[0]?.productId);
     if (!this.env.world().findPath({ x: this.x, z: this.z }, sp)) {
       for (const b of this.toStore) this.release(b);
       this.toStore.length = 0; this.storeTrip = false; this.storeCool = 15;
@@ -171,13 +180,14 @@ export class Stocker extends Staff {
     const player = this.env.ctx.services.player;
     const door = this.env.world().door();
     const floor: Box[] = [];
+    unclaimAll(this);
     for (const b of state.sidewalk) {
-      if (b.carried || b.units <= 0 || b === player?.carrying) continue;
+      if (b.carried || b.units <= 0 || b === player?.carrying || claimedByOther(b, this)) continue;
       if (shelfRoom(this.env, b.productId) <= 0 || !furnitureFor(this.env, b.productId, this.x, this.z)) continue;
       floor.push(b);
     }
     const storeOk = state.storageUnlocked && this.storeCool <= 0;
-    const stored = storeOk ? Object.keys(state.storage).filter((pid) => (state.storage[pid] ?? 0) > 0 && shelfRoom(this.env, pid) > 0 && furnitureFor(this.env, pid, this.x, this.z)) : [];
+    const stored = storeOk ? Object.keys(state.storage).filter((pid) => (state.storage[pid] ?? 0) > 0 && !claimedByOther(`pid:${pid}`, this) && shelfRoom(this.env, pid) > 0 && furnitureFor(this.env, pid, this.x, this.z)) : [];
     const pids = [...new Set([...floor.map((b) => b.productId), ...stored])].sort(this.byNeed);
     const top = pids[0];
     if (top) {
@@ -195,34 +205,43 @@ export class Stocker extends Staff {
           if (dist2(b.x ?? door.x, b.z ?? door.z + 1, onFloor.x ?? door.x, onFloor.z ?? door.z + 1) > 36) continue;
           this.plan.push(b);
         }
+        for (const b of this.plan) claim(b, this);
         this.job = 'toBox'; this.walkToBox(onFloor);
         return;
       }
-      // só no depósito: busca o mais precisado e os próximos que também estão lá
-      const sp = this.storagePoint();
+      // só no depósito: busca o mais precisado (vai até a estante dele) e os próximos que também estão lá
+      const sp = this.storagePoint(top);
       if (!this.env.world().findPath({ x: this.x, z: this.z }, sp)) { this.storeCool = 15; return; }
       this.storePids = pids.filter((p) => stored.includes(p)).slice(0, this.cap);
+      for (const p of this.storePids) claim(`pid:${p}`, this);
       this.job = 'toStorage'; this.moveTo(sp.x, sp.z);
       return;
     }
     // pós-teste 3: nada para repor → guarda no depósito as caixas que estão na CALÇADA (fora da loja)
     if (state.storageUnlocked && this.storeCool <= 0) {
       const D = storeBounds(state.expansion).depth;
-      const out = state.sidewalk.filter((b) => !b.carried && b.units > 0 && b !== player?.carrying && (b.z === undefined || b.z > D - 0.1) && this.canStore(b));
+      const out = state.sidewalk.filter((b) => !b.carried && b.units > 0 && b !== player?.carrying && !claimedByOther(b, this) && (b.z === undefined || b.z > D - 0.1) && this.canStore(b));
       if (out.length > 0) {
         const near = (b: Box): number => dist2(this.x, this.z, b.x ?? door.x, b.z ?? door.z + 1);
         out.sort((a, b) => near(a) - near(b));
         this.plan.length = 0;
         for (const b of out) { if (this.plan.length >= this.cap) break; this.plan.push(b); }
+        for (const b of this.plan) claim(b, this);
         this.storeTrip = true;
         this.job = 'toBox'; this.walkToBox(this.plan[0]!);
       }
     }
   }
   private tmp = { x: 0, z: 0 };
-  private storagePoint(): { x: number; z: number } {
+  /** Pós-teste 3: em frente à coluna do produto na estante (antes: um ponto fixo no meio do depósito). */
+  private rackFace = { x: 0, z: 0 };
+  private storagePoint(pid?: string): { x: number; z: number } {
+    const spot = safe('storageSpot', () => this.env.world().storageSpot?.(pid) ?? null, null);
+    if (spot) { this.rackFace.x = spot.box.x; this.rackFace.z = spot.box.z; return this.env.nearestWalkable(spot.x, spot.z, this.tmp); }
     const b = storeBounds(this.env.ctx.state.expansion);
-    return this.env.nearestWalkable(b.width / 2, -Math.min(2, STORAGE_DEPTH / 3), this.tmp);
+    const p = this.env.nearestWalkable(b.width / 2, -Math.min(2, STORAGE_DEPTH / 3), this.tmp);
+    this.rackFace.x = p.x; this.rackFace.z = p.z - 1;
+    return p;
   }
 
   private walkToBox(b: Box): void {
@@ -321,10 +340,10 @@ export class Stocker extends Staff {
         }
         break;
       case 'toStorage':
-        if (this.arrived) { this.job = 'takeStorage'; this.timer = 0.6; this.setPose('grab'); }
+        if (this.arrived) { this.job = 'takeStorage'; this.timer = 0.6; this.setPose('grab'); this.faceTowards(this.rackFace.x, this.rackFace.z); }
         break;
       case 'toStoreRoom':
-        if (this.arrived) { this.job = 'storeDrop'; this.timer = 0.6; this.setPose('grab'); }
+        if (this.arrived) { this.job = 'storeDrop'; this.timer = 0.6; this.setPose('grab'); this.faceTowards(this.rackFace.x, this.rackFace.z); }
         break;
       case 'storeDrop':
         this.timer -= dt;
@@ -483,7 +502,7 @@ export class Janitor extends Staff {
       case 'idle':
         this.setPose('mop');
         // pós-teste 3: emenda uma tarefa na outra — também a caminho do posto
-        if (working && this.cooldown <= 0 && (!this.moving || this.homing) && state.dirt.length > 0) { this.homing = false; this.pickDirt(); }
+        if (working && this.cooldown <= 0 && (!this.moving || this.homing) && state.dirt.length > 0 && this.pickDirt()) { this.homing = false; }
         else if (working && this.cooldown <= 0 && (!this.moving || this.homing) && this.pickJunk()) { this.homing = false; }
         else if (!this.moving && this.distTo(this.homeX, this.homeZ) > 0.7) { this.moveTo(this.homeX, this.homeZ); this.homing = true; }
         else if (!this.moving && !this.facedIn) { this.facedIn = true; this.faceTowards(this.homeX, this.homeZ - 3); } // esperando: olha para dentro da loja
@@ -560,7 +579,8 @@ export class Janitor extends Staff {
   private pickJunk(): boolean {
     const { state } = this.env.ctx;
     const player = this.env.ctx.services.player;
-    const list = state.sidewalk.filter((b) => !b.carried && b.units <= 0 && b !== player?.carrying && b.x !== undefined && b.z !== undefined);
+    unclaimAll(this);
+    const list = state.sidewalk.filter((b) => !b.carried && b.units <= 0 && b !== player?.carrying && b.x !== undefined && b.z !== undefined && !claimedByOther(b, this));
     if (list.length === 0) return false;
     list.sort((a, b) => dist2(this.x, this.z, a.x!, a.z!) - dist2(this.x, this.z, b.x!, b.z!));
     const first = list[0]!;
@@ -569,6 +589,7 @@ export class Janitor extends Staff {
       const b = list[i]!;
       if (dist2(b.x!, b.z!, first.x!, first.z!) <= 25) this.junkPlan.push(b);
     }
+    for (const b of this.junkPlan) claim(b, this);
     this.job = 'toJunk';
     this.moveTo(first.x!, first.z!);
     return true;
@@ -583,18 +604,24 @@ export class Janitor extends Staff {
     this.moveTo(a.x, a.z); this.binX = t.x; this.binZ = t.z;
     this.job = 'toBin';
   }
-  private pickDirt(): void {
+  private pickDirt(): boolean {
     const { state } = this.env.ctx;
+    unclaimAll(this);
     let bi = -1, bd = Infinity;
     for (let i = 0; i < state.dirt.length; i++) {
-      const d = dist2(state.dirt[i]!.x, state.dirt[i]!.z, this.x, this.z);
+      const dd = state.dirt[i]!;
+      if (claimedByOther(`dirt:${dd.x.toFixed(2)},${dd.z.toFixed(2)}`, this)) continue;
+      const d = dist2(dd.x, dd.z, this.x, this.z);
       if (d < bd) { bd = d; bi = i; }
     }
-    if (bi < 0) return;
+    if (bi < 0) return false;
     const dd = state.dirt[bi]!;
+    claim(`dirt:${dd.x.toFixed(2)},${dd.z.toFixed(2)}`, this);
     this.tx2 = dd.x; this.tz2 = dd.z;
     const p = this.env.nearestWalkable(dd.x, dd.z, this.tmp);
     this.moveTo(p.x, p.z);
     this.job = 'toDirt';
+    return true;
   }
+
 }
